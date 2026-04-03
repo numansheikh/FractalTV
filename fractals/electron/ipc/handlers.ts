@@ -9,6 +9,11 @@ export function registerHandlers() {
   // ── Ping (health check) ──────────────────────────────────────────────────
   ipcMain.handle('ping', () => 'pong')
 
+  // ── DevTools ─────────────────────────────────────────────────────────────
+  ipcMain.handle('devtools:toggle', (event) => {
+    event.sender.toggleDevTools()
+  })
+
   // ── Sources ──────────────────────────────────────────────────────────────
 
   ipcMain.handle('sources:list', async () => {

@@ -46,6 +46,11 @@ export const api = {
 
 contextBridge.exposeInMainWorld('api', api)
 
+// DevTools toggle (dev convenience)
+contextBridge.exposeInMainWorld('electronDevTools', () => {
+  ipcRenderer.invoke('devtools:toggle')
+})
+
 declare global {
   interface Window {
     api: typeof api

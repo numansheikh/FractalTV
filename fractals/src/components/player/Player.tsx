@@ -4,6 +4,12 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { ContentItem } from '@/components/browse/ContentCard'
 import { api } from '@/lib/api'
 
+declare global {
+  interface Window {
+    electronDevTools?: () => void
+  }
+}
+
 interface Props {
   content: ContentItem
   onClose: () => void
@@ -16,8 +22,10 @@ export function Player({ content, onClose }: Props) {
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [streamUrl, setStreamUrl] = useState<string | null>(null)
   const [playing, setPlaying] = useState(false)
   const [showControls, setShowControls] = useState(true)
+  const [showDebug, setShowDebug] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
   const [volume, setVolume] = useState(1)
@@ -44,6 +52,7 @@ export function Player({ content, onClose }: Props) {
       if (!video) return
 
       const url: string = result.url
+      setStreamUrl(url)
 
       // Native HLS (Safari) or hls.js
       if (video.canPlayType('application/vnd.apple.mpegurl')) {
@@ -102,6 +111,7 @@ export function Player({ content, onClose }: Props) {
         case 'ArrowDown': video.volume = Math.max(0, video.volume - 0.1); break
         case 'm': case 'M': video.muted = !video.muted; setMuted(video.muted); break
         case 'f': case 'F': toggleFullscreen(); break
+        case 'd': case 'D': setShowDebug((v) => !v); break
       }
     }
     window.addEventListener('keydown', handler)
@@ -313,13 +323,69 @@ export function Player({ content, onClose }: Props) {
 
                 <div className="flex-1" />
 
+                {/* Debug toggle */}
+                <ControlButton onClick={() => setShowDebug((v) => !v)} title="Debug (D)">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                    <path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+                  </svg>
+                </ControlButton>
+
                 {/* Fullscreen */}
-                <ControlButton onClick={toggleFullscreen} title="Fullscreen">
+                <ControlButton onClick={toggleFullscreen} title="Fullscreen (F)">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
                     <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
                   </svg>
                 </ControlButton>
               </div>
+
+              {/* Debug panel */}
+              <AnimatePresence>
+                {showDebug && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 8 }}
+                    className="mt-3 rounded-lg p-3 font-mono text-[11px]"
+                    style={{
+                      background: 'rgba(0,0,0,0.85)',
+                      border: '1px solid rgba(124,77,255,0.3)',
+                      color: 'rgba(255,255,255,0.7)',
+                      lineHeight: '1.6',
+                    }}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <span style={{ color: '#b388ff', fontWeight: 600 }}>Debug</span>
+                      <button
+                        onClick={() => window.electronDevTools?.()}
+                        className="rounded px-2 py-0.5 text-[10px] transition-colors"
+                        style={{ background: 'rgba(124,77,255,0.2)', color: '#b388ff' }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(124,77,255,0.35)' }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(124,77,255,0.2)' }}
+                      >
+                        Open DevTools
+                      </button>
+                    </div>
+                    <div style={{ color: 'rgba(255,255,255,0.4)' }}>title</div>
+                    <div className="mb-2" style={{ color: '#e2dff5' }}>{content.title}</div>
+                    <div style={{ color: 'rgba(255,255,255,0.4)' }}>stream url</div>
+                    <div
+                      className="break-all"
+                      style={{ color: error ? '#f87171' : '#86efac' }}
+                    >
+                      {streamUrl ?? '—'}
+                    </div>
+                    {error && (
+                      <>
+                        <div className="mt-2" style={{ color: 'rgba(255,255,255,0.4)' }}>error</div>
+                        <div style={{ color: '#f87171' }}>{error}</div>
+                      </>
+                    )}
+                    <div className="mt-2" style={{ color: 'rgba(255,255,255,0.4)' }}>
+                      hls.js supported: {String(Hls.isSupported())} · native hls: {String(videoRef.current?.canPlayType('application/vnd.apple.mpegurl') !== '')}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           </motion.div>
         )}

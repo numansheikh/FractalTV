@@ -18,6 +18,8 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      // IPTV streams are cross-origin — disable web security so HLS.js can fetch them
+      webSecurity: false,
     },
   })
 
