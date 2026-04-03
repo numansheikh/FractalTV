@@ -11,7 +11,8 @@
     "build:electron": "pnpm build && electron-builder",
     "preview": "electron-vite preview",
     "lint": "eslint src electron --ext .ts,.tsx",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "postinstall": "electron-rebuild -f -w better-sqlite3"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.2.2",
@@ -22,6 +23,7 @@
     "tailwindcss": "^4.2.2"
   },
   "devDependencies": {
+    "@electron/rebuild": "^4.0.3",
     "@types/better-sqlite3": "^7.6.13",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
