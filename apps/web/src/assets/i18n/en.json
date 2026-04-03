@@ -2,7 +2,7 @@
     "CLOSE": "Close",
     "PLAYLISTS": "Playlists",
     "HOME": {
-        "TITLE": "IPTVnator",
+        "TITLE": "Fractals",
         "SUBTITLE": "Please select a playlist from the list or add a new playlist",
         "TABS": {
             "RECENTLY_ADDED": "Recently added playlists",
@@ -15,7 +15,7 @@
         "PLAYLISTS": {
             "NO_PLAYLISTS": "No playlists were added",
             "ADD_FIRST": "Please add your first playlist",
-            "WELCOME_TITLE": "Welcome to IPTVnator",
+            "WELCOME_TITLE": "Welcome to Fractals",
             "WELCOME_DESCRIPTION": "Start your streaming journey by adding your first playlist. Connect to your favorite IPTV service and enjoy live TV, movies, and series.",
             "ADD_YOUR_FIRST": "Add Your First Playlist",
             "FEATURE_M3U": "M3U/M3U8 Files",
@@ -55,7 +55,8 @@
                 "PLAYLIST_EXPORT_SUCCESS": "Playlist was exported successfully.",
                 "PLAYLIST_EXPORT_ERROR": "Error: Playlist export failed.",
                 "COPY_URL": "Copy URL to clipboard",
-                "URL_COPIED": "URL copied to clipboard"
+                "URL_COPIED": "URL copied to clipboard",
+                "ADVANCED": "Advanced"
             },
             "REMOVE_DIALOG": {
                 "TITLE": "Remove playlist",
@@ -76,6 +77,10 @@
             "MY_PLAYLISTS": "My playlists",
             "MY_PLAYLISTS_SUBTITLE": "all available playlists",
             "PLAYLIST_UPDATE_SUCCESS": "Success! The playlist was successfully updated.",
+            "PLAYLIST_UPDATE_FAILED": "Failed to refresh playlist",
+            "REFRESH_MISSING_URL_OR_FILE": "Missing URL or file path for this playlist.",
+            "REFRESH_XTREAM_USE_MENU": "Xtream playlists: use the refresh option from the playlist menu (⋯ or sync button on the playlist).",
+            "CONTENT_LOAD_FAILED": "Failed to load playlist content",
             "PLAYLIST_UPDATE_ERROR": "Error updating playlist details.",
             "AUTO_REFRESH_UPDATE_SUCCESS": "Success! The playlists were successfully updated",
             "AUTO_REFRESH_ENABLED": "Auto-refresh enabled"
@@ -173,7 +178,7 @@
         "THEME_DESCRIPTION": "Select visual theme of the application",
         "SHOW_CAPTIONS_DESCRIPTION": "Show or hide subtitles by default",
         "VERSION_DESCRIPTION": "Current version of the application",
-        "EPG_NOTE": "Currently EPG is available only in the electron-based version of IPTVnator.",
+        "EPG_NOTE": "Currently EPG is available only in the electron-based version of Fractals.",
         "EPG_NOTE_URL_TEXT": "Check it here",
         "IMPORT_EXPORT_DATA": "Import/export playlists",
         "IMPORT_EXPORT_DATA_DESCRIPTION": "Export or import playlists in the JSON format used within the application.",
@@ -206,11 +211,21 @@
         "PORT_REQUIRED": "Port is required",
         "PORT_MIN": "Port must be at least 1",
         "PORT_MAX": "Port must be at most 65535",
-        "PORT_PATTERN": "Only digits are allowed"
+        "PORT_PATTERN": "Only digits are allowed",
+        "COLOR_SCHEME_LABEL": "Color scheme",
+        "COLOR_SCHEME_DESCRIPTION": "Switch between Modern (current) and Vintage (warm, retro) look.",
+        "COLOR_SCHEME_PLACEHOLDER": "Select appearance",
+        "PREFER_TMDB_POSTER": "Prefer TMDB poster",
+        "PREFER_TMDB_POSTER_DESCRIPTION": "When TMDB enrichment is used, use TMDB poster and backdrop instead of the provider's thumbnail when both are available.",
+        "PREFER_TMDB_POSTER_FOR_CATEGORY": "Use TMDB posters for this category"
     },
     "THEMES": {
         "DARK_THEME": "Dark theme",
         "LIGHT_THEME": "Light theme"
+    },
+    "SCHEMES": {
+        "MODERN": "Modern",
+        "VINTAGE": "Vintage"
     },
     "CHANNELS": {
         "SEARCH_CHANNEL": "Search channel",
@@ -302,7 +317,7 @@
     "NO": "No",
     "MENU": {
         "OPEN": "Open menu",
-        "SUPPORT_ARIA": "Support IPTVnator on GitHub",
+        "SUPPORT_ARIA": "Support Fractals on GitHub",
         "SETTINGS": "Settings",
         "SETTINGS_ARIA": "Open settings",
         "BUG_REPORT": "Report a bug",
@@ -312,10 +327,10 @@
         "SUPPORT_PROJECT": "Support project"
     },
     "ABOUT": {
-        "TITLE": "About IPTVnator",
+        "TITLE": "About Fractals",
         "DESCRIPTION": "Cross-platform IPTV player application with multiple features, such as support of m3u and m3u8 playlists, favorites, TV guide, TV archive/catchup and more.",
         "VERSION": "Version",
-        "GITHUB_TOOLTIP": "ITPVnator repository on GitHub",
+        "GITHUB_TOOLTIP": "Fractals repository on GitHub",
         "BUY_ME_A_COFFEE_TOOLTIP": "Buy me a coffee",
         "TWITTER_TOOLTIP": "Share on Twitter"
     },
@@ -343,6 +358,9 @@
         "EPISODE": "Episode",
         "RESUME": "Resume",
         "RESTART": "Start Over",
+        "REFRESH_TMDB": "Refresh TMDB data",
+        "REFRESH_TMDB_ALL": "Refresh all TMDB",
+        "REFRESH_TMDB_PROGRESS": "Posters {{current}} / {{total}}",
         "CONTINUE_WATCHING": "Continue Watching",
         "WATCHED": "Watched",
         "IN_PROGRESS": "In Progress",
@@ -447,7 +465,9 @@
             "NO_RESULTS_FOR": "No results found for \"{{term}}\"",
             "GROUP_BY_PLAYLIST": "Group results by playlist",
             "XTREAM_ONLY_NOTE": "Global search is currently available for Xtream playlists only.",
-            "VISIBLE_CATEGORIES_ONLY": "Visible categories only"
+            "VISIBLE_CATEGORIES_ONLY": "Visible categories only",
+            "SHOWING_RESULTS": "Showing {{ count }} of {{ total }} results",
+            "LOAD_MORE": "Load more"
         },
         "STREAM_URL_COPIED": "Stream URL copied to clipboard",
         "COPY_STREAM_URL": "Copy Stream URL",
@@ -488,7 +508,7 @@
         "SUBTITLE": "Control your IPTV player remotely",
         "UP_CHANNEL": "Channel Up",
         "DOWN_CHANNEL": "Channel Down",
-        "HEADER": "IPTVNator Remote Control",
-        "FOOTER": "IPTVNator Remote Control"
+        "HEADER": "Fractals Remote Control",
+        "FOOTER": "Fractals Remote Control"
     }
 }
