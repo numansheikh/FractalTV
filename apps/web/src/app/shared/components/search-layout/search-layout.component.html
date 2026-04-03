@@ -44,7 +44,7 @@
             <ng-content select="[subheader]" />
         </div>
 
-        <div class="results-container">
+        <div class="results-container" #resultsContainer>
             @if (isLoading()) {
                 <div class="loading-state">
                     <mat-spinner diameter="48" />

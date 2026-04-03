@@ -26,7 +26,10 @@ export class HomeComponent {
         this.dialog.open<AddPlaylistDialogComponent, { type: PlaylistType }>(
             AddPlaylistDialogComponent,
             {
-                width: '600px',
+                width: '560px',
+                maxWidth: '94vw',
+                panelClass: 'add-playlist-dialog',
+                position: { top: '6vh' },
                 data: { type: playlistType },
             }
         );

@@ -1,0 +1,76 @@
+// =============================================================================
+// Fractals – Single theme design tokens (minimal, bootstrap-like)
+// =============================================================================
+
+:root {
+    // Neutral scale (soft blue-gray / slate, not pure gray)
+    --fractals-gray-50: #f8fafc;
+    --fractals-gray-100: #f1f5f9;
+    --fractals-gray-200: #e2e8f0;
+    --fractals-gray-300: #cbd5e1;
+    --fractals-gray-400: #94a3b8;
+    --fractals-gray-500: #64748b;
+    --fractals-gray-600: #475569;
+    --fractals-gray-700: #334155;
+    --fractals-gray-800: #1e293b;
+    --fractals-gray-900: #0f172a;
+    --fractals-gray-950: #020617;
+
+    // Primary (accent) – teal
+    --fractals-primary: #0d9488;
+    --fractals-primary-rgb: 13, 148, 136;
+    --fractals-primary-muted: rgba(13, 148, 136, 0.75);
+    --fractals-primary-bg: rgba(13, 148, 136, 0.1);
+    --fractals-primary-border: rgba(13, 148, 136, 0.35);
+
+    // Surfaces (light blue-gray / creamy, minimal)
+    --fractals-body-bg: #f5f7fa;
+    --fractals-header-bg: #eef2f7;
+    --fractals-header-border: rgba(30, 41, 59, 0.08);
+    --fractals-header-text: #1e293b;
+    --fractals-header-text-muted: #64748b;
+    --fractals-surface-bg: #f5f7fa;
+    --fractals-surface-card: rgba(226, 232, 240, 0.6);
+    --fractals-surface-card-hover: rgba(203, 213, 225, 0.8);
+    --fractals-input-bg: #ffffff;
+    --fractals-input-border: rgba(148, 163, 184, 0.5);
+    --fractals-input-focus-border: var(--fractals-primary-border);
+
+    // Semantic
+    --fractals-accent: var(--fractals-primary);
+    --fractals-accent-muted: var(--fractals-primary-muted);
+    --fractals-accent-bg: var(--fractals-primary-bg);
+    --fractals-accent-border: var(--fractals-primary-border);
+
+    // Spacing (4px base, bootstrap-like)
+    --fractals-space-0: 0;
+    --fractals-space-1: 4px;
+    --fractals-space-2: 8px;
+    --fractals-space-3: 12px;
+    --fractals-space-4: 16px;
+    --fractals-space-5: 20px;
+    --fractals-space-6: 24px;
+    --fractals-space-8: 32px;
+    --fractals-space-10: 40px;
+    --fractals-space-12: 48px;
+    --fractals-space-16: 64px;
+
+    // Typography
+    --fractals-font-sans: Roboto, system-ui, -apple-system, 'Segoe UI', 'Helvetica Neue', sans-serif;
+    --fractals-font-mono: ui-monospace, 'Cascadia Code', 'Source Code Pro', monospace;
+    --fractals-text-xs: 0.75rem;
+    --fractals-text-sm: 0.875rem;
+    --fractals-text-base: 1rem;
+    --fractals-text-lg: 1.125rem;
+    --fractals-text-xl: 1.25rem;
+    --fractals-text-2xl: 1.5rem;
+
+    // Radius (reduced, minimal)
+    --fractals-radius: 4px;
+    --fractals-radius-sm: 2px;
+    --fractals-radius-lg: 6px;
+
+    // Layout
+    --fractals-container-max: 1140px;
+    --fractals-header-height: 56px;
+}

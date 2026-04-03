@@ -12,8 +12,6 @@
         <app-url-upload (urlAdded)="sendPlaylistsUrl($event)" />
     } @else if (playlistType === 'text') {
         <app-text-import (textAdded)="uploadAsText($event)" />
-    } @else if (playlistType === 'stalker') {
-        <app-stalker-portal-import (addClicked)="closeDialog()" />
     } @else if (playlistType === 'xtream') {
         <app-xtream-code-import (addClicked)="closeDialog()" />
     }

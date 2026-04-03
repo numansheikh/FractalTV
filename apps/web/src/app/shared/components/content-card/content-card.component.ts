@@ -24,6 +24,9 @@ export class ContentCardComponent {
     /** Title to display */
     readonly title = input.required<string>();
 
+    /** Optional category/group name (e.g. channel group, movie group) */
+    readonly category = input<string>();
+
     /** Content type (live, movie, series) */
     readonly type = input<string>();
 

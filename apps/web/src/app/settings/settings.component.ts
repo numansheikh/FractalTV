@@ -39,6 +39,7 @@ import { PlaylistActions, selectIsEpgAvailable } from 'm3u-state';
 import { take } from 'rxjs';
 import { DataService, EpgService, PlaylistsService } from 'services';
 import {
+    ColorScheme,
     Language,
     Playlist,
     StreamFormat,
@@ -134,14 +135,20 @@ export class SettingsComponent implements OnInit {
     /** All available visual themes */
     themeEnum = Theme;
 
+    /** Color scheme (Modern / Vintage look) */
+    colorSchemeEnum = ColorScheme;
+
     /** Settings form object */
     settingsForm = this.formBuilder.group({
-        player: [VideoPlayer.VideoJs],
+        player: [VideoPlayer.ArtPlayer],
         ...(this.isDesktop ? { epgUrl: new FormArray([]) } : {}),
         streamFormat: StreamFormat.M3u8StreamFormat,
         language: Language.ENGLISH,
         showCaptions: false,
         theme: Theme.LightTheme,
+        colorScheme: ColorScheme.Modern,
+        preferTmdbPoster: false,
+        preferTmdbPosterByCategory: {} as Record<string, boolean>,
         mpvPlayerPath: '',
         mpvReuseInstance: false,
         vlcPlayerPath: '',
@@ -334,6 +341,7 @@ export class SettingsComponent implements OnInit {
         }
         this.translate.use(this.settingsForm.value.language);
         this.settingsService.changeTheme(this.settingsForm.value.theme);
+        this.settingsService.changeColorScheme(this.settingsForm.value.colorScheme ?? ColorScheme.Modern);
         this.snackBar.open(
             this.translate.instant('SETTINGS.SETTINGS_SAVED'),
             null,

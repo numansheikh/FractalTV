@@ -13,19 +13,17 @@ import { getFilenameFromUrl } from 'm3u-utils';
 import { DataService } from 'services';
 import { PLAYLIST_PARSE_BY_URL } from 'shared-interfaces';
 import { FileUploadComponent } from '../../../home/file-upload/file-upload.component';
-import { StalkerPortalImportComponent } from '../../../home/stalker-portal-import/stalker-portal-import.component';
 import { TextImportComponent } from '../../../home/text-import/text-import.component';
 import { UrlUploadComponent } from '../../../home/url-upload/url-upload.component';
 import { XtreamCodeImportComponent } from '../../../home/xtream-code-import/xtream-code-import.component';
 
-export type PlaylistType = 'xtream' | 'url' | 'text' | 'file' | 'stalker';
+export type PlaylistType = 'xtream' | 'url' | 'text' | 'file';
 
 @Component({
     imports: [
         FileUploadComponent,
         MatButtonModule,
         MatDialogModule,
-        StalkerPortalImportComponent,
         TextImportComponent,
         TranslateModule,
         UrlUploadComponent,

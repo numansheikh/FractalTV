@@ -9,6 +9,7 @@ import {
 import { StorageMap } from '@ngx-pwa/local-storage';
 import { firstValueFrom } from 'rxjs';
 import {
+    ColorScheme,
     Language,
     Settings,
     STORE_KEY,
@@ -18,11 +19,14 @@ import {
 } from 'shared-interfaces';
 
 const DEFAULT_SETTINGS: Settings = {
-    player: VideoPlayer.VideoJs,
+    player: VideoPlayer.ArtPlayer,
     streamFormat: StreamFormat.M3u8StreamFormat,
     language: Language.ENGLISH,
     showCaptions: false,
     theme: Theme.LightTheme,
+    colorScheme: ColorScheme.Modern,
+    preferTmdbPoster: false,
+    preferTmdbPosterByCategory: {},
     mpvPlayerPath: '',
     mpvReuseInstance: false,
     vlcPlayerPath: '',
@@ -74,6 +78,9 @@ export const SettingsStore = signalStore(
                 language: store.language(),
                 showCaptions: store.showCaptions(),
                 theme: store.theme(),
+                colorScheme: store.colorScheme(),
+                preferTmdbPoster: store.preferTmdbPoster(),
+                preferTmdbPosterByCategory: store.preferTmdbPosterByCategory() ?? {},
                 mpvPlayerPath: store.mpvPlayerPath(),
                 mpvReuseInstance: store.mpvReuseInstance(),
                 vlcPlayerPath: store.vlcPlayerPath(),
@@ -82,6 +89,18 @@ export const SettingsStore = signalStore(
                 epgUrl: store.epgUrl(),
                 downloadFolder: store.downloadFolder(),
             };
+        },
+
+        /** Set per-category "prefer TMDB poster" for listing and detail */
+        async setPreferTmdbPosterForCategory(
+            playlistId: string,
+            categoryId: number,
+            value: boolean
+        ) {
+            const key = `${playlistId}_${categoryId}`;
+            const current = store.preferTmdbPosterByCategory?.() ?? {};
+            const next = { ...current, [key]: value };
+            await this.updateSettings({ preferTmdbPosterByCategory: next });
         },
 
         getDownloadFolder() {

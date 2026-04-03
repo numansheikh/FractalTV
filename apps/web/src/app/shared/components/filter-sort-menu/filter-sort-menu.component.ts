@@ -42,12 +42,6 @@ export class FilterSortMenuComponent {
             translationKey: 'HOME.PLAYLIST_TYPES.XTREAM',
             checked: true,
         },
-        {
-            id: 'stalker',
-            icon: 'router',
-            translationKey: 'HOME.PLAYLIST_TYPES.STALKER',
-            checked: true,
-        },
     ];
 
     private readonly selectedTypeFilters = this.store.selectSignal(

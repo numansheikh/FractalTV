@@ -1,35 +1,316 @@
-// @import 'themes/';
+@import 'theme-variables.scss';
 @import '@yangkghjh/videojs-aspect-ratio-panel/dist/videojs-aspect-ratio-panel.css';
 @import '../../../libs/ui/components/src/lib/resizable/resizable.scss';
 
-// macOS specific styles - space for traffic lights
+// -----------------------------------------------------------------------------
+// Base
+// -----------------------------------------------------------------------------
+*, *::before, *::after {
+    box-sizing: border-box;
+}
+
+html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    min-height: 100dvh;
+    font-family: var(--fractals-font-sans);
+    font-size: var(--fractals-text-base);
+    color: var(--fractals-header-text);
+    background-color: var(--fractals-body-bg);
+    user-select: none;
+}
+
+input, textarea {
+    user-select: text;
+}
+
+:focus {
+    outline: none;
+}
+
+// -----------------------------------------------------------------------------
+// App layout (bootstrap-like shell)
+// -----------------------------------------------------------------------------
+.app-layout {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    min-height: 100dvh;
+}
+
+.app-main {
+    flex: 1;
+    overflow: auto;
+    padding-top: var(--fractals-space-4);
+    padding-bottom: var(--fractals-space-6);
+}
+
+// -----------------------------------------------------------------------------
+// Layout utilities (bootstrap-like)
+// -----------------------------------------------------------------------------
+.container {
+    max-width: var(--fractals-container-max);
+    margin-left: auto;
+    margin-right: auto;
+    padding-left: var(--fractals-space-4);
+    padding-right: var(--fractals-space-4);
+}
+
+.full-width { width: 100%; }
+
+// Spacing
+.mt-2 { margin-top: var(--fractals-space-2); }
+.mt-3 { margin-top: var(--fractals-space-3); }
+.mt-4 { margin-top: var(--fractals-space-4); }
+.mb-2 { margin-bottom: var(--fractals-space-2); }
+.mb-3 { margin-bottom: var(--fractals-space-3); }
+.p-3 { padding: var(--fractals-space-3); }
+.p-4 { padding: var(--fractals-space-4); }
+
+// Typography
+.text-muted { color: var(--fractals-header-text-muted); }
+.text-sm { font-size: var(--fractals-text-sm); }
+.text-xs { font-size: var(--fractals-text-xs); }
+
+// -----------------------------------------------------------------------------
+// Dialogs & forms (scroll, keyboard, TV)
+// -----------------------------------------------------------------------------
+.mat-mdc-dialog-content,
+.mat-mdc-dialog-container .scrollable-form {
+    padding-bottom: env(safe-area-inset-bottom, var(--fractals-space-5));
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+@media (max-height: 800px), (pointer: coarse) {
+    .mat-mdc-dialog-content {
+        max-height: 55vh;
+    }
+}
+
+.mat-mdc-dialog-content .mat-mdc-form-field {
+    scroll-margin-bottom: 120px;
+}
+
+.cdk-overlay-backdrop {
+    backdrop-filter: blur(4px);
+}
+
+// Add playlist & Playlist details: theme colors, compact, top-aligned
+.cdk-overlay-pane.add-playlist-dialog,
+.cdk-overlay-pane.playlist-details-dialog {
+    align-items: flex-start !important;
+    justify-content: center;
+}
+
+.add-playlist-dialog .mat-mdc-dialog-container,
+.playlist-details-dialog .mat-mdc-dialog-container {
+    margin-top: 6vh;
+    max-height: 85vh;
+}
+
+.add-playlist-dialog .mat-mdc-dialog-surface {
+    background-color: var(--fractals-body-bg);
+    color: var(--fractals-header-text);
+    border-radius: var(--fractals-radius);
+    border: 1px solid var(--fractals-header-border);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+    width: 560px;
+    max-width: 94vw;
+    padding: 0;
+}
+
+.playlist-details-dialog .mat-mdc-dialog-surface {
+    background-color: var(--fractals-body-bg);
+    color: var(--fractals-header-text);
+    border-radius: var(--fractals-radius);
+    border: 1px solid var(--fractals-header-border);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+    width: 720px;
+    max-width: 94vw;
+    padding: 0;
+}
+
+.add-playlist-dialog .mat-mdc-dialog-title {
+    color: var(--fractals-header-text);
+    font-size: var(--fractals-text-lg);
+    font-weight: 600;
+    margin: 0;
+    padding: var(--fractals-space-4) var(--fractals-space-5) var(--fractals-space-2);
+}
+.playlist-details-dialog .mat-mdc-dialog-title {
+    color: var(--fractals-header-text);
+    font-size: var(--fractals-text-base);
+    font-weight: 600;
+    margin: 0;
+    padding: var(--fractals-space-4) var(--fractals-space-5) var(--fractals-space-2);
+}
+
+.add-playlist-dialog .mat-mdc-dialog-content,
+.playlist-details-dialog .mat-mdc-dialog-content {
+    padding: var(--fractals-space-2) var(--fractals-space-5) var(--fractals-space-4);
+    max-height: 50vh;
+}
+
+// Add playlist: 2-column grid
+.add-playlist-dialog .dialog-form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--fractals-space-2) var(--fractals-space-4);
+    margin-bottom: var(--fractals-space-2);
+}
+
+// Playlist details: vertical stack of edit boxes, tighter spacing
+.playlist-details-dialog .playlist-details-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--fractals-space-1) 0;
+    margin-bottom: var(--fractals-space-2);
+}
+
+// Horizontal label layout for playlist details: label in own column so it never overlaps the input
+.playlist-details-dialog .playlist-details-grid .mat-mdc-form-field .mat-mdc-form-field-flex {
+    align-items: center;
+}
+.playlist-details-dialog .playlist-details-grid .mat-mdc-form-field .mat-mdc-form-field-infix {
+    display: grid;
+    grid-template-columns: 6rem 1fr;
+    gap: var(--fractals-space-3);
+    align-items: center;
+    padding-top: 0;
+    padding-bottom: 0;
+    min-height: 32px;
+}
+.playlist-details-dialog .playlist-details-grid .mat-mdc-form-field mat-label {
+    grid-column: 1;
+    white-space: nowrap;
+    font-size: var(--fractals-text-sm);
+    color: var(--fractals-header-text-muted);
+    position: static;
+    transform: none;
+    padding: 0;
+}
+.playlist-details-dialog .playlist-details-grid .mat-mdc-form-field .mat-mdc-form-field-infix > *:nth-child(2) {
+    grid-column: 2;
+    min-width: 0;
+}
+.playlist-details-dialog .playlist-details-grid .mat-mdc-form-field .mat-mdc-input-element {
+    padding-left: var(--fractals-space-2);
+    min-width: 0;
+}
+// Prevent floating label from overlapping: keep label in column 1, input in column 2; no notch
+.playlist-details-dialog .playlist-details-grid .mat-mdc-form-field .mdc-notched-outline .mdc-notched-outline__notch {
+    border: none;
+    padding: 0;
+    max-width: 0;
+}
+.playlist-details-dialog .playlist-details-grid .mat-mdc-form-field .mat-mdc-form-field-subscript-wrapper {
+    grid-column: 1 / -1;
+}
+
+.add-playlist-dialog .dialog-form-grid-layout .button-row,
+.playlist-details-dialog .mat-mdc-dialog-actions {
+    margin-top: var(--fractals-space-3);
+}
+
+.add-playlist-dialog .mat-mdc-dialog-actions,
+.playlist-details-dialog .mat-mdc-dialog-actions {
+    padding: var(--fractals-space-2) var(--fractals-space-5) var(--fractals-space-4);
+    min-height: auto;
+}
+
+// Form fields inside these dialogs: theme colors
+.add-playlist-dialog .mat-mdc-text-field-wrapper,
+.playlist-details-dialog .mat-mdc-text-field-wrapper {
+    background-color: var(--fractals-input-bg) !important;
+}
+
+.add-playlist-dialog .mat-mdc-form-field .mdc-notched-outline .mdc-notched-outline__leading,
+.add-playlist-dialog .mat-mdc-form-field .mdc-notched-outline .mdc-notched-outline__notch,
+.add-playlist-dialog .mat-mdc-form-field .mdc-notched-outline .mdc-notched-outline__trailing,
+.playlist-details-dialog .mat-mdc-form-field .mdc-notched-outline .mdc-notched-outline__leading,
+.playlist-details-dialog .mat-mdc-form-field .mdc-notched-outline .mdc-notched-outline__notch,
+.playlist-details-dialog .mat-mdc-form-field .mdc-notched-outline .mdc-notched-outline__trailing {
+    border-color: var(--fractals-input-border) !important;
+}
+
+.add-playlist-dialog .mat-mdc-form-field.mat-focused .mdc-notched-outline .mdc-notched-outline__leading,
+.add-playlist-dialog .mat-mdc-form-field.mat-focused .mdc-notched-outline .mdc-notched-outline__notch,
+.add-playlist-dialog .mat-mdc-form-field.mat-focused .mdc-notched-outline .mdc-notched-outline__trailing,
+.playlist-details-dialog .mat-mdc-form-field.mat-focused .mdc-notched-outline .mdc-notched-outline__leading,
+.playlist-details-dialog .mat-mdc-form-field.mat-focused .mdc-notched-outline .mdc-notched-outline__notch,
+.playlist-details-dialog .mat-mdc-form-field.mat-focused .mdc-notched-outline .mdc-notched-outline__trailing {
+    border-color: var(--fractals-primary) !important;
+}
+
+.add-playlist-dialog .mat-mdc-input-element,
+.add-playlist-dialog .mat-mdc-form-field .mat-mdc-floating-label,
+.playlist-details-dialog .mat-mdc-input-element,
+.playlist-details-dialog .mat-mdc-form-field .mat-mdc-floating-label {
+    color: var(--fractals-header-text) !important;
+}
+
+.add-playlist-dialog .mat-mdc-form-field .mat-mdc-hint,
+.add-playlist-dialog .mat-mdc-form-field .mat-mdc-form-field-error,
+.playlist-details-dialog .mat-mdc-form-field .mat-mdc-hint,
+.playlist-details-dialog .mat-mdc-form-field .mat-mdc-form-field-error {
+    color: var(--fractals-header-text-muted) !important;
+}
+
+.add-playlist-dialog .mat-mdc-button,
+.playlist-details-dialog .mat-mdc-button {
+    color: var(--fractals-primary);
+}
+
+.add-playlist-dialog .mat-mdc-raised-button:not([disabled]),
+.playlist-details-dialog .mat-mdc-raised-button:not([disabled]) {
+    background-color: var(--fractals-primary);
+    color: white;
+}
+
+// Reduced radius for dialog surfaces, inputs, and buttons
+.add-playlist-dialog .mat-mdc-dialog-surface,
+.playlist-details-dialog .mat-mdc-dialog-surface {
+    border-radius: var(--fractals-radius-sm);
+}
+.add-playlist-dialog .mat-mdc-form-field .mdc-notched-outline .mdc-notched-outline__leading,
+.add-playlist-dialog .mat-mdc-form-field .mdc-notched-outline .mdc-notched-outline__notch,
+.add-playlist-dialog .mat-mdc-form-field .mdc-notched-outline .mdc-notched-outline__trailing,
+.playlist-details-dialog .mat-mdc-form-field .mdc-notched-outline .mdc-notched-outline__leading,
+.playlist-details-dialog .mat-mdc-form-field .mdc-notched-outline .mdc-notched-outline__notch,
+.playlist-details-dialog .mat-mdc-form-field .mdc-notched-outline .mdc-notched-outline__trailing {
+    border-radius: var(--fractals-radius-sm);
+}
+.add-playlist-dialog .mat-mdc-button,
+.playlist-details-dialog .mat-mdc-button {
+    border-radius: var(--fractals-radius-sm);
+}
+
+app-root.form-factor-tv .mat-mdc-dialog-content.playlist-details-content {
+    max-height: 42vh;
+}
+app-root.form-factor-tv .mat-mdc-dialog-content.playlist-details-content:focus {
+    outline: 2px solid var(--fractals-primary);
+    outline-offset: 2px;
+}
+
+// -----------------------------------------------------------------------------
+// macOS
+// -----------------------------------------------------------------------------
 app-root.macos-platform app-header .modern-header {
     padding-left: 80px;
 }
-
 app-root.macos-platform .current-playlist {
     padding-top: 30px;
 }
-
 app-root.macos-platform app-navigation .portal-status-container {
     padding-top: 30px;
 }
 
-body,
-html {
-    user-select: none;
-    margin: 0;
-    padding: 0;
-    height: 100%;
-    font-family: Roboto, 'Helvetica Neue', sans-serif;
-}
-
-// Re-enable context menu and text selection for input fields
-input,
-textarea {
-    user-select: text;
-}
-
+// -----------------------------------------------------------------------------
+// Standalone / PWA
+// -----------------------------------------------------------------------------
 @media (display-mode: standalone) {
     body {
         overscroll-behavior-y: contain;
@@ -37,60 +318,105 @@ textarea {
     }
 }
 
-.full-width {
-    width: 100%;
-}
-.mat-tab-label-active {
-    opacity: 1 !important;
-}
-
-input,
-button,
-textarea,
-:focus {
-    outline: none;
+// -----------------------------------------------------------------------------
+// Scrollbar
+// -----------------------------------------------------------------------------
+::-webkit-scrollbar-thumb {
+    background-color: var(--fractals-gray-700);
+    border-radius: var(--fractals-radius-sm);
 }
 
-.dark-theme {
-    ::-webkit-scrollbar {
-        overflow-y: scroll;
+// -----------------------------------------------------------------------------
+// Form factor: tablet
+// -----------------------------------------------------------------------------
+app-root.form-factor-tablet {
+    .mat-mdc-form-field .mat-mdc-text-field-wrapper,
+    .mat-mdc-button, .mat-mdc-raised-button, .mat-mdc-icon-button {
+        min-height: 48px;
     }
-
-    ::-webkit-scrollbar-thumb {
-        background-color: rgb(60 60 60);
-        border-radius: 10px;
+    .mat-mdc-form-field input, .mat-mdc-form-field .mat-mdc-input {
+        font-size: var(--fractals-text-base);
     }
 }
 
-.mb-10 {
-    margin-bottom: 10px;
-}
+// -----------------------------------------------------------------------------
+// Form factor: TV (focus rings, larger targets)
+// -----------------------------------------------------------------------------
+app-root.form-factor-tv {
+    font-size: var(--fractals-text-lg);
+    *:focus-visible,
+    .mat-mdc-button:focus-visible, .mat-mdc-icon-button:focus-visible,
+    .mat-mdc-tab:focus-visible, a:focus-visible {
+        outline: 3px solid var(--fractals-primary);
+        outline-offset: 2px;
+    }
+    .mat-mdc-button, .mat-mdc-raised-button {
+        min-height: 56px;
+        padding: 0 var(--fractals-space-6);
+        font-size: 1.1rem;
+    }
+    .mat-mdc-icon-button {
+        min-width: 56px; min-height: 56px;
+        width: 56px; height: 56px;
+    }
+    .mat-mdc-form-field .mat-mdc-text-field-wrapper { min-height: 56px; }
+    .mat-mdc-form-field input, .mat-mdc-form-field .mat-mdc-input {
+        font-size: 1.15rem;
+        padding: var(--fractals-space-3) var(--fractals-space-4);
+    }
+    .mat-mdc-tab {
+        min-height: 56px;
+        padding: 0 var(--fractals-space-6);
+    }
 
-.about-dialog-overlay {
-    .mat-mdc-dialog-surface {
-        text-align: center;
-        background: black !important;
-        color: #fff !important;
-        padding: 10px;
+    // Playlist list items: larger tap target and stronger focus for D-pad
+    app-playlist-item mat-list-item {
+        min-height: 56px;
+        &:focus-visible {
+            outline-width: 3px;
+            outline-offset: 2px;
+        }
     }
 }
 
+// Playlist list: prevent edit/pen and other action buttons from being clipped
+app-playlist-item mat-list-item,
+.recent-playlists .playlists-list .mdc-list-item,
+.playlists-list .mdc-list-item {
+    overflow: visible !important;
+}
+.recent-playlists .playlists-list,
+.playlists-list {
+    overflow: visible;
+    .mdc-list-item__content {
+        overflow: visible;
+        padding-right: var(--fractals-space-2);
+        min-width: 0; /* allow flex shrink of text so meta doesn't get squeezed */
+    }
+    app-playlist-item mat-list-item .action-buttons,
+    [matListItemMeta].action-buttons {
+        flex-shrink: 0;
+        overflow: visible;
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Misc
+// -----------------------------------------------------------------------------
+.mat-tab-label-active { opacity: 1 !important; }
 .scroll-viewport-portals {
     min-height: calc(100vh - 170px) !important;
     overflow-x: hidden !important;
 }
-
-.mat-drawer-inner-container {
-    overflow: hidden !important;
-}
-
-.cdk-overlay-backdrop {
-    backdrop-filter: blur(4px);
-}
-
-// Full-screen overlay dialogs (global search/recent) must stay interactive in Electron.
+.mat-drawer-inner-container { overflow: hidden !important; }
 .global-search-overlay,
 .global-search-overlay .mat-mdc-dialog-surface,
 .global-search-overlay .mat-mdc-dialog-container {
     app-region: no-drag;
+}
+.about-dialog-overlay .mat-mdc-dialog-surface {
+    text-align: center;
+    background: var(--fractals-body-bg) !important;
+    color: var(--fractals-header-text) !important;
+    padding: var(--fractals-space-4);
 }

@@ -265,6 +265,42 @@
                 </mat-form-field>
             </div>
         </div>
+        <div class="row">
+            <div class="column">
+                {{ 'SETTINGS.COLOR_SCHEME_LABEL' | translate }}
+                <p>{{ 'SETTINGS.COLOR_SCHEME_DESCRIPTION' | translate }}</p>
+            </div>
+            <div class="column">
+                <mat-form-field appearance="outline">
+                    <mat-label>{{ 'SETTINGS.COLOR_SCHEME_PLACEHOLDER' | translate }}</mat-label>
+                    <mat-select
+                        formControlName="colorScheme"
+                        data-test-id="select-color-scheme"
+                    >
+                        @for (scheme of colorSchemeEnum | keyvalue; track scheme) {
+                            <mat-option
+                                [value]="scheme.value"
+                                [attr.data-test-id]="scheme.value"
+                                >{{ 'SCHEMES.' + scheme.value | translate }}</mat-option
+                            >
+                        }
+                    </mat-select>
+                </mat-form-field>
+            </div>
+        </div>
+        <mat-divider />
+        <div class="row">
+            <div class="column">
+                {{ 'SETTINGS.PREFER_TMDB_POSTER' | translate }}
+                <p>{{ 'SETTINGS.PREFER_TMDB_POSTER_DESCRIPTION' | translate }}</p>
+            </div>
+            <div class="column margin-right">
+                <mat-checkbox
+                    class="column"
+                    formControlName="preferTmdbPoster"
+                ></mat-checkbox>
+            </div>
+        </div>
         <mat-divider />
         <div class="row">
             <div class="column">
@@ -446,7 +482,7 @@
         @if (isPwa) {
             <div class="row">
                 {{ 'SETTINGS.EPG_NOTE' | translate }}
-                &nbsp;<a href="https://github.com/4gray/iptvnator/releases">{{
+                &nbsp;<a href="https://github.com/FractalTV/fractals/releases">{{
                     'SETTINGS.EPG_NOTE_URL_TEXT' | translate
                 }}</a>
             </div>

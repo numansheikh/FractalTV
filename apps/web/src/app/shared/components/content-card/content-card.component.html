@@ -39,6 +39,9 @@
 
     <div class="card-info">
         <h3>{{ title() }}</h3>
+        @if (category()) {
+            <p class="category-info">{{ category() }}</p>
+        }
         @if (date()) {
             <p class="date-info">
                 {{ date() | date: 'd MMM, HH:mm' }}

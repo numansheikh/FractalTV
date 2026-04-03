@@ -3,7 +3,7 @@ import { inject, Injectable } from '@angular/core';
 import { StorageMap } from '@ngx-pwa/local-storage';
 import { catchError, map, Observable } from 'rxjs';
 import * as semver from 'semver';
-import { STORE_KEY, Theme } from 'shared-interfaces';
+import { ColorScheme, STORE_KEY, Theme } from 'shared-interfaces';
 
 @Injectable({
     providedIn: 'root',
@@ -13,8 +13,7 @@ export class SettingsService {
     private storage = inject(StorageMap);
 
     /**
-     * Changes the visual theme of the application
-     * @param selectedTheme theme to set
+     * Changes the visual theme of the application (light/dark)
      */
     changeTheme(selectedTheme: Theme): void {
         if (selectedTheme === Theme.LightTheme) {
@@ -22,6 +21,14 @@ export class SettingsService {
         } else if (selectedTheme === Theme.DarkTheme) {
             document.body.classList.add('dark-theme');
         }
+    }
+
+    /**
+     * Changes the color scheme (Modern vs Vintage look & feel)
+     */
+    changeColorScheme(scheme: ColorScheme): void {
+        const html = document.documentElement;
+        html.setAttribute('data-scheme', scheme === ColorScheme.Vintage ? 'vintage' : 'modern');
     }
 
     /**
@@ -58,7 +65,7 @@ export class SettingsService {
     getAppVersion() {
         return this.http
             .get<{ created_at: string; name: string }[]>(
-                'https://api.github.com/repos/4gray/iptvnator/releases'
+                'https://api.github.com/repos/FractalTV/fractals/releases'
             )
             .pipe(
                 map((response) => {

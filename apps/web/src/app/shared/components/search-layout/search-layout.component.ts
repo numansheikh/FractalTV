@@ -28,6 +28,9 @@ import { SearchFormComponent } from '../search-form/search-form.component';
 })
 export class SearchLayoutComponent {
     private readonly searchFormComponent = viewChild(SearchFormComponent);
+    readonly resultsContainerRef = viewChild<ElementRef<HTMLElement>>(
+        'resultsContainer'
+    );
 
     /** Page title translation key */
     readonly title = input<string>('PORTALS.SIDEBAR.SEARCH');
@@ -90,5 +93,17 @@ export class SearchLayoutComponent {
     /** Check if we should show results */
     get showResults(): boolean {
         return this.resultsCount() > 0 && !this.isLoading();
+    }
+
+    /** Get current scroll position of the results container (for preserving scroll on load more) */
+    getScrollTop(): number {
+        const el = this.resultsContainerRef()?.nativeElement;
+        return el ? el.scrollTop : 0;
+    }
+
+    /** Set scroll position of the results container */
+    setScrollTop(value: number): void {
+        const el = this.resultsContainerRef()?.nativeElement;
+        if (el) el.scrollTop = value;
     }
 }

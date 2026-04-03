@@ -76,6 +76,31 @@
                         }
                     ]
                 },
+                "mobile": {
+                    "baseHref": "/",
+                    "budgets": [
+                        {
+                            "type": "initial",
+                            "maximumWarning": "500kb",
+                            "maximumError": "5mb"
+                        },
+                        {
+                            "type": "anyComponentStyle",
+                            "maximumWarning": "10kb",
+                            "maximumError": "15kb"
+                        }
+                    ],
+                    "outputHashing": "all",
+                    "optimization": true,
+                    "extractLicenses": true,
+                    "sourceMap": false,
+                    "fileReplacements": [
+                        {
+                            "replace": "apps/web/src/environments/environment.ts",
+                            "with": "apps/web/src/environments/environment.mobile.ts"
+                        }
+                    ]
+                },
                 "development": {
                     "optimization": false,
                     "extractLicenses": false,
@@ -93,6 +118,9 @@
                 },
                 "pwa": {
                     "buildTarget": "web:build:pwa"
+                },
+                "mobile": {
+                    "buildTarget": "web:build:mobile"
                 },
                 "development": {
                     "buildTarget": "web:build:development"

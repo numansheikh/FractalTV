@@ -25,7 +25,7 @@ import {
     MockProvider,
     MockProviders,
 } from 'ng-mocks';
-import { Language, StreamFormat, Theme, VideoPlayer } from 'shared-interfaces';
+import { ColorScheme, Language, StreamFormat, Theme, VideoPlayer } from 'shared-interfaces';
 import { DataService } from '../../../../../libs/services/src/lib/data.service';
 import { HeaderComponent } from '../shared/components';
 import { SettingsComponent } from './settings.component';
@@ -52,11 +52,13 @@ export class MockRouter {
 }
 
 const DEFAULT_SETTINGS = {
-    player: VideoPlayer.VideoJs,
+    player: VideoPlayer.ArtPlayer,
     streamFormat: StreamFormat.M3u8StreamFormat,
     language: Language.ENGLISH,
     showCaptions: false,
     theme: Theme.LightTheme,
+    colorScheme: ColorScheme.Modern,
+    preferTmdbPoster: false,
     mpvPlayerPath: '',
     vlcPlayerPath: '',
     remoteControl: false,
@@ -66,7 +68,7 @@ const DEFAULT_SETTINGS = {
 class MockSettingsStore {
     private _settings = signal(DEFAULT_SETTINGS);
 
-    getSettings = () => this._settings;
+    getSettings = () => this._settings();
 
     loadSettings = jest.fn().mockResolvedValue(undefined);
 
@@ -81,6 +83,7 @@ class MockSettingsStore {
 class MockSettingsService {
     getAppVersion = jest.fn().mockReturnValue(of('1.0.0'));
     changeTheme = jest.fn();
+    changeColorScheme = jest.fn();
 }
 
 describe('SettingsComponent', () => {
@@ -148,7 +151,7 @@ describe('SettingsComponent', () => {
 
     describe('Get and set settings on component init', () => {
         const settings = {
-            player: VideoPlayer.VideoJs,
+            player: VideoPlayer.ArtPlayer,
         };
 
         it('should init default settings if previous config was not saved', async () => {

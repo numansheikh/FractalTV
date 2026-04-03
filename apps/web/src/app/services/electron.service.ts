@@ -81,14 +81,6 @@ export class ElectronService extends DataService {
             return await this.forwardXtreamRequest(
                 payload as { url: string; params: Record<string, string> }
             );
-        } else if (type === 'STALKER_REQUEST') {
-            return this.fetchStalkerData(
-                payload as {
-                    url: string;
-                    macAddress: string;
-                    params: Record<string, string>;
-                }
-            );
         } else if (type === 'OPEN_MPV_PLAYER') {
             const data = payload as any;
             try {
@@ -158,28 +150,6 @@ export class ElectronService extends DataService {
         }
     }
 
-    private async fetchStalkerData(payload: {
-        url: string;
-        macAddress: string;
-        params: Record<string, string>;
-    }) {
-        try {
-            // Use Electron IPC to make the Stalker request
-            const response = await window.electron.stalkerRequest(payload);
-            return response;
-        } catch (err) {
-            console.error('Stalker request error:', err);
-            this.snackBar.open(
-                `Error: ${err.message ?? ' Not found'}, status: ${err.status ?? 404}`,
-                'Close',
-                {
-                    duration: 5000,
-                }
-            );
-            throw err;
-        }
-    }
-
     private async fetchM3uPlaylistFromUrl(payload: Partial<Playlist>) {
         window.electron.fetchPlaylistByUrl(payload.url).then((result) => {
             this.store.dispatch(
@@ -196,46 +166,87 @@ export class ElectronService extends DataService {
         url?: string;
         filePath?: string;
         title: string;
+        serverUrl?: string;
     }) {
-        let methodToCall = null;
+        // Xtream/Stalker playlists are refreshed via their own flow, not M3U fetch
+        if (data.serverUrl) {
+            this.snackBar.open(
+                this.translateService.instant(
+                    'HOME.PLAYLISTS.REFRESH_XTREAM_USE_MENU'
+                ),
+                null,
+                { duration: 4000 }
+            );
+            return;
+        }
+        let methodToCall: Promise<unknown> | null = null;
         if (data.url && !data.filePath) {
-            // fetch from url
             methodToCall = window.electron.fetchPlaylistByUrl(
                 data.url,
                 data.title
             );
         } else if (data.filePath && !data.url) {
-            // update from file path
             methodToCall = window.electron.updatePlaylistFromFilePath(
                 data.filePath,
                 data.title
             );
         } else {
-            console.error(
-                'Either url or filePath must be provided, but not both.'
+            this.snackBar.open(
+                this.translateService.instant(
+                    'HOME.PLAYLISTS.PLAYLIST_UPDATE_FAILED'
+                ) +
+                    ': ' +
+                    this.translateService.instant(
+                        'HOME.PLAYLISTS.REFRESH_MISSING_URL_OR_FILE'
+                    ),
+                null,
+                { duration: 5000 }
             );
             return;
         }
 
-        methodToCall.then((playlistObject) => {
-            this.store.dispatch(
-                PlaylistActions.updatePlaylist({
-                    playlist: {
-                        ...playlistObject,
-                        _id: data.id,
-                    },
-                    playlistId: data.id,
-                })
-            );
+        methodToCall
+            .then((playlistObject) => {
+                this.store.dispatch(
+                    PlaylistActions.updatePlaylist({
+                        playlist: {
+                            ...(playlistObject as Playlist),
+                            _id: data.id,
+                        },
+                        playlistId: data.id,
+                    })
+                );
 
-            this.snackBar.open(
-                this.translateService.instant(
-                    'HOME.PLAYLISTS.PLAYLIST_UPDATE_SUCCESS'
-                ),
-                null,
-                { duration: 2000 }
-            );
-        });
+                this.snackBar.open(
+                    this.translateService.instant(
+                        'HOME.PLAYLISTS.PLAYLIST_UPDATE_SUCCESS'
+                    ),
+                    null,
+                    { duration: 2000 }
+                    );
+            })
+            .catch((error) => {
+                let message = 'Unknown error';
+                if (error && typeof error === 'object') {
+                    message =
+                        (error as any).message ??
+                        (error as any).statusText ??
+                        (typeof (error as any).status === 'number'
+                            ? `HTTP ${(error as any).status}`
+                            : JSON.stringify(error));
+                } else if (error != null) {
+                    message = String(error);
+                }
+                this.snackBar.open(
+                    this.translateService.instant(
+                        'HOME.PLAYLISTS.PLAYLIST_UPDATE_FAILED'
+                    ) +
+                        ': ' +
+                        message,
+                    null,
+                    { duration: 5000 }
+                );
+            });
     }
 
     /* private getErrorMessageByStatusCode(status: number) {
