@@ -1,0 +1,1541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fractals — Platform Mockups</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Mono:wght@300;400;500&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ─── Document Shell ──────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:          #06060b;
+  --surface:     #0f0f17;
+  --card:        #13131e;
+  --card-raised: #1a1a28;
+  --border:      rgba(124,77,255,0.12);
+  --border-soft: rgba(255,255,255,0.06);
+  --primary:     #7c4dff;
+  --primary-dim: rgba(124,77,255,0.18);
+  --primary-glow:rgba(124,77,255,0.35);
+  --accent:      #b388ff;
+  --on-surface:  #e8e3ff;
+  --muted:       #6b6880;
+  --subtle:      #3d3a54;
+
+  /* App simulation colors */
+  --app-bg:     #0f0f13;
+  --app-card:   #1a1a24;
+  --app-raised: #222230;
+  --app-border: rgba(255,255,255,0.07);
+  --app-text:   #e2ddf5;
+  --app-muted:  #7a748a;
+  --app-purple: #7c4dff;
+  --app-purple-light: #b388ff;
+}
+
+html { scroll-behavior: smooth; }
+body {
+  background: var(--bg);
+  color: var(--on-surface);
+  font-family: 'Inter', sans-serif;
+  min-height: 100vh;
+  padding: 0 0 120px;
+  overflow-x: hidden;
+}
+
+/* Noise overlay */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 9999;
+  opacity: 0.4;
+}
+
+/* ─── Page Header ─────────────────────────────────────────────────────────── */
+.page-header {
+  padding: 72px 60px 56px;
+  position: relative;
+  overflow: hidden;
+}
+.page-header::after {
+  content: '';
+  position: absolute;
+  top: -100px;
+  left: -100px;
+  width: 600px;
+  height: 400px;
+  background: radial-gradient(ellipse, rgba(124,77,255,0.15) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.fractal-icon {
+  width: 48px;
+  height: 48px;
+  margin-bottom: 24px;
+  position: relative;
+  z-index: 1;
+}
+
+.page-title {
+  font-family: 'Syne', sans-serif;
+  font-size: clamp(36px, 5vw, 64px);
+  font-weight: 800;
+  line-height: 1.0;
+  letter-spacing: -0.03em;
+  background: linear-gradient(135deg, #fff 30%, var(--accent) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  position: relative;
+  z-index: 1;
+}
+.page-subtitle {
+  margin-top: 12px;
+  font-family: 'DM Mono', monospace;
+  font-size: 13px;
+  color: var(--muted);
+  letter-spacing: 0.06em;
+  position: relative;
+  z-index: 1;
+}
+.platform-pills {
+  margin-top: 20px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  position: relative;
+  z-index: 1;
+}
+.pill {
+  padding: 4px 12px;
+  border-radius: 100px;
+  border: 1px solid var(--border);
+  background: var(--primary-dim);
+  font-size: 11px;
+  font-family: 'DM Mono', monospace;
+  color: var(--accent);
+  letter-spacing: 0.04em;
+}
+
+/* ─── Section Labels ─────────────────────────────────────────────────────── */
+.section-label {
+  padding: 0 60px;
+  margin-bottom: 24px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.section-label::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border-soft);
+}
+.section-label span {
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* ─── Mockup Grid ─────────────────────────────────────────────────────────── */
+.mockup-grid {
+  padding: 0 60px;
+  display: grid;
+  gap: 32px;
+}
+.mockup-grid.two-col { grid-template-columns: 1fr 1fr; }
+.mockup-grid.three-col-tv { grid-template-columns: 1fr 1fr 1.4fr; align-items: start; }
+.mockup-spacer { margin-bottom: 48px; }
+
+/* Platform chip below each mockup */
+.platform-chip {
+  margin-top: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 0.05em;
+}
+.platform-chip .dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--primary);
+  box-shadow: 0 0 6px var(--primary);
+}
+
+/* ─── Shared App Styles (all mockups) ───────────────────────────────────── */
+.app-bg { background: var(--app-bg); }
+.app-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 14px;
+  height: 52px;
+  background: var(--app-card);
+  border-bottom: 1px solid var(--app-border);
+  flex-shrink: 0;
+}
+.app-logo-icon {
+  width: 26px; height: 26px;
+  background: var(--app-purple);
+  clip-path: polygon(50% 0%, 85% 20%, 100% 55%, 85% 90%, 50% 100%, 15% 90%, 0% 55%, 15% 20%);
+  flex-shrink: 0;
+}
+.app-logo-text {
+  font-family: 'Syne', sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--app-text);
+  letter-spacing: -0.01em;
+}
+.app-search {
+  flex: 1;
+  height: 30px;
+  background: var(--app-raised);
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  gap: 7px;
+}
+.app-search .icon { font-size: 12px; color: var(--app-muted); }
+.app-search .placeholder { font-size: 11px; color: var(--app-muted); }
+.app-icon-btn {
+  width: 30px; height: 30px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  color: var(--app-muted);
+  cursor: pointer;
+}
+.app-icon-btn:hover { background: var(--app-raised); color: var(--app-text); }
+
+/* Cards */
+.playlist-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 10px;
+  padding: 14px;
+}
+.playlist-card {
+  background: var(--app-card);
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  padding: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.playlist-card:hover { border-color: rgba(124,77,255,0.4); }
+.playlist-card.active { border-color: var(--app-purple); background: rgba(124,77,255,0.08); }
+.pc-icon {
+  width: 36px; height: 36px;
+  border-radius: 8px;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+}
+.pc-icon.m3u  { background: rgba(100,181,246,0.15); }
+.pc-icon.xtream { background: rgba(255,171,64,0.15); }
+.pc-icon.stalker { background: rgba(129,199,132,0.15); }
+.pc-name { font-size: 12px; font-weight: 500; color: var(--app-text); margin-bottom: 4px; line-height: 1.3; }
+.pc-meta { font-size: 10px; color: var(--app-muted); margin-bottom: 6px; }
+.pc-badge {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 9px;
+  font-family: 'DM Mono', monospace;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.pc-badge.m3u { background: rgba(100,181,246,0.15); color: #64b5f6; }
+.pc-badge.xtream { background: rgba(255,171,64,0.15); color: #ffab40; }
+.pc-badge.stalker { background: rgba(129,199,132,0.15); color: #81c784; }
+
+/* ─── Video Player Layout ──────────────────────────────────────────────────── */
+.vp-layout {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  height: 100%;
+}
+.vp-sidebar {
+  width: 240px;
+  flex-shrink: 0;
+  background: var(--app-card);
+  border-right: 1px solid var(--app-border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.vp-sidebar-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--app-border);
+  height: 36px;
+  flex-shrink: 0;
+}
+.vp-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: var(--app-muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+.vp-tab.active { color: var(--app-purple-light); border-bottom-color: var(--app-purple); }
+.ch-list { flex: 1; overflow: hidden; }
+.ch-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(255,255,255,0.03);
+}
+.ch-item.active { background: rgba(124,77,255,0.12); }
+.ch-item.focused {
+  background: rgba(124,77,255,0.18);
+  outline: 2px solid var(--app-purple);
+  outline-offset: -2px;
+}
+.ch-logo {
+  width: 28px; height: 28px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  font-family: 'Syne', sans-serif;
+}
+.ch-info { flex: 1; min-width: 0; }
+.ch-name { font-size: 11px; color: var(--app-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ch-epg { font-size: 9px; color: var(--app-muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ch-progress { height: 2px; background: var(--app-raised); border-radius: 2px; margin-top: 3px; }
+.ch-progress-fill { height: 100%; border-radius: 2px; background: var(--app-purple); }
+
+/* Video area */
+.vp-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: #000;
+  position: relative;
+  overflow: hidden;
+}
+.vp-toolbar {
+  height: 42px;
+  background: var(--app-card);
+  border-bottom: 1px solid var(--app-border);
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.vp-toolbar .ch-active-name { font-size: 12px; font-weight: 500; color: var(--app-text); flex: 1; }
+.vp-video {
+  flex: 1;
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+}
+.vp-video-bg {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, #0a0510 0%, #080415 40%, #020208 100%);
+}
+.vp-video-content {
+  position: relative;
+  z-index: 1;
+  text-align: center;
+}
+.vp-channel-logo-large {
+  width: 56px; height: 56px;
+  border-radius: 12px;
+  margin: 0 auto 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  font-weight: 700;
+  font-family: 'Syne', sans-serif;
+  border: 2px solid rgba(255,255,255,0.15);
+}
+.vp-channel-name-large { font-size: 13px; color: rgba(255,255,255,0.6); font-weight: 500; }
+.vp-controls {
+  position: absolute;
+  bottom: 0;
+  left: 0; right: 0;
+  padding: 12px 14px 10px;
+  background: linear-gradient(to top, rgba(0,0,0,0.85) 0%, transparent 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.vp-progress { height: 3px; background: rgba(255,255,255,0.2); border-radius: 3px; }
+.vp-progress-fill { height: 100%; border-radius: 3px; background: var(--app-purple); width: 42%; }
+.vp-ctrl-row { display: flex; align-items: center; gap: 8px; }
+.vp-ctrl-btn { font-size: 16px; color: rgba(255,255,255,0.85); cursor: pointer; }
+.vp-time { font-size: 10px; color: rgba(255,255,255,0.5); font-family: 'DM Mono', monospace; margin-left: auto; }
+
+/* EPG drawer */
+.vp-epg {
+  width: 200px;
+  flex-shrink: 0;
+  background: var(--app-card);
+  border-left: 1px solid var(--app-border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.vp-epg-header {
+  padding: 10px 12px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--app-text);
+  border-bottom: 1px solid var(--app-border);
+  flex-shrink: 0;
+}
+.epg-item {
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.epg-item.now { background: rgba(124,77,255,0.1); }
+.epg-time { font-size: 9px; font-family: 'DM Mono', monospace; color: var(--app-purple-light); margin-bottom: 2px; }
+.epg-title { font-size: 10px; color: var(--app-text); margin-bottom: 3px; line-height: 1.3; }
+.epg-bar { height: 2px; background: var(--app-raised); border-radius: 2px; }
+.epg-bar-fill { height: 100%; background: var(--app-purple); border-radius: 2px; }
+
+/* ─── 1. WEB PWA MOCKUP ──────────────────────────────────────────────────── */
+.browser-chrome {
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 24px 80px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.06);
+}
+.browser-titlebar {
+  height: 36px;
+  background: #1e1e26;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  gap: 10px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.browser-dots { display: flex; gap: 6px; }
+.browser-dot { width: 11px; height: 11px; border-radius: 50%; }
+.browser-dot.red    { background: #ff5f57; }
+.browser-dot.yellow { background: #ffbd2e; }
+.browser-dot.green  { background: #28c840; }
+.browser-tabs {
+  display: flex;
+  gap: 2px;
+  flex: 1;
+  height: 100%;
+  align-items: flex-end;
+  padding: 0 8px;
+}
+.browser-tab {
+  background: #13131e;
+  border-radius: 6px 6px 0 0;
+  padding: 5px 14px;
+  font-size: 10px;
+  color: #e2ddf5;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-bottom: none;
+  white-space: nowrap;
+}
+.browser-tab-icon { width: 12px; height: 12px; background: var(--app-purple); clip-path: polygon(50% 0%, 85% 20%, 100% 55%, 85% 90%, 50% 100%, 15% 90%, 0% 55%, 15% 20%); }
+.browser-urlbar {
+  background: #0f0f17;
+  border-radius: 6px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  gap: 6px;
+  font-size: 11px;
+  color: #9d97b5;
+  font-family: 'DM Mono', monospace;
+  min-width: 0;
+  flex: 0 0 240px;
+  border: 1px solid rgba(255,255,255,0.07);
+}
+.url-lock { font-size: 10px; }
+.browser-content { height: 380px; overflow: hidden; }
+
+/* ─── 2 & 3. ELECTRON (macOS / Windows) ─────────────────────────────────── */
+.electron-window {
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 24px 80px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.06);
+}
+.macos-titlebar {
+  height: 38px;
+  background: #1a1a26;
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  position: relative;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.macos-dots { display: flex; gap: 7px; }
+.macos-title {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(255,255,255,0.5);
+}
+.win-titlebar {
+  height: 32px;
+  background: #1a1a26;
+  display: flex;
+  align-items: center;
+  padding: 0 0 0 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.win-title-text {
+  font-size: 12px;
+  color: rgba(255,255,255,0.55);
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.win-controls { display: flex; height: 100%; }
+.win-ctrl {
+  width: 44px;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: rgba(255,255,255,0.5);
+  cursor: pointer;
+}
+.win-ctrl:last-child { background: #c42b1c; color: #fff; font-size: 10px; font-weight: 600; }
+.win-ctrl:hover:not(:last-child) { background: rgba(255,255,255,0.08); }
+.electron-content { height: 380px; overflow: hidden; display: flex; flex-direction: column; }
+
+/* ─── 4. ANDROID PHONE ───────────────────────────────────────────────────── */
+.phone-frame {
+  width: 260px;
+  margin: 0 auto;
+  border-radius: 40px;
+  padding: 14px 8px;
+  background: linear-gradient(160deg, #1a1a2e 0%, #12121f 100%);
+  box-shadow: 0 0 0 2px #2a2a3e, 0 30px 80px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.08);
+  position: relative;
+}
+.phone-notch {
+  width: 80px; height: 28px;
+  background: #12121f;
+  border-radius: 0 0 18px 18px;
+  margin: 0 auto 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.phone-camera { width: 10px; height: 10px; border-radius: 50%; background: #222; border: 1px solid #333; }
+.phone-screen {
+  border-radius: 28px;
+  overflow: hidden;
+  background: var(--app-bg);
+  height: 460px;
+  display: flex;
+  flex-direction: column;
+}
+.phone-statusbar {
+  height: 22px;
+  background: var(--app-bg);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  flex-shrink: 0;
+}
+.phone-time { font-size: 10px; font-weight: 600; color: var(--app-text); }
+.phone-icons { display: flex; gap: 4px; font-size: 10px; color: var(--app-text); }
+.phone-video {
+  flex: 0 0 180px;
+  background: #000;
+  position: relative;
+  overflow: hidden;
+}
+.phone-video-bg {
+  position: absolute; inset: 0;
+  background: linear-gradient(135deg, #0a0510 0%, #050208 100%);
+}
+.phone-video-logo {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+}
+.phone-video-logo .ch-big { font-size: 22px; font-weight: 800; font-family: 'Syne', sans-serif; }
+.phone-video-controls {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  padding: 8px 12px 6px;
+  background: linear-gradient(to top, rgba(0,0,0,0.8) 0%, transparent 100%);
+}
+.phone-channel-list { flex: 1; overflow: hidden; }
+.phone-ch-header {
+  padding: 8px 12px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--app-text);
+  border-bottom: 1px solid var(--app-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.phone-ch-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.phone-ch-item.active { background: rgba(124,77,255,0.1); }
+.phone-ch-logo { width: 32px; height: 32px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; font-family: 'Syne', sans-serif; flex-shrink: 0; }
+.phone-ch-info .ch-name { font-size: 12px; }
+.phone-ch-info .ch-epg { font-size: 10px; }
+
+/* ─── 5. IPAD ─────────────────────────────────────────────────────────────── */
+.ipad-frame {
+  border-radius: 18px;
+  padding: 14px 18px;
+  background: linear-gradient(160deg, #1c1c2e 0%, #141420 100%);
+  box-shadow: 0 0 0 2px #28283c, 0 30px 80px rgba(0,0,0,0.65), inset 0 1px 0 rgba(255,255,255,0.07);
+  position: relative;
+}
+.ipad-camera-bar {
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 6px;
+}
+.ipad-camera { width: 8px; height: 8px; border-radius: 50%; background: #1a1a2a; border: 1px solid #2a2a3a; }
+.ipad-screen {
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--app-bg);
+  display: flex;
+  flex-direction: column;
+}
+.ipad-content { display: flex; flex: 1; overflow: hidden; height: 340px; }
+.ipad-sidebar {
+  width: 220px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--app-border);
+  background: var(--app-card);
+  display: flex;
+  flex-direction: column;
+}
+.ipad-sidebar-search {
+  margin: 10px;
+  height: 32px;
+  background: var(--app-raised);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--app-muted);
+  flex-shrink: 0;
+}
+.ipad-main { flex: 1; background: #000; position: relative; overflow: hidden; }
+.ipad-toolbar {
+  height: 40px;
+  background: var(--app-card);
+  border-bottom: 1px solid var(--app-border);
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* ─── 6. SAMSUNG TV / TIZEN ──────────────────────────────────────────────── */
+.tv-wrapper {
+  position: relative;
+}
+.tv-frame {
+  border-radius: 10px 10px 0 0;
+  padding: 12px 12px 8px;
+  background: linear-gradient(180deg, #1a1a26 0%, #131320 100%);
+  box-shadow: 0 0 0 1px #252535, 0 20px 60px rgba(0,0,0,0.6);
+}
+.tv-bezel-top {
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.tv-brand { font-size: 9px; letter-spacing: 0.2em; color: rgba(255,255,255,0.2); font-family: 'Syne', sans-serif; font-weight: 600; }
+.tv-camera-dot { width: 6px; height: 6px; border-radius: 50%; background: #1a1a28; border: 1px solid #252535; }
+.tv-screen {
+  border-radius: 6px;
+  overflow: hidden;
+  position: relative;
+  height: 280px;
+  background: #000;
+}
+.tv-screen-bg {
+  position: absolute; inset: 0;
+  background: linear-gradient(135deg, #040210 0%, #060315 40%, #020108 100%);
+}
+.tv-stand-neck {
+  width: 60px;
+  height: 20px;
+  background: linear-gradient(180deg, #131320, #1a1a26);
+  margin: 0 auto;
+}
+.tv-stand-base {
+  width: 200px;
+  height: 14px;
+  background: linear-gradient(180deg, #1a1a26, #0f0f1a);
+  margin: 0 auto;
+  border-radius: 0 0 8px 8px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+}
+
+/* TV video background content */
+.tv-video-program {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  color: rgba(255,255,255,0.12);
+  font-style: italic;
+  letter-spacing: 0.05em;
+}
+
+/* TV channel overlay */
+.tv-overlay {
+  position: absolute;
+  top: 0; left: 0; bottom: 0;
+  width: 220px;
+  background: rgba(10,8,20,0.92);
+  backdrop-filter: blur(12px);
+  border-right: 1px solid rgba(124,77,255,0.2);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  z-index: 2;
+}
+.tv-overlay-header {
+  padding: 12px 14px 8px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  flex-shrink: 0;
+}
+.tv-overlay-title { font-size: 13px; font-weight: 600; color: var(--app-text); font-family: 'Syne', sans-serif; }
+.tv-overlay-subtitle { font-size: 10px; color: var(--app-muted); margin-top: 2px; }
+.tv-ch-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(255,255,255,0.03);
+  transition: background 0.1s;
+}
+.tv-ch-item.focused {
+  background: rgba(124,77,255,0.2);
+  outline: 2px solid var(--app-purple);
+  outline-offset: -2px;
+  border-radius: 4px;
+}
+.tv-ch-logo {
+  width: 36px; height: 36px;
+  border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; font-weight: 800; font-family: 'Syne', sans-serif;
+  flex-shrink: 0;
+}
+.tv-ch-info .ch-name { font-size: 13px; }
+.tv-ch-info .ch-epg { font-size: 10px; margin-top: 2px; }
+.tv-focused-badge {
+  margin-left: auto;
+  width: 20px; height: 20px;
+  border-radius: 4px;
+  background: var(--app-purple);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+/* TV status bar */
+.tv-status {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 36px;
+  background: rgba(8,6,18,0.9);
+  backdrop-filter: blur(8px);
+  border-top: 1px solid rgba(255,255,255,0.06);
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  gap: 16px;
+  z-index: 3;
+}
+.tv-status-channel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tv-status-channel .tv-ch-logo-sm {
+  width: 20px; height: 20px;
+  border-radius: 4px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 9px; font-weight: 800; font-family: 'Syne', sans-serif;
+}
+.tv-status-channel .name { font-size: 12px; font-weight: 500; color: var(--app-text); }
+.tv-status-program { font-size: 11px; color: var(--app-muted); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tv-status-time { font-family: 'DM Mono', monospace; font-size: 13px; color: var(--app-text); font-weight: 500; flex-shrink: 0; }
+
+/* D-pad indicator hint */
+.tv-dpad-hint {
+  position: absolute;
+  top: 12px; right: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  z-index: 4;
+  opacity: 0.6;
+}
+.dpad-row { display: flex; gap: 2px; justify-content: center; }
+.dpad-btn {
+  width: 18px; height: 18px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 8px;
+  color: rgba(255,255,255,0.6);
+}
+.dpad-btn.active { background: rgba(124,77,255,0.5); color: #fff; }
+
+/* ─── Channel logo colors ─────────────────────────────────────────────────── */
+.logo-cnn    { background: rgba(204,0,0,0.2);   color: #ef5350; }
+.logo-bbc    { background: rgba(30,70,180,0.2);  color: #64b5f6; }
+.logo-espn   { background: rgba(200,30,30,0.2);  color: #ef9a9a; }
+.logo-sky    { background: rgba(0,100,200,0.2);  color: #90caf9; }
+.logo-fox    { background: rgba(220,130,0,0.2);  color: #ffcc80; }
+.logo-nat    { background: rgba(200,150,0,0.2);  color: #ffe082; }
+.logo-disc   { background: rgba(0,160,130,0.2);  color: #80cbc4; }
+.logo-dazn   { background: rgba(0,180,80,0.2);   color: #a5d6a7; }
+
+/* ─── Animations ─────────────────────────────────────────────────────────── */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.mockup-grid { animation: fadeUp 0.6s ease both; }
+.mockup-grid:nth-child(2) { animation-delay: 0.1s; }
+.mockup-grid:nth-child(4) { animation-delay: 0.2s; }
+.mockup-grid:nth-child(6) { animation-delay: 0.3s; }
+.mockup-grid:nth-child(8) { animation-delay: 0.4s; }
+
+@keyframes tvGlow {
+  0%, 100% { box-shadow: 0 0 0 2px var(--app-purple), 0 0 12px rgba(124,77,255,0.4); }
+  50%       { box-shadow: 0 0 0 2px var(--app-purple), 0 0 24px rgba(124,77,255,0.7); }
+}
+.tv-ch-item.focused { animation: tvGlow 2s ease-in-out infinite; }
+
+/* Legend */
+.legend {
+  padding: 40px 60px 0;
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+  margin-bottom: 40px;
+}
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-family: 'DM Mono', monospace;
+  color: var(--muted);
+}
+.legend-color {
+  width: 10px; height: 10px;
+  border-radius: 3px;
+}
+
+@media (max-width: 1100px) {
+  .mockup-grid.two-col { grid-template-columns: 1fr; }
+  .mockup-grid.three-col-tv { grid-template-columns: 1fr; }
+  .page-header { padding: 40px 24px; }
+  .mockup-grid { padding: 0 24px; }
+  .section-label { padding: 0 24px; }
+  .legend { padding: 24px 24px 0; }
+}
+</style>
+</head>
+<body>
+
+<!-- ─── PAGE HEADER ─────────────────────────────────────────────────────── -->
+<header class="page-header">
+  <svg class="fractal-icon" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <polygon points="24,2 44,13 44,35 24,46 4,35 4,13" fill="rgba(124,77,255,0.2)" stroke="#7c4dff" stroke-width="1.5"/>
+    <polygon points="24,10 36,17 36,31 24,38 12,31 12,17" fill="rgba(124,77,255,0.15)" stroke="#b388ff" stroke-width="1"/>
+    <polygon points="24,18 30,21 30,27 24,30 18,27 18,21" fill="#7c4dff"/>
+  </svg>
+  <h1 class="page-title">Fractals<br>Platform Mockups</h1>
+  <p class="page-subtitle">// v0.20.0 &nbsp;·&nbsp; 6 target platforms &nbsp;·&nbsp; Angular 21 + Electron + Capacitor</p>
+  <div class="platform-pills">
+    <span class="pill">Web PWA</span>
+    <span class="pill">macOS</span>
+    <span class="pill">Windows</span>
+    <span class="pill">Android</span>
+    <span class="pill">iOS / iPadOS</span>
+    <span class="pill">Tizen TV</span>
+  </div>
+</header>
+
+<div class="legend">
+  <div class="legend-item"><div class="legend-color" style="background:#7c4dff"></div> Active / selected state</div>
+  <div class="legend-item"><div class="legend-color" style="background:#64b5f6"></div> M3U playlist</div>
+  <div class="legend-item"><div class="legend-color" style="background:#ffab40"></div> Xtream Codes portal</div>
+  <div class="legend-item"><div class="legend-color" style="background:#81c784"></div> Stalker portal</div>
+  <div class="legend-item"><div class="legend-color" style="background:rgba(124,77,255,0.5); outline: 2px solid #7c4dff; outline-offset:1px;"></div> TV D-pad focus</div>
+</div>
+
+<!-- ─── ROW 1: WEB PWA + macOS ──────────────────────────────────────────── -->
+<div class="section-label"><span>Desktop — Web & macOS</span></div>
+<div class="mockup-grid two-col mockup-spacer">
+
+  <!-- 1. WEB PWA -->
+  <div>
+    <div class="browser-chrome">
+      <!-- Browser chrome -->
+      <div class="browser-titlebar">
+        <div class="browser-dots">
+          <div class="browser-dot red"></div>
+          <div class="browser-dot yellow"></div>
+          <div class="browser-dot green"></div>
+        </div>
+        <div class="browser-tabs">
+          <div class="browser-tab">
+            <div class="browser-tab-icon"></div>
+            Fractals
+          </div>
+        </div>
+        <div class="browser-urlbar">
+          <span class="url-lock">🔒</span>
+          <span>fractals.tv</span>
+        </div>
+        <div class="app-icon-btn" style="margin-left:auto">⋯</div>
+      </div>
+      <!-- App content: Home screen -->
+      <div class="browser-content app-bg">
+        <div class="app-header">
+          <div class="app-logo-icon"></div>
+          <div class="app-logo-text">Fractals</div>
+          <div class="app-search" style="margin:0 12px">
+            <span class="icon">🔍</span>
+            <span class="placeholder">Search playlists…</span>
+          </div>
+          <div class="app-icon-btn">＋</div>
+          <div class="app-icon-btn">★</div>
+          <div class="app-icon-btn">🔍</div>
+          <div class="app-icon-btn">⚙</div>
+        </div>
+        <div class="playlist-grid">
+          <div class="playlist-card active">
+            <div class="pc-icon m3u">📺</div>
+            <div class="pc-name">Sports HD</div>
+            <div class="pc-meta">3,241 ch · 2h ago</div>
+            <span class="pc-badge m3u">M3U</span>
+          </div>
+          <div class="playlist-card">
+            <div class="pc-icon xtream">🎬</div>
+            <div class="pc-name">Movies Pack</div>
+            <div class="pc-meta">8,504 items · 1d ago</div>
+            <span class="pc-badge xtream">Xtream</span>
+          </div>
+          <div class="playlist-card">
+            <div class="pc-icon m3u">📡</div>
+            <div class="pc-name">News International</div>
+            <div class="pc-meta">412 ch · 6h ago</div>
+            <span class="pc-badge m3u">M3U</span>
+          </div>
+          <div class="playlist-card">
+            <div class="pc-icon stalker">🌐</div>
+            <div class="pc-name">Premium Portal</div>
+            <div class="pc-meta">12,800 items · 3d ago</div>
+            <span class="pc-badge stalker">Stalker</span>
+          </div>
+          <div class="playlist-card">
+            <div class="pc-icon xtream">🎭</div>
+            <div class="pc-name">Series &amp; VOD</div>
+            <div class="pc-meta">22,100 items · 5h ago</div>
+            <span class="pc-badge xtream">Xtream</span>
+          </div>
+          <div class="playlist-card">
+            <div class="pc-icon m3u">🎵</div>
+            <div class="pc-name">Music Radio</div>
+            <div class="pc-meta">620 ch · 12h ago</div>
+            <span class="pc-badge m3u">M3U</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="platform-chip"><div class="dot"></div>Web PWA · Chrome / Safari / Firefox · 1440×900</div>
+  </div>
+
+  <!-- 2. macOS ELECTRON -->
+  <div>
+    <div class="electron-window">
+      <div class="macos-titlebar">
+        <div class="macos-dots">
+          <div class="browser-dot red"></div>
+          <div class="browser-dot yellow"></div>
+          <div class="browser-dot green"></div>
+        </div>
+        <div class="macos-title">Fractals</div>
+      </div>
+      <div class="electron-content app-bg">
+        <div class="vp-layout">
+          <!-- Left sidebar -->
+          <div class="vp-sidebar">
+            <div class="vp-sidebar-tabs">
+              <div class="vp-tab active">Channels</div>
+              <div class="vp-tab">Groups</div>
+              <div class="vp-tab">Favorites</div>
+            </div>
+            <div class="app-search" style="margin:8px;height:28px">
+              <span class="icon" style="font-size:11px">🔍</span>
+              <span class="placeholder" style="font-size:10px">Search channels…</span>
+            </div>
+            <div class="ch-list">
+              <div class="ch-item active">
+                <div class="ch-logo logo-cnn">CNN</div>
+                <div class="ch-info">
+                  <div class="ch-name">CNN HD</div>
+                  <div class="ch-epg">Breaking News Live</div>
+                  <div class="ch-progress"><div class="ch-progress-fill" style="width:62%"></div></div>
+                </div>
+              </div>
+              <div class="ch-item">
+                <div class="ch-logo logo-bbc">BBC</div>
+                <div class="ch-info">
+                  <div class="ch-name">BBC World News</div>
+                  <div class="ch-epg">World Business Report</div>
+                  <div class="ch-progress"><div class="ch-progress-fill" style="width:28%"></div></div>
+                </div>
+              </div>
+              <div class="ch-item">
+                <div class="ch-logo logo-espn">ESPN</div>
+                <div class="ch-info">
+                  <div class="ch-name">ESPN HD</div>
+                  <div class="ch-epg">SportsCenter</div>
+                  <div class="ch-progress"><div class="ch-progress-fill" style="width:81%"></div></div>
+                </div>
+              </div>
+              <div class="ch-item">
+                <div class="ch-logo logo-sky">SKY</div>
+                <div class="ch-info">
+                  <div class="ch-name">Sky Sports Main</div>
+                  <div class="ch-epg">Premier League Live</div>
+                  <div class="ch-progress"><div class="ch-progress-fill" style="width:45%"></div></div>
+                </div>
+              </div>
+              <div class="ch-item">
+                <div class="ch-logo logo-fox">FOX</div>
+                <div class="ch-info">
+                  <div class="ch-name">FOX News HD</div>
+                  <div class="ch-epg">Fox &amp; Friends</div>
+                  <div class="ch-progress"><div class="ch-progress-fill" style="width:15%"></div></div>
+                </div>
+              </div>
+              <div class="ch-item">
+                <div class="ch-logo logo-nat">NAT</div>
+                <div class="ch-info">
+                  <div class="ch-name">Nat Geo Wild</div>
+                  <div class="ch-epg">Planet Earth III</div>
+                  <div class="ch-progress"><div class="ch-progress-fill" style="width:57%"></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <!-- Video player -->
+          <div class="vp-main">
+            <div class="vp-toolbar">
+              <div class="app-icon-btn">☰</div>
+              <div class="vp-toolbar" style="flex:1;height:auto;background:transparent;border:none;padding:0">
+                <span class="vp-toolbar ch-active-name" style="font-size:11px">CNN HD</span>
+              </div>
+              <div class="app-icon-btn">ℹ</div>
+              <div class="app-icon-btn">⋮</div>
+              <div class="app-icon-btn">⚙</div>
+            </div>
+            <div class="vp-video">
+              <div class="vp-video-bg"></div>
+              <div class="vp-video-content">
+                <div class="vp-channel-logo-large logo-cnn">CNN</div>
+                <div class="vp-channel-name-large">Breaking News Live</div>
+              </div>
+              <div class="vp-controls">
+                <div class="vp-progress"><div class="vp-progress-fill"></div></div>
+                <div class="vp-ctrl-row">
+                  <span class="vp-ctrl-btn">⏮</span>
+                  <span class="vp-ctrl-btn">▶</span>
+                  <span class="vp-ctrl-btn">⏭</span>
+                  <span class="vp-ctrl-btn" style="margin-left:8px">🔊</span>
+                  <span class="vp-time">LIVE · 14:32:08</span>
+                  <span class="vp-ctrl-btn">⛶</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <!-- EPG drawer -->
+          <div class="vp-epg">
+            <div class="vp-epg-header">EPG — CNN HD</div>
+            <div class="epg-item now">
+              <div class="epg-time">▶ 14:00 – 15:00</div>
+              <div class="epg-title">Breaking News Live</div>
+              <div class="epg-bar"><div class="epg-bar-fill" style="width:62%"></div></div>
+            </div>
+            <div class="epg-item">
+              <div class="epg-time">15:00 – 16:00</div>
+              <div class="epg-title">CNN Newsroom</div>
+            </div>
+            <div class="epg-item">
+              <div class="epg-time">16:00 – 17:00</div>
+              <div class="epg-title">The Lead with Jake Tapper</div>
+            </div>
+            <div class="epg-item">
+              <div class="epg-time">17:00 – 18:00</div>
+              <div class="epg-title">The Situation Room</div>
+            </div>
+            <div class="epg-item">
+              <div class="epg-time">18:00 – 19:00</div>
+              <div class="epg-title">Erin Burnett OutFront</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="platform-chip"><div class="dot"></div>macOS · Electron 39 · 1280×800 · Apple Silicon</div>
+  </div>
+
+</div><!-- end row 1 -->
+
+<!-- ─── ROW 2: WINDOWS + ANDROID ──────────────────────────────────────── -->
+<div class="section-label"><span>Windows & Android Phone</span></div>
+<div class="mockup-grid two-col mockup-spacer">
+
+  <!-- 3. WINDOWS ELECTRON -->
+  <div>
+    <div class="electron-window">
+      <div class="win-titlebar">
+        <div class="win-title-text">
+          <div style="width:12px;height:12px;background:var(--app-purple);clip-path:polygon(50% 0%, 85% 20%, 100% 55%, 85% 90%, 50% 100%, 15% 90%, 0% 55%, 15% 20%);flex-shrink:0"></div>
+          Fractals
+        </div>
+        <div class="win-controls">
+          <div class="win-ctrl">─</div>
+          <div class="win-ctrl">□</div>
+          <div class="win-ctrl">✕</div>
+        </div>
+      </div>
+      <div class="electron-content app-bg">
+        <div class="vp-layout">
+          <div class="vp-sidebar">
+            <div class="vp-sidebar-tabs">
+              <div class="vp-tab">Channels</div>
+              <div class="vp-tab active">Groups</div>
+              <div class="vp-tab">Favorites</div>
+            </div>
+            <div class="app-search" style="margin:8px;height:28px">
+              <span class="icon" style="font-size:11px">🔍</span>
+              <span class="placeholder" style="font-size:10px">Search…</span>
+            </div>
+            <div class="ch-list">
+              <!-- Group header -->
+              <div style="padding:6px 10px 4px;font-size:9px;color:var(--app-muted);text-transform:uppercase;letter-spacing:0.08em;font-family:'DM Mono',monospace">▾ Sports (48)</div>
+              <div class="ch-item focused">
+                <div class="ch-logo logo-sky">SKY</div>
+                <div class="ch-info">
+                  <div class="ch-name">Sky Sports Main</div>
+                  <div class="ch-epg">Premier League</div>
+                  <div class="ch-progress"><div class="ch-progress-fill" style="width:45%"></div></div>
+                </div>
+              </div>
+              <div class="ch-item">
+                <div class="ch-logo logo-espn">ESPN</div>
+                <div class="ch-info">
+                  <div class="ch-name">ESPN HD</div>
+                  <div class="ch-epg">SportsCenter</div>
+                  <div class="ch-progress"><div class="ch-progress-fill" style="width:81%"></div></div>
+                </div>
+              </div>
+              <div class="ch-item">
+                <div class="ch-logo logo-dazn">DZ</div>
+                <div class="ch-info">
+                  <div class="ch-name">DAZN 1 HD</div>
+                  <div class="ch-epg">Boxing: Fury vs Wilder</div>
+                  <div class="ch-progress"><div class="ch-progress-fill" style="width:33%"></div></div>
+                </div>
+              </div>
+              <div style="padding:6px 10px 4px;font-size:9px;color:var(--app-muted);text-transform:uppercase;letter-spacing:0.08em;font-family:'DM Mono',monospace;margin-top:4px">▸ News (12)</div>
+              <div style="padding:6px 10px 4px;font-size:9px;color:var(--app-muted);text-transform:uppercase;letter-spacing:0.08em;font-family:'DM Mono',monospace">▸ Movies (34)</div>
+              <div style="padding:6px 10px 4px;font-size:9px;color:var(--app-muted);text-transform:uppercase;letter-spacing:0.08em;font-family:'DM Mono',monospace">▸ Entertainment (71)</div>
+            </div>
+          </div>
+          <div class="vp-main">
+            <div class="vp-toolbar">
+              <div class="app-icon-btn">☰</div>
+              <span style="font-size:11px;font-weight:500;color:var(--app-text);flex:1">Sky Sports Main Event HD</span>
+              <div class="app-icon-btn">ℹ</div>
+              <div class="app-icon-btn">⚙</div>
+            </div>
+            <div class="vp-video">
+              <div class="vp-video-bg" style="background:linear-gradient(135deg,#040e1a 0%,#060816 100%)"></div>
+              <div class="vp-video-content">
+                <div class="vp-channel-logo-large logo-sky">SKY</div>
+                <div class="vp-channel-name-large">Premier League Live</div>
+              </div>
+              <div class="vp-controls">
+                <div class="vp-progress"><div class="vp-progress-fill" style="width:45%"></div></div>
+                <div class="vp-ctrl-row">
+                  <span class="vp-ctrl-btn">⏮</span>
+                  <span class="vp-ctrl-btn">▶</span>
+                  <span class="vp-ctrl-btn">⏭</span>
+                  <span class="vp-ctrl-btn" style="margin-left:8px">🔊</span>
+                  <span class="vp-time">LIVE · 14:32:08</span>
+                  <span class="vp-ctrl-btn">⛶</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="platform-chip"><div class="dot"></div>Windows · Electron 39 · 1280×800 · x64</div>
+  </div>
+
+  <!-- 4. ANDROID PHONE -->
+  <div style="display:flex;flex-direction:column;align-items:center">
+    <div class="phone-frame">
+      <div class="phone-notch">
+        <div class="phone-camera"></div>
+      </div>
+      <div class="phone-screen">
+        <div class="phone-statusbar">
+          <span class="phone-time">14:32</span>
+          <span class="phone-icons">📶 🔋</span>
+        </div>
+        <!-- Video player top half -->
+        <div class="phone-video">
+          <div class="phone-video-bg"></div>
+          <div class="phone-video-logo">
+            <div class="ch-big" style="color:#ef5350">ESPN</div>
+            <div style="font-size:9px;color:rgba(255,255,255,0.45);margin-top:4px">SportsCenter</div>
+          </div>
+          <div class="phone-video-controls">
+            <div class="vp-progress" style="margin-bottom:5px"><div class="vp-progress-fill" style="width:81%"></div></div>
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="font-size:16px;color:rgba(255,255,255,0.8)">▶</span>
+              <span style="font-size:16px;color:rgba(255,255,255,0.7)">🔊</span>
+              <span style="font-size:9px;color:rgba(255,255,255,0.4);font-family:'DM Mono',monospace;margin-left:auto">LIVE</span>
+              <span style="font-size:14px;color:rgba(255,255,255,0.7)">⛶</span>
+            </div>
+          </div>
+        </div>
+        <!-- Channel list bottom half -->
+        <div class="phone-channel-list">
+          <div class="phone-ch-header">
+            <span>Channels</span>
+            <span style="font-size:9px;color:var(--app-muted)">Sports HD · 3,241</span>
+          </div>
+          <div class="phone-ch-item active">
+            <div class="phone-ch-logo logo-espn">ESPN</div>
+            <div class="phone-ch-info">
+              <div class="ch-name">ESPN HD</div>
+              <div class="ch-epg">SportsCenter · 14:00–15:00</div>
+            </div>
+            <span style="font-size:9px;color:var(--app-purple-light);font-family:'DM Mono',monospace">LIVE</span>
+          </div>
+          <div class="phone-ch-item">
+            <div class="phone-ch-logo logo-sky">SKY</div>
+            <div class="phone-ch-info">
+              <div class="ch-name">Sky Sports Main</div>
+              <div class="ch-epg">Premier League · 14:00–16:00</div>
+            </div>
+          </div>
+          <div class="phone-ch-item">
+            <div class="phone-ch-logo logo-dazn">DZ</div>
+            <div class="phone-ch-info">
+              <div class="ch-name">DAZN 1 HD</div>
+              <div class="ch-epg">Boxing: Fury vs Wilder</div>
+            </div>
+          </div>
+          <div class="phone-ch-item">
+            <div class="phone-ch-logo logo-fox">FOX</div>
+            <div class="phone-ch-info">
+              <div class="ch-name">FOX Sports 1</div>
+              <div class="ch-epg">College Football</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="platform-chip" style="justify-content:center"><div class="dot"></div>Android (Capacitor) · Pixel 9 · 393×852</div>
+  </div>
+
+</div><!-- end row 2 -->
+
+<!-- ─── ROW 3: IPAD ─────────────────────────────────────────────────────── -->
+<div class="section-label"><span>iPadOS — Landscape Split View</span></div>
+<div class="mockup-grid mockup-spacer" style="grid-template-columns:1fr">
+
+  <div>
+    <div class="ipad-frame">
+      <div class="ipad-camera-bar">
+        <div class="ipad-camera"></div>
+      </div>
+      <div class="ipad-screen">
+        <!-- Toolbar -->
+        <div class="ipad-toolbar">
+          <div class="app-logo-icon" style="width:20px;height:20px"></div>
+          <div class="app-logo-text" style="font-size:13px">Fractals</div>
+          <div style="flex:1"></div>
+          <div class="app-icon-btn">ℹ</div>
+          <div class="app-icon-btn">⋮</div>
+          <div class="app-icon-btn">⚙</div>
+        </div>
+        <div class="ipad-content">
+          <!-- Sidebar -->
+          <div class="ipad-sidebar">
+            <div class="ipad-sidebar-search">
+              <span style="font-size:11px">🔍</span>
+              <span>Search channels…</span>
+            </div>
+            <div class="vp-sidebar-tabs" style="height:32px;border-bottom:1px solid var(--app-border)">
+              <div class="vp-tab active" style="font-size:11px">Channels</div>
+              <div class="vp-tab" style="font-size:11px">Groups</div>
+              <div class="vp-tab" style="font-size:11px">★</div>
+            </div>
+            <div class="ch-list">
+              <div class="ch-item">
+                <div class="ch-logo logo-cnn" style="width:32px;height:32px">CNN</div>
+                <div class="ch-info">
+                  <div class="ch-name" style="font-size:12px">CNN HD</div>
+                  <div class="ch-epg" style="font-size:10px">Breaking News</div>
+                  <div class="ch-progress"><div class="ch-progress-fill" style="width:62%"></div></div>
+                </div>
+              </div>
+              <div class="ch-item active">
+                <div class="ch-logo logo-bbc" style="width:32px;height:32px">BBC</div>
+                <div class="ch-info">
+                  <div class="ch-name" style="font-size:12px">BBC World News</div>
+                  <div class="ch-epg" style="font-size:10px">World Business Report</div>
+                  <div class="ch-progress"><div class="ch-progress-fill" style="width:28%"></div></div>
+                </div>
+              </div>
+              <div class="ch-item">
+                <div class="ch-logo logo-espn" style="width:32px;height:32px">ESPN</div>
+                <div class="ch-info">
+                  <div class="ch-name" style="font-size:12px">ESPN HD</div>
+                  <div class="ch-epg" style="font-size:10px">SportsCenter</div>
+                  <div class="ch-progress"><div class="ch-progress-fill" style="width:81%"></div></div>
+                </div>
+              </div>
+              <div class="ch-item">
+                <div class="ch-logo logo-disc" style="width:32px;height:32px">DIS</div>
+                <div class="ch-info">
+                  <div class="ch-name" style="font-size:12px">Discovery Channel</div>
+                  <div class="ch-epg" style="font-size:10px">How It's Made</div>
+                  <div class="ch-progress"><div class="ch-progress-fill" style="width:50%"></div></div>
+                </div>
+              </div>
+              <div class="ch-item">
+                <div class="ch-logo logo-nat" style="width:32px;height:32px">NAT</div>
+                <div class="ch-info">
+                  <div class="ch-name" style="font-size:12px">Nat Geo Wild</div>
+                  <div class="ch-epg" style="font-size:10px">Planet Earth III</div>
+                  <div class="ch-progress"><div class="ch-progress-fill" style="width:57%"></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <!-- Main video area -->
+          <div class="ipad-main">
+            <div class="vp-video" style="height:100%">
+              <div class="vp-video-bg" style="background:linear-gradient(135deg,#040a18 0%,#05080f 100%)"></div>
+              <div class="vp-video-content">
+                <div class="vp-channel-logo-large logo-bbc" style="width:64px;height:64px;font-size:20px">BBC</div>
+                <div class="vp-channel-name-large" style="font-size:14px;margin-top:6px">BBC World News</div>
+                <div style="font-size:11px;color:rgba(255,255,255,0.3);margin-top:4px">World Business Report</div>
+              </div>
+              <div class="vp-controls">
+                <div class="vp-progress" style="margin-bottom:8px"><div class="vp-progress-fill" style="width:28%"></div></div>
+                <div class="vp-ctrl-row" style="gap:14px">
+                  <span class="vp-ctrl-btn" style="font-size:20px">⏮</span>
+                  <span class="vp-ctrl-btn" style="font-size:22px">▶</span>
+                  <span class="vp-ctrl-btn" style="font-size:20px">⏭</span>
+                  <span class="vp-ctrl-btn" style="font-size:18px;margin-left:12px">🔊</span>
+                  <span class="vp-time" style="font-size:11px">LIVE · 14:32:08</span>
+                  <span class="vp-ctrl-btn" style="font-size:20px">⛶</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="platform-chip" style="justify-content:center;margin-top:14px"><div class="dot"></div>iPadOS (Capacitor) · iPad Air · 820×1180 · Landscape</div>
+  </div>
+
+</div><!-- end row 3 -->
+
+<!-- ─── ROW 4: SAMSUNG TV / TIZEN ────────────────────────────────────────── -->
+<div class="section-label"><span>Samsung TV — Tizen · 10-foot UI · D-pad Navigation</span></div>
+<div class="mockup-grid mockup-spacer" style="grid-template-columns:1fr">
+
+  <div>
+    <div class="tv-wrapper">
+      <div class="tv-frame">
+        <div class="tv-bezel-top">
+          <div class="tv-camera-dot"></div>
+          <div class="tv-brand">SAMSUNG</div>
+          <div class="tv-camera-dot"></div>
+        </div>
+        <div class="tv-screen">
+          <!-- Blurred video background -->
+          <div class="tv-screen-bg"></div>
+          <div class="tv-video-program">▶ &nbsp; Sky Sports Main Event HD &nbsp; · &nbsp; Premier League Live</div>
+
+          <!-- Channel list overlay (left) -->
+          <div class="tv-overlay">
+            <div class="tv-overlay-header">
+              <div class="tv-overlay-title">Channels</div>
+              <div class="tv-overlay-subtitle">Sports HD · 3,241 channels</div>
+            </div>
+            <div class="tv-ch-item">
+              <div class="tv-ch-logo logo-cnn">CNN</div>
+              <div class="tv-ch-info">
+                <div class="ch-name">CNN HD</div>
+                <div class="ch-epg">Breaking News Live</div>
+              </div>
+            </div>
+            <div class="tv-ch-item focused">
+              <div class="tv-ch-logo logo-sky">SKY</div>
+              <div class="tv-ch-info">
+                <div class="ch-name">Sky Sports Main</div>
+                <div class="ch-epg">Premier League Live</div>
+              </div>
+              <div class="tv-focused-badge">▶</div>
+            </div>
+            <div class="tv-ch-item">
+              <div class="tv-ch-logo logo-espn">ESPN</div>
+              <div class="tv-ch-info">
+                <div class="ch-name">ESPN HD</div>
+                <div class="ch-epg">SportsCenter</div>
+              </div>
+            </div>
+            <div class="tv-ch-item">
+              <div class="tv-ch-logo logo-bbc">BBC</div>
+              <div class="tv-ch-info">
+                <div class="ch-name">BBC World News</div>
+                <div class="ch-epg">World Business Report</div>
+              </div>
+            </div>
+            <div class="tv-ch-item">
+              <div class="tv-ch-logo logo-fox">FOX</div>
+              <div class="tv-ch-info">
+                <div class="ch-name">FOX News HD</div>
+                <div class="ch-epg">Fox &amp; Friends</div>
+              </div>
+            </div>
+            <div class="tv-ch-item">
+              <div class="tv-ch-logo logo-dazn">DZ</div>
+              <div class="tv-ch-info">
+                <div class="ch-name">DAZN 1 HD</div>
+                <div class="ch-epg">Boxing: Fury vs Wilder</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- D-pad hint -->
+          <div class="tv-dpad-hint">
+            <div class="dpad-row"><div class="dpad-btn active">▲</div></div>
+            <div class="dpad-row">
+              <div class="dpad-btn">◀</div>
+              <div class="dpad-btn">OK</div>
+              <div class="dpad-btn">▶</div>
+            </div>
+            <div class="dpad-row"><div class="dpad-btn active">▼</div></div>
+          </div>
+
+          <!-- Status bar -->
+          <div class="tv-status">
+            <div class="tv-status-channel">
+              <div class="tv-ch-logo-sm logo-sky">S</div>
+              <div class="name">Sky Sports Main Event</div>
+            </div>
+            <div class="tv-status-program">Premier League Live · Arsenal vs. Manchester City · 62'</div>
+            <div class="tv-status-time">14:32</div>
+          </div>
+        </div>
+      </div>
+      <div class="tv-stand-neck"></div>
+      <div class="tv-stand-base"></div>
+    </div>
+    <div class="platform-chip" style="justify-content:center;margin-top:20px"><div class="dot"></div>Tizen (Samsung Smart TV) · 1920×1080 · D-pad Remote · No mouse cursor</div>
+  </div>
+
+</div><!-- end row 4 -->
+
+<script>
+// Animate TV focus indicator pulsing between items
+const tvItems = document.querySelectorAll('.tv-ch-item');
+let currentFocused = 1; // starts on Sky Sports
+setInterval(() => {
+  tvItems.forEach((el, i) => el.classList.toggle('focused', i === currentFocused));
+}, 3000);
+</script>
+</body>
+</html>

@@ -5,8 +5,6 @@ import { map, startWith } from 'rxjs/operators';
 
 /** Breakpoints (px) for form factor detection */
 const TABLET_MIN = 600;
-const TV_MIN_WIDTH = 960;
-const TV_MIN_HEIGHT = 540;
 
 const TV_UA_REGEX =
     /Android TV|AFT|TV\)|GoogleTV|HbbTV|NetCast|Viera|TV Safari|Tizen/i;
@@ -34,14 +32,10 @@ export class FormFactorService {
         { initialValue: window.innerHeight }
     );
 
-    /** True when running on a TV-sized or TV-identified device (e.g. Android TV, Tizen). */
+    /** True when running on a TV-identified device (e.g. Android TV, Tizen). UA-string only — size alone does not qualify as TV. */
     readonly isTV = computed(() => {
-        const w = this.width();
-        const h = this.height();
         const ua = window.navigator?.userAgent ?? '';
-        const isTvUa = TV_UA_REGEX.test(ua);
-        const isTvSize = w >= TV_MIN_WIDTH && h >= TV_MIN_HEIGHT && w >= h;
-        return isTvUa || isTvSize;
+        return TV_UA_REGEX.test(ua);
     });
 
     /** True when running on a Samsung Tizen TV. */

@@ -1,4 +1,15 @@
-# Fractals - IPTV Player Application
+# Fractals
+
+This repository contains two independent workspaces:
+
+| Folder | Description |
+|---|---|
+| `legacy/` | Original Angular + Electron + Capacitor implementation (IPTVNator-based). Frozen reference — fully working. |
+| `fractals/` | New app — stack and architecture TBD. Clean workspace for the rewrite. |
+
+---
+
+# Legacy App — IPTV Player Application
 
 <p align="center">
   <img src="apps/web/src/assets/icons/icon-tv-256.png" alt="Fractals icon" title="Free IPTV player application" width="128" />
