@@ -16,11 +16,15 @@
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.2.2",
+    "@tanstack/react-query": "^5.96.2",
     "better-sqlite3": "^12.8.0",
+    "cmdk": "^1.1.1",
     "drizzle-orm": "^0.45.2",
+    "framer-motion": "^12.38.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "tailwindcss": "^4.2.2"
+    "tailwindcss": "^4.2.2",
+    "zustand": "^5.0.12"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.0.3",
