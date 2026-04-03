@@ -8,7 +8,7 @@ const blog = defineCollection({
     description: z.string(),
     pubDate: z.coerce.date(),
     updatedDate: z.coerce.date().optional(),
-    author: z.string().default('4gray'),
+    author: z.string().default('FractalTV'),
     featured: z.boolean().default(false),
     heroImage: z.string().optional(),
     tags: z.array(z.string()).default([]),

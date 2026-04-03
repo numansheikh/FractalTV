@@ -15,7 +15,7 @@ const canonicalURL = new URL(Astro.url.pathname, Astro.site);
 const {
   title,
   description,
-  image = '/iptvnator/og-image.png',
+  image = '/fractals/og-image.png',
   type = 'website',
   noindex = false,
   keywords = [],
@@ -35,11 +35,11 @@ const schemaPayload = jsonLd
 
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<link rel="icon" type="image/x-icon" href="/iptvnator/favicon.ico" />
+<link rel="icon" type="image/x-icon" href="/fractals/favicon.ico" />
 <meta name="generator" content={Astro.generator} />
 <meta name="robots" content={robotsContent} />
 <meta name="referrer" content="strict-origin-when-cross-origin" />
-<meta name="author" content="4gray" />
+<meta name="author" content="FractalTV" />
 <meta name="theme-color" content="#0a0a08" />
 <meta name="format-detection" content="telephone=no" />
 {keywords.length > 0 && <meta name="keywords" content={keywords.join(', ')} />}
@@ -62,7 +62,7 @@ const schemaPayload = jsonLd
 
 <!-- Open Graph / Facebook -->
 <meta property="og:type" content={type} />
-<meta property="og:site_name" content="IPTVnator" />
+<meta property="og:site_name" content="Fractals" />
 <meta property="og:locale" content="en_US" />
 <meta property="og:url" content={canonicalURL.toString()} />
 <meta property="og:title" content={title} />

@@ -1,8 +1,8 @@
 ---
 title: Blog Components Demo (MDX)
-description: Reusable MDX components for IPTVnator blog posts including alerts, CTA buttons, and terminal command blocks.
+description: Reusable MDX components for Fractals blog posts including alerts, CTA buttons, and terminal command blocks.
 pubDate: 2026-02-15
-author: 4gray
+author: FractalTV
 tags:
 - blog
 - mdx
@@ -54,22 +54,22 @@ This post demonstrates reusable UI components you can use in `.mdx` blog posts.
 ## Terminal code block
 
 <TerminalBlock title="Terminal">
-$ xattr -c /Applications/IPTVnator.app
+$ xattr -c /Applications/Fractals.app
 </TerminalBlock>
 
 ## Copy command
 
-<CopyCommand title="One-line fix" command="xattr -c /Applications/IPTVnator.app" />
+<CopyCommand title="One-line fix" command="xattr -c /Applications/Fractals.app" />
 
 ## Button / CTA
 
 <PostButton
-  href="https://github.com/4gray/iptvnator/releases/latest"
+  href="https://github.com/FractalTV/fractals/releases/latest"
   label="Download latest release"
 />
 
 <PostButton
-  href="/iptvnator/blog/v0-18-release-notes/"
+  href="/fractals/blog/v0-18-release-notes/"
   label="Read v0.18 release notes"
   external={false}
 />
@@ -91,19 +91,19 @@ $ xattr -c /Applications/IPTVnator.app
   links={[
     {
       label: 'GitHub',
-      href: 'https://github.com/4gray/iptvnator',
+      href: 'https://github.com/FractalTV/fractals',
       hint: 'Source code, issues, and releases.',
       icon: 'github',
     },
     {
       label: 'Telegram',
-      href: 'https://t.me/iptvnator',
+      href: 'https://github.com/FractalTV/fractals',
       hint: 'Announcements and community updates.',
       icon: 'telegram',
     },
     {
       label: 'GitHub Sponsors',
-      href: 'https://github.com/sponsors/4gray',
+      href: 'https://github.com/sponsors/FractalTV',
       hint: 'Support long-term development.',
       icon: 'sponsor',
     },
@@ -165,12 +165,12 @@ $ xattr -c /Applications/IPTVnator.app
   columns={2}
   images={[
     {
-      src: '/iptvnator/blog/iptvnator-v18.jpeg',
-      alt: 'IPTVnator v0.18 UI screenshot',
+      src: '/fractals/blog/fractals-v18.jpeg',
+      alt: 'Fractals v0.18 UI screenshot',
       caption: 'v0.18 interface update',
     },
     {
-      src: '/iptvnator/blog/macos-app-damaged.jpg',
+      src: '/fractals/blog/macos-app-damaged.jpg',
       alt: 'macOS app damaged warning dialog',
       caption: 'macOS Gatekeeper warning example',
     },
@@ -182,19 +182,19 @@ $ xattr -c /Applications/IPTVnator.app
 <BlogImageSlider
   images={[
     {
-      src: '/iptvnator/blog/iptvnator-v18.jpeg',
-      alt: 'IPTVnator v0.18 UI screenshot',
+      src: '/fractals/blog/fractals-v18.jpeg',
+      alt: 'Fractals v0.18 UI screenshot',
       caption: 'Main app interface in v0.18.',
     },
     {
-      src: '/iptvnator/blog/macos-app-damaged.jpg',
+      src: '/fractals/blog/macos-app-damaged.jpg',
       alt: 'macOS app damaged warning dialog',
       caption: 'Gatekeeper warning on unsigned app launch.',
     },
     {
-      src: '/iptvnator/blog/epg.png',
+      src: '/fractals/blog/epg.png',
       alt: 'EPG guide screenshot',
-      caption: 'Electronic Program Guide screen in IPTVnator.',
+      caption: 'Electronic Program Guide screen in Fractals.',
     },
   ]}
 />
