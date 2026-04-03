@@ -54,7 +54,7 @@ Any other credential pair is auto-generated using a hash of `username:password` 
 
 ### PWA CORS Proxy Endpoint
 
-IPTVnator's PWA routes Xtream calls through a backend proxy:
+Fractals' PWA routes Xtream calls through a backend proxy:
 ```
 GET /xtream?url=<serverUrl>&action=<action>&username=<u>&password=<p>
 ```
