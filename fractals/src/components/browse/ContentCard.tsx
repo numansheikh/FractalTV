@@ -1,4 +1,5 @@
 import { motion } from 'framer-motion'
+import { useSourcesStore } from '@/stores/sources.store'
 
 export interface ContentItem {
   id: string
@@ -11,6 +12,7 @@ export interface ContentItem {
   ratingImdb?: number
   genres?: string
   sourceIds?: string
+  primarySourceId?: string
 }
 
 interface Props {
@@ -25,10 +27,16 @@ const TYPE_META: Record<string, { label: string; color: string; bg: string }> = 
 }
 
 export function ContentCard({ item, onClick }: Props) {
+  const { sources } = useSourcesStore()
   const genres = item.genres ? tryParseGenres(item.genres).slice(0, 2) : []
   const rating = item.ratingTmdb ?? item.ratingImdb
   const meta = TYPE_META[item.type]
   const sourceCount = item.sourceIds ? item.sourceIds.split(',').length : 1
+
+  // Find primary source name
+  const primarySource = item.primarySourceId
+    ? sources.find((s) => s.id === item.primarySourceId)
+    : undefined
 
   return (
     <motion.div
@@ -99,15 +107,21 @@ export function ContentCard({ item, onClick }: Props) {
         </div>
       </div>
 
-      {/* Source count badge */}
-      {sourceCount > 1 && (
-        <span
-          className="shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-mono"
-          style={{ background: 'var(--color-surface)', color: 'var(--color-text-muted)', border: '1px solid var(--color-border)' }}
-        >
-          ×{sourceCount}
-        </span>
-      )}
+      {/* Source name / count */}
+      <div className="shrink-0 flex flex-col items-end gap-0.5">
+        {primarySource && (
+          <span className="max-w-[64px] truncate rounded px-1.5 py-0.5 text-[9px] font-medium"
+            style={{ background: 'var(--color-surface)', color: 'var(--color-text-muted)', border: '1px solid var(--color-border)' }}
+            title={primarySource.name}>
+            {primarySource.name}
+          </span>
+        )}
+        {sourceCount > 1 && (
+          <span className="text-[9px] font-mono" style={{ color: 'var(--color-text-muted)' }}>
+            +{sourceCount - 1}
+          </span>
+        )}
+      </div>
 
       {/* Play chevron */}
       <div className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100" style={{ color: 'var(--color-text-muted)' }}>

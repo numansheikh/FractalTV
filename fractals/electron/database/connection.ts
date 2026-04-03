@@ -47,6 +47,7 @@ function createTables(db: Database.Database) {
       password TEXT,
       m3u_url TEXT,
       status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'error', 'syncing')),
+      disabled INTEGER NOT NULL DEFAULT 0,
       last_sync INTEGER,
       last_error TEXT,
       item_count INTEGER NOT NULL DEFAULT 0,
@@ -168,6 +169,9 @@ function createTables(db: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_epg_time ON epg(start_time, end_time);
     CREATE INDEX IF NOT EXISTS idx_user_data_profile ON user_data(profile_id);
   `)
+
+  // Migrations — safe to run on existing DBs
+  try { db.exec(`ALTER TABLE sources ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0`) } catch {}
 
   // Insert default profile if not exists
   db.prepare(`

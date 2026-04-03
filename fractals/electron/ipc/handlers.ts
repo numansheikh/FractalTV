@@ -40,9 +40,26 @@ export function registerHandlers() {
   })
 
   ipcMain.handle('sources:remove', async (_event, sourceId: string) => {
-    const db = getDb()
-    await db.delete(sources).where(eq(sources.id, sourceId))
+    const sqlite = getSqlite()
+    // Manually cascade — content table has no ON DELETE CASCADE
+    sqlite.transaction(() => {
+      sqlite.prepare(`DELETE FROM content_fts WHERE content_id IN (SELECT id FROM content WHERE primary_source_id = ?)`).run(sourceId)
+      sqlite.prepare(`DELETE FROM user_data WHERE content_id IN (SELECT id FROM content WHERE primary_source_id = ?)`).run(sourceId)
+      sqlite.prepare(`DELETE FROM embeddings WHERE content_id IN (SELECT id FROM content WHERE primary_source_id = ?)`).run(sourceId)
+      sqlite.prepare(`DELETE FROM content_sources WHERE source_id = ?`).run(sourceId)
+      sqlite.prepare(`DELETE FROM content WHERE primary_source_id = ?`).run(sourceId)
+      sqlite.prepare(`DELETE FROM categories WHERE source_id = ?`).run(sourceId)
+      sqlite.prepare(`DELETE FROM epg WHERE source_id = ?`).run(sourceId)
+      sqlite.prepare(`DELETE FROM sources WHERE id = ?`).run(sourceId)
+    })()
     return { success: true }
+  })
+
+  ipcMain.handle('sources:toggle-disabled', async (_event, sourceId: string) => {
+    const sqlite = getSqlite()
+    sqlite.prepare(`UPDATE sources SET disabled = NOT disabled WHERE id = ?`).run(sourceId)
+    const row = sqlite.prepare(`SELECT disabled FROM sources WHERE id = ?`).get(sourceId) as any
+    return { disabled: !!row?.disabled }
   })
 
   ipcMain.handle('sources:sync', async (event, sourceId: string) => {
@@ -66,11 +83,12 @@ export function registerHandlers() {
   ipcMain.handle('search:query', async (_event, args: {
     query: string
     type?: 'live' | 'movie' | 'series'
+    sourceIds?: string[]
     limit?: number
     offset?: number
   }) => {
     const sqlite = getSqlite()
-    const { type, limit = 50, offset = 0 } = args
+    const { type, sourceIds, limit = 50, offset = 0 } = args
     // Normalize: decompose accented chars then strip combining marks
     // "café" → "cafe", "ñ" → "n", "Ö" → "O" — matches both ways
     const query = args.query
@@ -78,39 +96,49 @@ export function registerHandlers() {
       .replace(/[\u0300-\u036f]/g, '')
       .trim()
 
+    // Build source filter clause — only include content from enabled, selected sources
+    const enabledSources = (sqlite.prepare(`SELECT id FROM sources WHERE disabled = 0`).all() as { id: string }[]).map(r => r.id)
+    const filterIds = sourceIds && sourceIds.length > 0
+      ? sourceIds.filter(id => enabledSources.includes(id))
+      : enabledSources
+    const sourceFilter = filterIds.length > 0
+      ? `AND c.primary_source_id IN (${filterIds.map(() => '?').join(',')})`
+      : 'AND 1=0'
+
     if (!query || query.trim().length === 0) {
-      // Empty query = return recent/browse content
-      let sql = `
+      // Empty query = browse content
+      const sql = `
         SELECT c.*, GROUP_CONCAT(cs.source_id) as source_ids
         FROM content c
         LEFT JOIN content_sources cs ON cs.content_id = c.id
-        ${type ? `WHERE c.type = '${type}'` : ''}
+        WHERE 1=1
+        ${type ? `AND c.type = '${type}'` : ''}
+        ${sourceFilter}
         GROUP BY c.id
         ORDER BY c.updated_at DESC
         LIMIT ? OFFSET ?
       `
-      return sqlite.prepare(sql).all(limit, offset)
+      return sqlite.prepare(sql).all(...filterIds, limit, offset)
     }
 
     // FTS5 search
-    let sql = `
+    const sql = `
       SELECT c.*, fts.rank, GROUP_CONCAT(cs.source_id) as source_ids
       FROM content_fts fts
       JOIN content c ON c.id = fts.content_id
       LEFT JOIN content_sources cs ON cs.content_id = c.id
       WHERE content_fts MATCH ?
       ${type ? `AND c.type = '${type}'` : ''}
+      ${sourceFilter}
       GROUP BY c.id
       ORDER BY fts.rank
       LIMIT ? OFFSET ?
     `
 
     try {
-      // FTS5 match syntax: wrap in quotes for phrase, append * for prefix
       const ftsQuery = `"${query.replace(/"/g, '""')}"* OR ${query.split(/\s+/).map(w => `${w}*`).join(' OR ')}`
-      return sqlite.prepare(sql).all(ftsQuery, limit, offset)
+      return sqlite.prepare(sql).all(ftsQuery, ...filterIds, limit, offset)
     } catch {
-      // Fallback to LIKE if FTS fails (e.g. special characters)
       const likeQuery = `%${query}%`
       return sqlite.prepare(`
         SELECT c.*, GROUP_CONCAT(cs.source_id) as source_ids
@@ -118,9 +146,10 @@ export function registerHandlers() {
         LEFT JOIN content_sources cs ON cs.content_id = c.id
         WHERE c.title LIKE ?
         ${type ? `AND c.type = '${type}'` : ''}
+        ${sourceFilter}
         GROUP BY c.id
         LIMIT ? OFFSET ?
-      `).all(likeQuery, limit, offset)
+      `).all(likeQuery, ...filterIds, limit, offset)
     }
   })
 

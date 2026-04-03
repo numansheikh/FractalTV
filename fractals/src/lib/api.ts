@@ -17,12 +17,15 @@ export const api = {
     remove: (sourceId: string) =>
       isElectron ? window.api.sources.remove(sourceId) : Promise.resolve({ success: false }),
 
+    toggleDisabled: (sourceId: string) =>
+      isElectron ? window.api.sources.toggleDisabled(sourceId) : Promise.resolve({ disabled: false }),
+
     sync: (sourceId: string) =>
       isElectron ? window.api.sources.sync(sourceId) : Promise.resolve({ success: false }),
   },
 
   search: {
-    query: (args: { query: string; type?: 'live' | 'movie' | 'series'; limit?: number; offset?: number }) =>
+    query: (args: { query: string; type?: 'live' | 'movie' | 'series'; sourceIds?: string[]; limit?: number; offset?: number }) =>
       isElectron ? window.api.search.query(args) : Promise.resolve([]),
   },
 

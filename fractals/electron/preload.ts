@@ -12,6 +12,7 @@ export const api = {
     testXtream: (args: { serverUrl: string; username: string; password: string }) =>
       ipcRenderer.invoke('sources:test-xtream', args),
     remove: (sourceId: string) => ipcRenderer.invoke('sources:remove', sourceId),
+    toggleDisabled: (sourceId: string) => ipcRenderer.invoke('sources:toggle-disabled', sourceId),
     sync: (sourceId: string) => ipcRenderer.invoke('sources:sync', sourceId),
   },
 

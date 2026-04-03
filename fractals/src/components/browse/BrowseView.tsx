@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { api } from '@/lib/api'
 import { ContentCard, ContentItem } from './ContentCard'
 import { useSearchStore } from '@/stores/search.store'
+import { useSourcesStore } from '@/stores/sources.store'
 import { FractalsIcon } from '@/components/shared/FractalsIcon'
 
 interface Props {
@@ -13,36 +14,38 @@ interface Props {
 
 export function BrowseView({ onAddSource, onSelectContent, sourcesCount }: Props) {
   const { query, type } = useSearchStore()
+  const { selectedSourceIds } = useSourcesStore()
   const isSearching = query.trim().length > 0
 
   const searchType = type === 'all' ? undefined : (type as 'live' | 'movie' | 'series')
+  const srcFilter = selectedSourceIds.length > 0 ? selectedSourceIds : undefined
 
   // When searching — unified results
   const { data: searchResults = [], isFetching: searchFetching } = useQuery({
-    queryKey: ['search', query, type],
-    queryFn: () => api.search.query({ query: query.trim(), type: searchType, limit: 100 }),
+    queryKey: ['search', query, type, selectedSourceIds],
+    queryFn: () => api.search.query({ query: query.trim(), type: searchType, sourceIds: srcFilter, limit: 100 }),
     enabled: isSearching,
     placeholderData: (prev) => prev,
   })
 
   // Browse mode — fetch each type separately
   const { data: liveItems = [] } = useQuery({
-    queryKey: ['browse', 'live'],
-    queryFn: () => api.search.query({ query: '', type: 'live', limit: 50 }),
+    queryKey: ['browse', 'live', selectedSourceIds],
+    queryFn: () => api.search.query({ query: '', type: 'live', sourceIds: srcFilter, limit: 50 }),
     enabled: !isSearching && (type === 'all' || type === 'live') && sourcesCount > 0,
-    staleTime: 60_000,
+    staleTime: 30_000,
   })
   const { data: movieItems = [] } = useQuery({
-    queryKey: ['browse', 'movie'],
-    queryFn: () => api.search.query({ query: '', type: 'movie', limit: 50 }),
+    queryKey: ['browse', 'movie', selectedSourceIds],
+    queryFn: () => api.search.query({ query: '', type: 'movie', sourceIds: srcFilter, limit: 50 }),
     enabled: !isSearching && (type === 'all' || type === 'movie') && sourcesCount > 0,
-    staleTime: 60_000,
+    staleTime: 30_000,
   })
   const { data: seriesItems = [] } = useQuery({
-    queryKey: ['browse', 'series'],
-    queryFn: () => api.search.query({ query: '', type: 'series', limit: 50 }),
+    queryKey: ['browse', 'series', selectedSourceIds],
+    queryFn: () => api.search.query({ query: '', type: 'series', sourceIds: srcFilter, limit: 50 }),
     enabled: !isSearching && (type === 'all' || type === 'series') && sourcesCount > 0,
-    staleTime: 60_000,
+    staleTime: 30_000,
   })
 
   if (sourcesCount === 0) {
