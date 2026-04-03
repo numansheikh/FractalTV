@@ -11,7 +11,7 @@ import {
     viewChild,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { MatIconButton } from '@angular/material/button';
+import { MatButtonModule, MatIconButton } from '@angular/material/button';
 import { MatCheckboxModule } from '@angular/material/checkbox';
 import {
     MAT_DIALOG_DATA,
@@ -22,11 +22,12 @@ import { MatIcon } from '@angular/material/icon';
 import { ActivatedRoute, Router } from '@angular/router';
 import { TranslatePipe } from '@ngx-translate/core';
 import groupBy from 'lodash/groupBy';
-import { DatabaseService } from 'services';
+import { DatabaseService, GlobalSearchResult } from 'services';
 import { ContentCardComponent } from '../../shared/components/content-card/content-card.component';
 import { SearchLayoutComponent } from '../../shared/components/search-layout/search-layout.component';
 import { createLogger } from '../../shared/utils/logger';
 import { XtreamContentItem } from '../data-sources/xtream-data-source.interface';
+import { SearchScrollService } from './search-scroll.service';
 import { SearchFilters } from '../stores/features/with-search.feature';
 import { XtreamStore } from '../stores/xtream.store';
 import { ContentType } from '../xtream-state';
@@ -41,6 +42,7 @@ interface SearchResultsData {
         ContentCardComponent,
         FormsModule,
         KeyValuePipe,
+        MatButtonModule,
         MatCheckboxModule,
         MatDialogModule,
         MatIcon,
@@ -58,6 +60,7 @@ export class SearchResultsComponent implements AfterViewInit {
     readonly router = inject(Router);
     readonly activatedRoute = inject(ActivatedRoute);
     readonly databaseService = inject(DatabaseService);
+    private readonly searchScrollService = inject(SearchScrollService);
     private readonly logger = createLogger('XtreamSearchResults');
 
     /** Search term from store */
@@ -148,6 +151,7 @@ export class SearchResultsComponent implements AfterViewInit {
                 this.clearResultsOnly();
             }
         });
+
     }
 
     ngAfterViewInit() {
@@ -155,9 +159,19 @@ export class SearchResultsComponent implements AfterViewInit {
         setTimeout(() => {
             this.searchLayoutComponent()?.focusSearchInput();
         });
+
+        // Restore scroll position when returning from a program detail page
+        const saved = this.searchScrollService.getAndClearScrollTop();
+        if (saved > 0) {
+            requestAnimationFrame(() => {
+                this.searchLayoutComponent()?.setScrollTop(saved);
+            });
+        }
     }
 
-    executeSearch() {
+    private static readonly PAGE_SIZE = 50;
+
+    async executeSearch(offset = 0): Promise<void> {
         const filters = this.filters();
         const types = Object.entries(filters)
             .filter(([_, enabled]) => enabled)
@@ -165,15 +179,41 @@ export class SearchResultsComponent implements AfterViewInit {
         const excludeHidden = this.excludeHidden();
 
         if (this.isGlobalSearch) {
-            this.searchGlobal(this.searchTerm(), types, excludeHidden);
+            await this.searchGlobal(
+                this.searchTerm(),
+                types,
+                excludeHidden,
+                offset
+            );
         } else {
-            this.xtreamStore.searchContent({
+            await this.xtreamStore.searchContent({
                 term: this.searchTerm(),
                 types,
                 excludeHidden,
+                offset,
+                limit: SearchResultsComponent.PAGE_SIZE,
             });
         }
     }
+
+    /** Load next page of results (append); preserves scroll position */
+    async loadMore(): Promise<void> {
+        const layout = this.searchLayoutComponent();
+        const scrollTop = layout?.getScrollTop() ?? 0;
+        const currentLength = this.xtreamStore.searchResults().length;
+
+        await this.executeSearch(currentLength);
+
+        // Restore scroll after Angular has updated the view
+        requestAnimationFrame(() => layout?.setScrollTop(scrollTop));
+    }
+
+    /** Whether there are more results to load */
+    readonly hasMoreResults = computed(
+        () =>
+            this.xtreamStore.searchTotal() >
+            this.xtreamStore.searchResults().length
+    );
 
     /**
      * Update search term in the store
@@ -207,16 +247,32 @@ export class SearchResultsComponent implements AfterViewInit {
         this.xtreamStore.setGlobalSearchResults([]);
     }
 
-    async searchGlobal(term: string, types: string[], excludeHidden?: boolean) {
+    async searchGlobal(
+        term: string,
+        types: string[],
+        excludeHidden?: boolean,
+        offset = 0
+    ) {
         this.xtreamStore.setIsSearching(true);
         try {
-            const results = await this.databaseService.globalSearchContent(
-                term,
-                types,
-                excludeHidden
-            );
+            const { results, total } =
+                await this.databaseService.globalSearchContent(
+                    term,
+                    types,
+                    excludeHidden,
+                    offset,
+                    SearchResultsComponent.PAGE_SIZE
+                );
             if (results && Array.isArray(results)) {
-                this.xtreamStore.setGlobalSearchResults(results);
+                if (offset === 0) {
+                    this.xtreamStore.setGlobalSearchResults(results, total);
+                } else {
+                    const current = this.xtreamStore.searchResults() as GlobalSearchResult[];
+                    this.xtreamStore.setGlobalSearchResults(
+                        [...current, ...results],
+                        total
+                    );
+                }
             } else {
                 this.xtreamStore.setIsSearching(false);
             }
@@ -227,6 +283,11 @@ export class SearchResultsComponent implements AfterViewInit {
     }
 
     selectItem(item: XtreamContentItem) {
+        // Save scroll position so it can be restored when navigating back
+        this.searchScrollService.saveScrollTop(
+            this.searchLayoutComponent()?.getScrollTop() ?? 0
+        );
+
         if (this.isGlobalSearch && item.playlist_id) {
             this.dialogRef?.close();
             const type = item.type === 'movie' ? 'vod' : item.type;

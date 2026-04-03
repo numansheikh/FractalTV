@@ -35,6 +35,8 @@ export interface ContentState {
     isImporting: boolean;
     importCount: number;
     itemsToImport: number;
+    /** Set when categories or content fetch fails so UI can show a message */
+    contentLoadError?: string | null;
 }
 
 /**
@@ -52,6 +54,7 @@ const initialContentState: ContentState = {
     isImporting: false,
     importCount: 0,
     itemsToImport: 0,
+    contentLoadError: null,
 };
 
 /**
@@ -177,7 +180,15 @@ export function withContent() {
                         });
                     } catch (error) {
                         logger.error('Error fetching categories', error);
-                        patchState(store, { isLoadingCategories: false });
+                        console.error('[Xtream DEBUG] fetchAllCategories error:', error);
+                        const message =
+                            error instanceof Error
+                                ? error.message
+                                : String(error);
+                        patchState(store, {
+                            isLoadingCategories: false,
+                            contentLoadError: message,
+                        });
                     }
                 },
 
@@ -237,7 +248,15 @@ export function withContent() {
                         });
                     } catch (error) {
                         logger.error('Error fetching content', error);
-                        patchState(store, { isLoadingContent: false });
+                        console.error('[Xtream DEBUG] fetchAllContent error:', error);
+                        const message =
+                            error instanceof Error
+                                ? error.message
+                                : String(error);
+                        patchState(store, {
+                            isLoadingContent: false,
+                            contentLoadError: message,
+                        });
                     }
                 },
 
@@ -246,20 +265,27 @@ export function withContent() {
                  */
                 async initializeContent(): Promise<void> {
                     const ctx = getCredentialsFromStore();
-                    if (!ctx) return;
+                    if (!ctx) {
+                        console.warn('[Xtream DEBUG] initializeContent: getCredentialsFromStore returned null');
+                        return;
+                    }
+                    console.log('[Xtream DEBUG] initializeContent: starting', { playlistId: ctx.playlistId });
 
                     patchState(store, {
                         isImporting: true,
                         importCount: 0,
                         itemsToImport: 0,
+                        contentLoadError: null,
                     });
 
                     try {
-                        // Fetch categories first
+                        console.log('[Xtream DEBUG] initializeContent: fetchAllCategories...');
                         await this.fetchAllCategories();
+                        console.log('[Xtream DEBUG] initializeContent: fetchAllCategories done');
 
-                        // Then fetch content (with progress tracking)
+                        console.log('[Xtream DEBUG] initializeContent: fetchAllContent...');
                         await this.fetchAllContent();
+                        console.log('[Xtream DEBUG] initializeContent: fetchAllContent done');
 
                         // Restore user data if needed
                         const restoreKey = `xtream-restore-${ctx.playlistId}`;
@@ -339,6 +365,13 @@ export function withContent() {
                  */
                 resetContent(): void {
                     patchState(store, initialContentState);
+                },
+
+                /**
+                 * Clear content load error (e.g. after showing snackbar)
+                 */
+                clearContentError(): void {
+                    patchState(store, { contentLoadError: null });
                 },
             };
         })

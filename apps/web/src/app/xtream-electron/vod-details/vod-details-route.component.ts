@@ -8,16 +8,19 @@ import {
     inject,
     signal,
 } from '@angular/core';
+import { MatButtonModule } from '@angular/material/button';
 import { MatIcon } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { ActivatedRoute } from '@angular/router';
 import { TranslateModule } from '@ngx-translate/core';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import { ContentHeroComponent } from 'components';
 import { XtreamVodDetails } from 'shared-interfaces';
 import { DownloadsService } from '../../services/downloads.service';
 import { SettingsStore } from '../../services/settings-store.service';
+import { TmdbService } from '../services/tmdb.service';
 import { XtreamStore } from '../stores/xtream.store';
-import { SafePipe } from '@iptvnator/pipes';
+import { SafePipe } from '@fractals/pipes';
 import { createLogger } from '../../shared/utils/logger';
 
 /**
@@ -35,7 +38,9 @@ import { createLogger } from '../../shared/utils/logger';
     styleUrls: ['../detail-view.scss'],
     imports: [
         ContentHeroComponent,
+        MatButtonModule,
         MatIcon,
+        MatTooltipModule,
         SafePipe,
         SlicePipe,
         TranslateModule,
@@ -48,11 +53,14 @@ export class VodDetailsRouteComponent implements OnInit, OnDestroy {
     private route = inject(ActivatedRoute);
     private readonly xtreamStore = inject(XtreamStore);
     private readonly downloadsService = inject(DownloadsService);
+    private readonly tmdbService = inject(TmdbService);
     private readonly logger = createLogger('VodDetailsRoute');
     private readonly detailsInitDone = signal(false);
+    readonly isRefreshingTmdb = signal(false);
 
     readonly theme = this.settingsStore.theme;
     readonly isElectron = this.downloadsService.isAvailable;
+    readonly tmdbEnabled = this.tmdbService.isEnabled;
 
     readonly isFavorite = this.xtreamStore.isFavorite;
     readonly selectedItem = this.xtreamStore.selectedItem;
@@ -201,6 +209,16 @@ export class VodDetailsRouteComponent implements OnInit, OnDestroy {
 
     goBack() {
         this.location.back();
+    }
+
+    async refreshTmdb() {
+        if (this.isRefreshingTmdb() || !this.tmdbEnabled) return;
+        this.isRefreshingTmdb.set(true);
+        try {
+            await this.xtreamStore.refreshVodTmdbEnrichment();
+        } finally {
+            this.isRefreshingTmdb.set(false);
+        }
     }
 
     async downloadVod(vodItem: XtreamVodDetails) {

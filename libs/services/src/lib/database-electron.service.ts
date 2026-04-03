@@ -18,6 +18,7 @@ export interface XCategoryFromDb {
 export interface XtreamContent {
     id: number;
     category_id: number;
+    category_name?: string;
     title: string;
     rating: string;
     added: string;
@@ -256,31 +257,43 @@ export class DatabaseService {
     }
 
     /**
-     * Search content within a playlist
+     * Search content within a playlist (paginated)
      */
     async searchXtreamContent(
         playlistId: string,
         searchTerm: string,
         types: string[],
-        excludeHidden?: boolean
-    ): Promise<XtreamContent[]> {
+        excludeHidden?: boolean,
+        offset = 0,
+        limit = 50
+    ): Promise<{ results: XtreamContent[]; total: number }> {
         return await window.electron.dbSearchContent(
             playlistId,
             searchTerm,
             types,
-            excludeHidden
+            excludeHidden,
+            offset,
+            limit
         );
     }
 
     /**
-     * Global search across all playlists
+     * Global search across all playlists (paginated)
      */
     async globalSearchContent(
         searchTerm: string,
         types: string[],
-        excludeHidden?: boolean
-    ): Promise<GlobalSearchResult[]> {
-        return await window.electron.dbGlobalSearch(searchTerm, types, excludeHidden);
+        excludeHidden?: boolean,
+        offset = 0,
+        limit = 50
+    ): Promise<{ results: GlobalSearchResult[]; total: number }> {
+        return await window.electron.dbGlobalSearch(
+            searchTerm,
+            types,
+            excludeHidden,
+            offset,
+            limit
+        );
     }
 
     /**

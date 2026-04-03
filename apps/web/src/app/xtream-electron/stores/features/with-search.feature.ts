@@ -28,6 +28,7 @@ export interface SearchState {
     searchTerm: string;
     searchFilters: SearchFilters;
     searchResults: XtreamContentItem[];
+    searchTotal: number;
     globalSearchResults: GlobalSearchResult[];
     isSearching: boolean;
 }
@@ -48,6 +49,7 @@ const initialSearchState: SearchState = {
     searchTerm: '',
     searchFilters: initialSearchFilters,
     searchResults: [],
+    searchTotal: 0,
     globalSearchResults: [],
     isSearching: false,
 };
@@ -68,54 +70,73 @@ export function withSearch() {
 
             return {
                 /**
-                 * Search content within the current playlist
+                 * Search content within the current playlist (paginated).
+                 * When offset is 0, replaces results; when offset > 0, appends (load more).
                  */
                 async searchContent(
                     searchTerm: string,
                     types: string[],
-                    excludeHidden?: boolean
-                ): Promise<XtreamContentItem[]> {
-                    // Access parent store's playlistId (from withPortal)
+                    excludeHidden?: boolean,
+                    offset = 0,
+                    limit = 50
+                ): Promise<{ results: XtreamContentItem[]; total: number }> {
                     const storeAny = store as any;
                     const playlistId = storeAny.playlistId?.();
 
                     if (!playlistId || !searchTerm.trim()) {
-                        patchState(store, { searchResults: [] });
-                        return [];
+                        patchState(store, {
+                            searchResults: [],
+                            searchTotal: 0,
+                        });
+                        return { results: [], total: 0 };
                     }
 
                     patchState(store, { isSearching: true });
 
                     try {
-                        const results = await dataSource.searchContent(
-                            playlistId,
-                            searchTerm,
-                            types,
-                            excludeHidden
-                        );
+                        const { results, total } =
+                            await dataSource.searchContent(
+                                playlistId,
+                                searchTerm,
+                                types,
+                                excludeHidden,
+                                offset,
+                                limit
+                            );
+
+                        const nextResults =
+                            offset === 0
+                                ? results
+                                : [...store.searchResults(), ...results];
 
                         patchState(store, {
-                            searchResults: results,
+                            searchResults: nextResults,
+                            searchTotal: total,
                             isSearching: false,
                         });
 
-                        return results;
+                        return { results: nextResults, total };
                     } catch (error) {
                         logger.error('Error searching content', error);
                         patchState(store, {
                             searchResults: [],
+                            searchTotal: 0,
                             isSearching: false,
                         });
-                        return [];
+                        return { results: [], total: 0 };
                     }
                 },
 
                 /**
                  * Set global search results (from external search)
                  */
-                setGlobalSearchResults(results: GlobalSearchResult[]): void {
+                setGlobalSearchResults(
+                    results: GlobalSearchResult[],
+                    total?: number
+                ): void {
                     patchState(store, {
                         searchResults: results as any,
+                        searchTotal: total ?? results.length,
                         globalSearchResults: results,
                         isSearching: false,
                     });

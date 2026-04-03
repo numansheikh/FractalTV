@@ -224,9 +224,11 @@ export class PwaXtreamDataSource implements IXtreamDataSource {
         playlistId: string,
         searchTerm: string,
         types: string[],
-        _excludeHidden?: boolean
-    ): Promise<XtreamContentItem[]> {
-        const results: any[] = [];
+        _excludeHidden?: boolean,
+        offset = 0,
+        limit = 50
+    ): Promise<{ results: XtreamContentItem[]; total: number }> {
+        const all: any[] = [];
         const searchLower = searchTerm.toLowerCase();
 
         for (const type of types) {
@@ -239,10 +241,12 @@ export class PwaXtreamDataSource implements IXtreamDataSource {
                 return title.toLowerCase().includes(searchLower);
             });
 
-            results.push(...filtered);
+            all.push(...filtered);
         }
 
-        return results as XtreamContentItem[];
+        const total = all.length;
+        const results = all.slice(offset, offset + limit);
+        return { results: results as XtreamContentItem[], total };
     }
 
     // =========================================================================

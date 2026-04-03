@@ -39,6 +39,10 @@ export class PlaylistErrorViewComponent {
     openPlaylistDetails() {
         this.dialog.open(PlaylistInfoComponent, {
             data: this.currentPlaylist(),
+            width: '720px',
+            maxWidth: '94vw',
+            panelClass: 'playlist-details-dialog',
+            position: { top: '6vh' },
         });
     }
 

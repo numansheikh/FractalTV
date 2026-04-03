@@ -58,6 +58,9 @@ export interface XtreamContentItem {
     description?: string;
     playlist_id?: string;
     playlist_name?: string;
+
+    /** Category/group name (e.g. channel group, movie group) */
+    category_name?: string;
 }
 
 /**
@@ -229,14 +232,16 @@ export interface IXtreamDataSource {
     // =========================================================================
 
     /**
-     * Search content within a playlist
+     * Search content within a playlist (paginated)
      */
     searchContent(
         playlistId: string,
         searchTerm: string,
         types: string[],
-        excludeHidden?: boolean
-    ): Promise<XtreamContentItem[]>;
+        excludeHidden?: boolean,
+        offset?: number,
+        limit?: number
+    ): Promise<{ results: XtreamContentItem[]; total: number }>;
 
     // =========================================================================
     // Favorites Operations

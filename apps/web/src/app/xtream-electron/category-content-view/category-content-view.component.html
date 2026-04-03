@@ -25,6 +25,40 @@
             <app-stalker-series-view />
         }
     } @else {
+        @if (showTmdbCategoryOption()) {
+            <div class="category-toolbar category-toolbar--tmdb">
+                <mat-checkbox
+                    [checked]="preferTmdbPosterForCurrentCategory()"
+                    (change)="togglePreferTmdbPosterForCategory($event.checked)"
+                >
+                    {{ 'SETTINGS.PREFER_TMDB_POSTER_FOR_CATEGORY' | translate }}
+                </mat-checkbox>
+                <button
+                    class="tmdb-refresh-all-btn"
+                    [matTooltip]="'XTREAM.REFRESH_TMDB_ALL' | translate"
+                    [disabled]="isRefreshingAllTmdb()"
+                    (click)="refreshAllTmdb()"
+                >
+                    @if (isRefreshingAllTmdb()) {
+                        <mat-icon class="spin">sync</mat-icon>
+                    } @else {
+                        <mat-icon>refresh</mat-icon>
+                    }
+                    {{ 'XTREAM.REFRESH_TMDB_ALL' | translate }}
+                </button>
+                @if (refreshTmdbProgress(); as progress) {
+                    <div class="tmdb-refresh-progress">
+                        <mat-progress-bar
+                            mode="determinate"
+                            [value]="(progress.current / progress.total) * 100"
+                        />
+                        <span class="tmdb-refresh-progress__label">
+                            {{ 'XTREAM.REFRESH_TMDB_PROGRESS' | translate: { current: progress.current, total: progress.total } }}
+                        </span>
+                    </div>
+                }
+            </div>
+        }
         <app-grid-list
             [isLoading]="isPaginatedContentLoading()"
             [items]="contentWithProgress()"

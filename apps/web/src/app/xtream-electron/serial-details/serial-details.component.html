@@ -50,6 +50,21 @@
 
         <!-- Action Buttons -->
         <ng-container hero-actions>
+            @if (tmdbEnabled) {
+                <button
+                    class="tmdb-refresh-btn"
+                    [matTooltip]="'XTREAM.REFRESH_TMDB' | translate"
+                    [disabled]="isRefreshingTmdb()"
+                    (click)="refreshTmdb()"
+                >
+                    @if (isRefreshingTmdb()) {
+                        <mat-icon class="spin">sync</mat-icon>
+                    } @else {
+                        <mat-icon>refresh</mat-icon>
+                    }
+                    {{ 'XTREAM.REFRESH_TMDB' | translate }}
+                </button>
+            }
             @if (!isFavorite()) {
                 <button class="favorite-btn" (click)="toggleFavorite()">
                     <mat-icon>add</mat-icon>

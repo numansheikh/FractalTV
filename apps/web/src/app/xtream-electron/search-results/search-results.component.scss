@@ -157,3 +157,17 @@
         padding: 0 8px;
     }
 }
+
+.search-results-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 1rem;
+    padding: 1rem 0;
+
+    .results-count {
+        font-size: 0.9rem;
+        color: var(--text-color-secondary);
+    }
+}

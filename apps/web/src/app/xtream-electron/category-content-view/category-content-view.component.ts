@@ -7,6 +7,11 @@ import {
     OnInit,
     signal,
 } from '@angular/core';
+import { MatButtonModule } from '@angular/material/button';
+import { MatCheckboxModule } from '@angular/material/checkbox';
+import { MatIcon } from '@angular/material/icon';
+import { MatProgressBarModule } from '@angular/material/progress-bar';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import { PageEvent } from '@angular/material/paginator';
 import { ActivatedRoute, Router } from '@angular/router';
 import { Store } from '@ngrx/store';
@@ -35,7 +40,10 @@ import { StalkerStore } from '../../stalker/stalker.store';
 import { VodDetailsComponent } from '../../xtream/vod-details/vod-details.component';
 import { XTREAM_DATA_SOURCE } from '../data-sources';
 import { PlaylistErrorViewComponent } from '../playlist-error-view/playlist-error-view.component';
+import { TmdbPosterCacheService } from '../services/tmdb-poster-cache.service';
+import { TmdbService } from '../services/tmdb.service';
 import { XtreamStore } from '../stores/xtream.store';
+import { SettingsStore } from '../../services/settings-store.service';
 
 @Component({
     selector: 'app-category-content-view',
@@ -43,6 +51,11 @@ import { XtreamStore } from '../stores/xtream.store';
     styleUrls: ['./category-content-view.component.scss'],
     imports: [
         GridListComponent,
+        MatButtonModule,
+        MatCheckboxModule,
+        MatIcon,
+        MatProgressBarModule,
+        MatTooltipModule,
         PlaylistErrorViewComponent,
         StalkerSeriesViewComponent,
         TranslatePipe,
@@ -59,6 +72,9 @@ export class CategoryContentViewComponent implements OnInit, OnDestroy {
     private readonly store = this.isStalker
         ? inject(StalkerStore)
         : inject(XtreamStore);
+    private readonly tmdbPosterCache = inject(TmdbPosterCacheService);
+    private readonly tmdbService = inject(TmdbService);
+    private readonly settingsStore = inject(SettingsStore);
 
     /** Unsubscribe function for playback position updates */
     private unsubscribePositionUpdates: (() => void) | null = null;
@@ -185,20 +201,57 @@ export class CategoryContentViewComponent implements OnInit, OnDestroy {
         const xtreamStore = this.store as any;
         if (!xtreamStore.getProgressPercent) return items;
 
+        // Depend on TMDB cache so listing updates when user opens/refreshes a detail
+        this.tmdbPosterCache.cache();
+        const preferTmdbPoster = this.settingsStore.preferTmdbPoster();
+        const byCategory = this.settingsStore.preferTmdbPosterByCategory?.() ?? {};
+        const playlistId = xtreamStore.currentPlaylist?.()?.id;
+        const categoryId = xtreamStore.selectedCategoryId?.();
+        const categoryKey =
+            playlistId != null && categoryId != null
+                ? `${playlistId}_${categoryId}`
+                : null;
+        const preferTmdbForThisCategory =
+            categoryKey != null ? byCategory[categoryKey] : undefined;
+        const useTmdbPoster =
+            preferTmdbForThisCategory ?? preferTmdbPoster;
+
         return items.map((item: any) => {
             const isSeries = this.contentType() === 'series';
             const id = Number(
                 item.xtream_id || item.series_id || item.stream_id
             );
 
+            let poster_url = item.poster_url ?? item.stream_icon ?? item.cover;
+            if (useTmdbPoster && playlistId) {
+                if (!isSeries && item.xtream_id != null) {
+                    const cached = this.tmdbPosterCache.get(
+                        playlistId,
+                        item.xtream_id
+                    );
+                    if (cached) poster_url = cached;
+                } else if (isSeries) {
+                    const serialId = item.series_id ?? item.xtream_id ?? item.stream_id;
+                    if (serialId != null) {
+                        const cached = this.tmdbPosterCache.getSeries(
+                            playlistId,
+                            serialId
+                        );
+                        if (cached) poster_url = cached;
+                    }
+                }
+            }
+
             if (isSeries) {
                 return {
                     ...item,
+                    poster_url,
                     hasSeriesProgress: xtreamStore.hasSeriesProgress(id),
                 };
             } else {
                 return {
                     ...item,
+                    poster_url,
                     progress: xtreamStore.getProgressPercent(id, 'vod'),
                     isWatched: xtreamStore.isWatched(id, 'vod'),
                 };
@@ -210,6 +263,60 @@ export class CategoryContentViewComponent implements OnInit, OnDestroy {
     readonly selectedItem = this.store.selectedItem;
     readonly totalPages = this.store.getTotalPages;
     readonly bigStore = inject(Store);
+
+    /** Show "Use TMDB posters for this category" only when TMDB is on and we have a category (Xtream) */
+    readonly showTmdbCategoryOption = computed(() => {
+        if (this.isStalker || !this.tmdbService.isEnabled) return false;
+        const xtreamStore = this.store as any;
+        return (
+            xtreamStore.currentPlaylist?.()?.id != null &&
+            xtreamStore.selectedCategoryId?.() != null
+        );
+    });
+
+    readonly preferTmdbPosterForCurrentCategory = computed(() => {
+        const xtreamStore = this.store as any;
+        const playlistId = xtreamStore.currentPlaylist?.()?.id;
+        const categoryId = xtreamStore.selectedCategoryId?.();
+        if (playlistId == null || categoryId == null) return false;
+        const key = `${playlistId}_${categoryId}`;
+        const byCat =
+            this.settingsStore.preferTmdbPosterByCategory?.() ?? {};
+        return byCat[key] === true;
+    });
+
+    togglePreferTmdbPosterForCategory(checked: boolean) {
+        const xtreamStore = this.store as any;
+        const playlistId = xtreamStore.currentPlaylist?.()?.id;
+        const categoryId = xtreamStore.selectedCategoryId?.();
+        if (playlistId == null || categoryId == null) return;
+        this.settingsStore.setPreferTmdbPosterForCategory(
+            playlistId,
+            categoryId,
+            checked
+        );
+    }
+
+    readonly isRefreshingAllTmdb = signal(false);
+    /** When non-null, refresh-all is running: { current, total } for progress bar */
+    readonly refreshTmdbProgress = signal<{ current: number; total: number } | null>(null);
+
+    async refreshAllTmdb() {
+        if (this.isRefreshingAllTmdb() || this.isStalker) return;
+        const xtreamStore = this.store as any;
+        if (!xtreamStore.refreshCategoryTmdbEnrichment) return;
+        this.isRefreshingAllTmdb.set(true);
+        this.refreshTmdbProgress.set(null);
+        try {
+            await xtreamStore.refreshCategoryTmdbEnrichment((current, total) => {
+                this.refreshTmdbProgress.set({ current, total });
+            });
+            await this.tmdbPosterCache.persist();
+        } finally {
+            this.isRefreshingAllTmdb.set(false);
+            this.refreshTmdbProgress.set(null);
+        }
+    }
 
     /** Computed VodDetailsItem for the vod-details component */
     readonly vodDetailsItem = computed<VodDetailsItem | null>(() => {
@@ -267,6 +374,10 @@ export class CategoryContentViewComponent implements OnInit, OnDestroy {
             const xtreamStore = this.store as any;
             if (xtreamStore.currentPlaylist()?.id) {
                 xtreamStore.loadAllPositions(xtreamStore.currentPlaylist().id);
+            }
+            // Load persisted TMDB poster cache so listings show cached posters across sessions
+            if (this.tmdbService.isEnabled) {
+                this.tmdbPosterCache.loadFromStorage();
             }
         }
 

@@ -1,10 +1,13 @@
 import { Location, SlicePipe } from '@angular/common';
-import { Component, inject, OnDestroy, OnInit } from '@angular/core';
+import { Component, inject, OnDestroy, OnInit, signal } from '@angular/core';
+import { MatButtonModule } from '@angular/material/button';
 import { MatIcon } from '@angular/material/icon';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import { ActivatedRoute } from '@angular/router';
 import { TranslatePipe } from '@ngx-translate/core';
 import { ContentHeroComponent } from 'components';
 import { XtreamSerieEpisode } from 'shared-interfaces';
+import { TmdbService } from '../services/tmdb.service';
 import { SeasonContainerComponent } from '../season-container/season-container.component';
 import { XtreamStore } from '../stores/xtream.store';
 
@@ -14,7 +17,9 @@ import { XtreamStore } from '../stores/xtream.store';
     styleUrls: ['../detail-view.scss'],
     imports: [
         ContentHeroComponent,
+        MatButtonModule,
         MatIcon,
+        MatTooltipModule,
         SeasonContainerComponent,
         SlicePipe,
         TranslatePipe,
@@ -24,6 +29,10 @@ export class SerialDetailsComponent implements OnInit, OnDestroy {
     private readonly location = inject(Location);
     private readonly route = inject(ActivatedRoute);
     private readonly xtreamStore = inject(XtreamStore);
+    private readonly tmdbService = inject(TmdbService);
+
+    readonly tmdbEnabled = this.tmdbService.isEnabled;
+    readonly isRefreshingTmdb = signal(false);
 
     readonly selectedItem = this.xtreamStore.selectedItem;
     readonly selectedContentType = this.xtreamStore.selectedContentType;
@@ -93,5 +102,15 @@ export class SerialDetailsComponent implements OnInit, OnDestroy {
 
     goBack() {
         this.location.back();
+    }
+
+    async refreshTmdb() {
+        if (this.isRefreshingTmdb() || !this.tmdbEnabled) return;
+        this.isRefreshingTmdb.set(true);
+        try {
+            await this.xtreamStore.refreshSerialTmdbEnrichment();
+        } finally {
+            this.isRefreshingTmdb.set(false);
+        }
     }
 }

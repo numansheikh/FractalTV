@@ -241,9 +241,18 @@ export class ElectronXtreamDataSource implements IXtreamDataSource {
         playlistId: string,
         searchTerm: string,
         types: string[],
-        excludeHidden?: boolean
-    ): Promise<XtreamContentItem[]> {
-        return this.dbService.searchXtreamContent(playlistId, searchTerm, types, excludeHidden);
+        excludeHidden?: boolean,
+        offset?: number,
+        limit?: number
+    ): Promise<{ results: XtreamContentItem[]; total: number }> {
+        return this.dbService.searchXtreamContent(
+            playlistId,
+            searchTerm,
+            types,
+            excludeHidden,
+            offset ?? 0,
+            limit ?? 50
+        );
     }
 
     // =========================================================================
