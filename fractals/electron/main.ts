@@ -12,17 +12,11 @@ function createWindow() {
     backgroundColor: '#0a0a0f',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     webPreferences: {
-      preload: join(__dirname, 'preload.js'),
+      preload: join(__dirname, '../preload/preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
     },
-    show: false,
-  })
-
-  // Show window when ready to avoid flash of white
-  win.once('ready-to-show', () => {
-    win.show()
   })
 
   // Open external links in browser, not in the app
@@ -33,14 +27,13 @@ function createWindow() {
 
   if (isDev) {
     win.loadURL('http://localhost:5173')
-    win.webContents.openDevTools()
   } else {
-    win.loadFile(join(__dirname, '../dist/index.html'))
+    win.loadFile(join(__dirname, '../../dist/index.html'))
   }
 }
 
 // Single instance lock
-const gotTheLock = app.requestSingleInstanceLock()
+const gotTheLock = app.requestSingleInstanceLock({ key: isDev ? 'fractals-dev' : 'fractals' })
 if (!gotTheLock) {
   app.quit()
 } else {
