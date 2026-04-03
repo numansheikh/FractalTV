@@ -7,6 +7,7 @@ import { SearchBar } from '@/components/search/SearchBar'
 import { BrowseView } from '@/components/browse/BrowseView'
 import { Sidebar } from '@/components/settings/Sidebar'
 import { AddSourceDialog } from '@/components/settings/AddSourceDialog'
+import { Player } from '@/components/player/Player'
 import { ContentItem } from '@/components/browse/ContentCard'
 
 const queryClient = new QueryClient({
@@ -106,27 +107,15 @@ function AppShell() {
         )}
       </AnimatePresence>
 
-      {/* TODO: Content detail + Player */}
-      {selectedContent && (
-        <div
-          className="fixed bottom-4 right-4 z-50 rounded-lg px-3 py-2 text-xs shadow-xl"
-          style={{
-            background: 'var(--color-card)',
-            color: 'var(--color-text-secondary)',
-            border: '1px solid var(--color-border-strong)',
-          }}
-        >
-          Selected:{' '}
-          <span style={{ color: 'var(--color-text-primary)' }}>{selectedContent.title}</span>
-          <button
-            onClick={() => setSelectedContent(null)}
-            className="ml-2 transition-colors"
-            style={{ color: 'var(--color-text-muted)' }}
-          >
-            ✕
-          </button>
-        </div>
-      )}
+      {/* Player */}
+      <AnimatePresence>
+        {selectedContent && (
+          <Player
+            content={selectedContent}
+            onClose={() => setSelectedContent(null)}
+          />
+        )}
+      </AnimatePresence>
     </div>
   )
 }
