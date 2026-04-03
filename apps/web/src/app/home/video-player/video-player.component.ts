@@ -9,6 +9,7 @@ import {
     OnInit,
     effect,
     inject,
+    signal,
     viewChild,
 } from '@angular/core';
 import { MatDialog } from '@angular/material/dialog';
@@ -55,6 +56,7 @@ import {
     SidebarView,
     VideoPlayer,
 } from 'shared-interfaces';
+import { FormFactorService } from '../../services/form-factor.service';
 import { SettingsStore } from '../../services/settings-store.service';
 import {
     getAdjacentChannelItem,
@@ -91,6 +93,7 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
     private readonly settingsStore = inject(SettingsStore);
     private readonly storage = inject(StorageMap);
     private readonly store = inject(Store);
+    readonly formFactor = inject(FormFactorService);
 
     /** Active selected channel */
     readonly activeChannel$ = this.store
@@ -129,6 +132,19 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
     private channelNumberTimeout?: number;
 
     volume = 1;
+
+    /** TV mode: toolbar visibility — shown on activity, auto-hides after 5s */
+    readonly showToolbar = signal(true);
+    private toolbarTimer?: ReturnType<typeof setTimeout>;
+
+    /** Show toolbar and restart the auto-hide timer (TV mode only). */
+    revealToolbar(): void {
+        this.showToolbar.set(true);
+        if (this.formFactor.isTV()) {
+            clearTimeout(this.toolbarTimer);
+            this.toolbarTimer = setTimeout(() => this.showToolbar.set(false), 5000);
+        }
+    }
 
     constructor() {
         // Initialize volume from localStorage in constructor
@@ -309,6 +325,7 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
         this.unsubscribeRemoteChannelChange?.();
         this.unsubscribeRemoteCommand?.();
         this.statusSubscription?.unsubscribe();
+        clearTimeout(this.toolbarTimer);
     }
 
     /**

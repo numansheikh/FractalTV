@@ -1,10 +1,16 @@
-<mat-drawer-container class="main-container" autosize>
+<mat-drawer-container
+    class="main-container"
+    [class.tv-mode]="formFactor.isTV()"
+    autosize
+    (keydown)="revealToolbar()"
+    (mousemove)="revealToolbar()"
+>
     <!-- sidebar content -->
     <mat-drawer
         #drawer
-        mode="side"
-        opened
-        disableClose
+        [mode]="formFactor.isTV() ? 'over' : 'side'"
+        [opened]="!formFactor.isTV()"
+        [disableClose]="!formFactor.isTV()"
         class="mat-drawer"
         appResizable
         [minWidth]="200"
@@ -23,16 +29,18 @@
     </mat-drawer>
     <mat-drawer-content class="drawer-content">
         @if (activeChannel$ | async; as activeChannel) {
-            <!-- toolbar with drawer icon -->
-            <app-toolbar
-                (toggleLeftDrawerClicked)="drawer.toggle()"
-                (toggleRightDrawerClicked)="drawerRight.toggle()"
-                (multiEpgClicked)="openMultiEpgView()"
-                (infoOverlayClicked)="toggleInfoOverlay()"
-                [activeChannel]="activeChannel"
-                [isLeftDrawerOpened]="drawer.opened"
-                (settingsClicked)="openSettings()"
-            />
+            <!-- toolbar with drawer icon — hidden in TV mode after inactivity -->
+            @if (!formFactor.isTV() || showToolbar()) {
+                <app-toolbar
+                    (toggleLeftDrawerClicked)="drawer.toggle()"
+                    (toggleRightDrawerClicked)="drawerRight.toggle()"
+                    (multiEpgClicked)="openMultiEpgView()"
+                    (infoOverlayClicked)="toggleInfoOverlay()"
+                    [activeChannel]="activeChannel"
+                    [isLeftDrawerOpened]="drawer.opened"
+                    (settingsClicked)="openSettings()"
+                />
+            }
             @if (activeChannel.radio === 'true') {
                 <app-audio-player
                     [url]="activeChannel.url"
@@ -125,8 +133,13 @@
         }
     </mat-drawer-content>
     <!-- right sidebar content -->
-    <mat-drawer position="end" #drawerRight mode="side" disableClose>
-        @if (isDesktop) {
+    <mat-drawer
+        position="end"
+        #drawerRight
+        [mode]="formFactor.isTV() ? 'over' : 'side'"
+        [disableClose]="!formFactor.isTV()"
+    >
+        @if (isDesktop || formFactor.isTV()) {
             <app-epg-list />
         }
     </mat-drawer>

@@ -344,11 +344,15 @@ app-root.form-factor-tablet {
 // -----------------------------------------------------------------------------
 app-root.form-factor-tv {
     font-size: var(--fractals-text-lg);
+    cursor: none; // no mouse pointer on TV
+
     *:focus-visible,
     .mat-mdc-button:focus-visible, .mat-mdc-icon-button:focus-visible,
-    .mat-mdc-tab:focus-visible, a:focus-visible {
+    .mat-mdc-tab:focus-visible, a:focus-visible,
+    [tabindex="0"]:focus-visible {
         outline: 3px solid var(--fractals-primary);
         outline-offset: 2px;
+        border-radius: 4px;
     }
     .mat-mdc-button, .mat-mdc-raised-button {
         min-height: 56px;
@@ -375,6 +379,37 @@ app-root.form-factor-tv {
         &:focus-visible {
             outline-width: 3px;
             outline-offset: 2px;
+        }
+    }
+
+    // Channel list items: clear focus ring
+    .channel-list-item:focus-visible {
+        outline: 3px solid var(--fractals-primary);
+        outline-offset: 2px;
+        border-radius: 4px;
+    }
+
+    // Dialogs: wider on TV
+    .mat-mdc-dialog-container,
+    .add-playlist-dialog .mat-mdc-dialog-container {
+        width: 80vw !important;
+        max-width: 80vw !important;
+    }
+
+    // Toolbar: smooth fade in/out
+    app-toolbar {
+        animation: tv-toolbar-fadein 0.2s ease;
+    }
+    @keyframes tv-toolbar-fadein {
+        from { opacity: 0; transform: translateY(-8px); }
+        to   { opacity: 1; transform: translateY(0); }
+    }
+
+    // Video player: fill entire screen when drawers are in 'over' mode
+    .main-container.tv-mode {
+        .mat-drawer-content {
+            margin-left: 0 !important;
+            margin-right: 0 !important;
         }
     }
 }

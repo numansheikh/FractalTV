@@ -17,6 +17,7 @@ import {
     STORE_KEY,
     Theme,
 } from 'shared-interfaces';
+import { DpadNavigationService } from './services/dpad-navigation.service';
 import { FormFactorService } from './services/form-factor.service';
 import { SettingsService } from './services/settings.service';
 import { EpgProgressPanelComponent } from './shared/epg-progress-panel/epg-progress-panel.component';
@@ -53,6 +54,8 @@ export class AppComponent implements OnInit {
     private translate = inject(TranslateService);
     private formFactor = inject(FormFactorService);
     private settingsService = inject(SettingsService);
+    // Initialize D-pad navigation service (TV mode)
+    private readonly _dpad = inject(DpadNavigationService);
 
     /** Default language as fallback */
     private readonly DEFAULT_LANG = Language.ENGLISH;
@@ -90,6 +93,23 @@ export class AppComponent implements OnInit {
                 }
             });
         }
+
+        // TV mode: Escape / Backspace closes open dialogs or navigates back
+        document.addEventListener('keydown', (event) => {
+            if (!this.formFactor.isTV()) return;
+            if (event.key !== 'Escape' && event.key !== 'Backspace') return;
+            // Don't intercept Backspace inside text inputs
+            const tag = (event.target as HTMLElement)?.tagName?.toLowerCase();
+            if (event.key === 'Backspace' && (tag === 'input' || tag === 'textarea')) return;
+
+            if (this.dialog.openDialogs.length > 0) {
+                event.preventDefault();
+                this.dialog.openDialogs[this.dialog.openDialogs.length - 1].close();
+            } else {
+                event.preventDefault();
+                this.router.navigate(['/']);
+            }
+        });
     }
 
     ngOnInit() {

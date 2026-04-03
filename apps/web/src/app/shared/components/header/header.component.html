@@ -9,6 +9,7 @@
     </div>
 
     @if (isHome) {
+        @if (!formFactor.isTV()) {
         <div class="search-container">
             <mat-icon class="search-icon">search</mat-icon>
             <input
@@ -21,6 +22,7 @@
                 (input)="onSearchQueryUpdate(searchInput.value)"
             />
         </div>
+        } <!-- end @if (!formFactor.isTV()) -->
 
         <!-- Desktop menu buttons -->
         <div class="menu desktop-menu">

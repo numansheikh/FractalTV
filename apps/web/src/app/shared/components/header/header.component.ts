@@ -18,6 +18,7 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 import { ActivatedRoute, Router } from '@angular/router';
 import { TranslateModule } from '@ngx-translate/core';
 import { DataService } from 'services';
+import { FormFactorService } from '../../../services/form-factor.service';
 import { GLOBAL_FAVORITES_PLAYLIST_ID } from 'shared-interfaces';
 //import { shell } from 'electron';
 import { AddPlaylistMenuComponent, PlaylistType } from 'components';
@@ -53,6 +54,7 @@ export class HeaderComponent implements OnInit {
     private dialog = inject(MatDialog);
     private dataService = inject(DataService);
     private router = inject(Router);
+    readonly formFactor = inject(FormFactorService);
 
     readonly addPlaylistMenuComponent = viewChild.required(
         AddPlaylistMenuComponent

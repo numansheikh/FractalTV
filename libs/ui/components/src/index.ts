@@ -20,3 +20,4 @@ export * from './lib/video-player/sidebar/sidebar.component';
 export * from './lib/video-player/toolbar/toolbar.component';
 export * from './lib/vjs-player/vjs-player.component';
 export * from './lib/resizable/resizable.directive';
+export * from './lib/tv-focusable/tv-focusable.directive';

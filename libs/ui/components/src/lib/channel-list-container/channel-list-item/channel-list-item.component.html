@@ -6,6 +6,8 @@
     cdkDragPreviewContainer="parent"
     [class.active]="selected()"
     (click)="clicked.emit()"
+    (keydown.enter)="clicked.emit()"
+    tabindex="0"
     data-test-id="channel-item"
 >
     @if (isDraggable()) {

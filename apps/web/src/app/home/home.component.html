@@ -1,4 +1,4 @@
-<div class="app-layout">
+<div class="app-layout" [class.tv-mode]="formFactor.isTV()">
     <app-header
         [title]="'HOME.TITLE' | translate"
         [subtitle]="'HOME.SUBTITLE' | translate"

@@ -1,4 +1,5 @@
 import { Component, inject, signal } from '@angular/core';
+import { FormFactorService } from '../services/form-factor.service';
 import { MatDialog } from '@angular/material/dialog';
 import { TranslatePipe } from '@ngx-translate/core';
 import { PlaylistType, RecentPlaylistsComponent } from 'components';
@@ -15,6 +16,7 @@ import { GlobalSearchResultsComponent } from '../xtream-electron/search-results/
 })
 export class HomeComponent {
     private readonly dialog = inject(MatDialog);
+    readonly formFactor = inject(FormFactorService);
 
     searchQuery = signal<string>('');
 
