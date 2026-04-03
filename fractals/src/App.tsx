@@ -8,6 +8,7 @@ import { BrowseView } from '@/components/browse/BrowseView'
 import { Sidebar } from '@/components/settings/Sidebar'
 import { AddSourceDialog } from '@/components/settings/AddSourceDialog'
 import { Player } from '@/components/player/Player'
+import { ContentDetail } from '@/components/content/ContentDetail'
 import { SettingsDialog } from '@/components/settings/SettingsDialog'
 import { ContentItem } from '@/components/browse/ContentCard'
 
@@ -28,6 +29,7 @@ function AppShell() {
   const [showAddSource, setShowAddSource] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [selectedContent, setSelectedContent] = useState<ContentItem | null>(null)
+  const [playingContent, setPlayingContent] = useState<ContentItem | null>(null)
 
   // Load sources on mount
   useEffect(() => {
@@ -96,7 +98,14 @@ function AppShell() {
         <BrowseView
           sourcesCount={sources.length}
           onAddSource={() => setShowAddSource(true)}
-          onSelectContent={setSelectedContent}
+          onSelectContent={(item) => {
+            // Live TV goes straight to player; movies/series open detail first
+            if (item.type === 'live') {
+              setPlayingContent(item)
+            } else {
+              setSelectedContent(item)
+            }
+          }}
         />
       </div>
 
@@ -113,12 +122,23 @@ function AppShell() {
         )}
       </AnimatePresence>
 
+      {/* Content detail panel */}
+      <AnimatePresence>
+        {selectedContent && !playingContent && (
+          <ContentDetail
+            item={selectedContent}
+            onPlay={(item) => { setPlayingContent(item); setSelectedContent(null) }}
+            onClose={() => setSelectedContent(null)}
+          />
+        )}
+      </AnimatePresence>
+
       {/* Player */}
       <AnimatePresence>
-        {selectedContent && (
+        {playingContent && (
           <Player
-            content={selectedContent}
-            onClose={() => setSelectedContent(null)}
+            content={playingContent}
+            onClose={() => setPlayingContent(null)}
           />
         )}
       </AnimatePresence>
