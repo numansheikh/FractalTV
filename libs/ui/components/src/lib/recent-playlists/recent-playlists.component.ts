@@ -89,10 +89,12 @@ export class RecentPlaylistsComponent {
         this.sortService.getSortOptions(),
     ]).pipe(
         map(([playlists, searchQuery, filters, sortOptions]) => {
-            const filteredPlaylists = playlists
+            // Exclude Stalker playlists (no longer supported)
+            const playlistsWithoutStalker = playlists.filter(
+                (item) => !item.macAddress
+            );
+            const filteredPlaylists = playlistsWithoutStalker
                 .filter((item) => {
-                    const isStalkerFilter =
-                        item.macAddress && filters.includes('stalker');
                     const isXtreamFilter =
                         item.username &&
                         item.password &&
@@ -102,11 +104,9 @@ export class RecentPlaylistsComponent {
                         !item.username &&
                         !item.password &&
                         !item.serverUrl &&
-                        !item.macAddress &&
                         filters.includes('m3u');
 
                     return (
-                        (isStalkerFilter && filters.includes('stalker')) ||
                         (isXtreamFilter && filters.includes('xtream')) ||
                         (isM3uFilter && filters.includes('m3u'))
                     );
@@ -123,7 +123,7 @@ export class RecentPlaylistsComponent {
 
             return {
                 playlists: sortedPlaylists,
-                totalCount: playlists.length,
+                totalCount: playlistsWithoutStalker.length,
             };
         })
     );
@@ -135,6 +135,10 @@ export class RecentPlaylistsComponent {
     openInfoDialog(data: PlaylistMeta): void {
         this.dialog.open(PlaylistInfoComponent, {
             data,
+            width: '720px',
+            maxWidth: '94vw',
+            panelClass: 'playlist-details-dialog',
+            position: { top: '6vh' },
         });
     }
 
@@ -161,8 +165,6 @@ export class RecentPlaylistsComponent {
     getPlaylist(playlistMeta: PlaylistMeta): void {
         if (playlistMeta.serverUrl) {
             this.router.navigate(['xtreams', playlistMeta._id]);
-        } else if (playlistMeta.macAddress) {
-            this.router.navigate(['stalker', playlistMeta._id]);
         } else {
             this.router.navigate(['playlists', playlistMeta._id]);
             this.playlistClicked.emit(playlistMeta._id);
@@ -217,6 +219,7 @@ export class RecentPlaylistsComponent {
                 id: item._id,
                 title: item.title,
                 ...(item.url ? { url: item.url } : { filePath: item.filePath }),
+                ...(item.serverUrl ? { serverUrl: item.serverUrl } : {}),
             });
         }
     }
@@ -248,10 +251,13 @@ export class RecentPlaylistsComponent {
                     const updateDate = Date.now();
 
                     // Update the updateDate timestamp in database (Electron)
-                    await this.databaseService.updateXtreamPlaylistDetails({
+                    const updated = await this.databaseService.updateXtreamPlaylistDetails({
                         id: item._id,
                         updateDate,
                     });
+                    if (!updated) {
+                        throw new Error('Could not update playlist in database');
+                    }
 
                     // Update the updateDate timestamp in IndexedDB
                     this.store.dispatch(
@@ -283,12 +289,17 @@ export class RecentPlaylistsComponent {
                     this.router.navigate(['xtreams', item._id]);
                 } catch (error) {
                     console.error('Error refreshing Xtream playlist:', error);
+                    const message =
+                        error instanceof Error
+                            ? error.message
+                            : String(error ?? 'Unknown error');
                     this.snackBar.open(
                         this.translate.instant(
                             'HOME.PLAYLISTS.REFRESH_XTREAM_DIALOG.ERROR'
-                        ),
+                        ) +
+                            (message ? ` ${message}` : ''),
                         undefined,
-                        { duration: 3000 }
+                        { duration: 5000 }
                     );
                 }
             },

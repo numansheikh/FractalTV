@@ -62,10 +62,10 @@ export class PlaylistSwitcherComponent {
     /** All playlists from store */
     readonly playlists = this.store.selectSignal(selectAllPlaylistsMeta);
 
-    /** Filtered playlists based on search query, sorted by importDate (newest first) */
+    /** Filtered playlists based on search query, sorted by importDate (newest first). Stalker playlists are excluded. */
     readonly filteredPlaylists = computed(() => {
         const query = this.searchQuery().toLowerCase().trim();
-        const allPlaylists = this.playlists();
+        const allPlaylists = this.playlists().filter((p) => !p.macAddress);
         const filtered = query
             ? allPlaylists.filter(
                   (p) =>
@@ -103,8 +103,8 @@ export class PlaylistSwitcherComponent {
     }
 
     private updateActivePlaylistFromRoute(url: string) {
-        // Match routes like /playlists/:id, /xtreams/:id, /stalker/:id
-        const match = url.match(/\/(playlists|xtreams|stalker)\/([^\/\?]+)/);
+        // Match routes like /playlists/:id, /xtreams/:id
+        const match = url.match(/\/(playlists|xtreams)\/([^\/\?]+)/);
         if (match) {
             this.activePlaylistId.set(match[2]);
         } else {
@@ -153,8 +153,6 @@ export class PlaylistSwitcherComponent {
     selectPlaylist(playlist: PlaylistMeta) {
         if (playlist.serverUrl) {
             this.router.navigate(['xtreams', playlist._id]);
-        } else if (playlist.macAddress) {
-            this.router.navigate(['stalker', playlist._id]);
         } else {
             this.router.navigate(['playlists', playlist._id]);
         }
@@ -162,9 +160,6 @@ export class PlaylistSwitcherComponent {
     }
 
     getPlaylistIcon(playlist: PlaylistMeta): string {
-        if (playlist.macAddress) {
-            return 'dashboard';
-        }
         if (playlist.serverUrl) {
             return 'public';
         }
@@ -175,9 +170,6 @@ export class PlaylistSwitcherComponent {
     }
 
     getPlaylistTypeLabel(playlist: PlaylistMeta): string {
-        if (playlist.macAddress) {
-            return 'Stalker Portal';
-        }
         if (playlist.serverUrl) {
             return 'Xtream Code';
         }

@@ -1,6 +1,6 @@
 import { Clipboard, ClipboardModule } from '@angular/cdk/clipboard';
 import { DatePipe } from '@angular/common';
-import { Component, inject } from '@angular/core';
+import { Component, inject, signal } from '@angular/core';
 import {
     FormControl,
     ReactiveFormsModule,
@@ -30,6 +30,16 @@ import { Playlist, PlaylistMeta } from 'shared-interfaces';
             .spacer {
                 flex: 1 1 auto;
             }
+            .playlist-details-grid {
+                display: grid;
+                grid-template-columns: 1fr;
+                gap: 0.25rem 0;
+                margin-bottom: 0.25rem;
+            }
+            .advanced-toggle {
+                margin: 0.5rem 0;
+                width: 100%;
+            }
         `,
     ],
     providers: [DatePipe],
@@ -58,6 +68,34 @@ export class PlaylistInfoComponent {
     public playlistData = inject<Playlist & { id: string }>(MAT_DIALOG_DATA);
 
     readonly isDesktop = !!window.electron;
+
+    /** TV/large-screen mode: show short form and "Advanced" section to keep fields above keyboard */
+    readonly isTVLayout = typeof window !== 'undefined' && window.innerWidth >= 960 && window.innerHeight >= 540;
+
+    /** Advanced section expanded (for TV: collapse by default so core fields fit above keyboard) */
+    readonly advancedExpanded = signal(false);
+
+    /** Scroll dialog content with D-pad when the content area has focus (TV remote) */
+    onDialogContentKeydown(e: KeyboardEvent): void {
+        const el = e.currentTarget as HTMLElement;
+        if (e.target !== el || !el) return;
+        const step = 56;
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            el.scrollTop = Math.min(el.scrollTop + step, el.scrollHeight - el.clientHeight);
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            el.scrollTop = Math.max(el.scrollTop - step, 0);
+        }
+    }
+
+    /** Scroll focused input into view (helps when OSK is open on mobile/TV) */
+    scrollFocusedFieldIntoView(e: FocusEvent): void {
+        const el = e.target as HTMLElement;
+        if (el?.matches?.('input, textarea')) {
+            setTimeout(() => el.scrollIntoView({ block: 'center', behavior: 'smooth' }), 100);
+        }
+    }
 
     /** Playlist object */
     playlist: Playlist & { id: string };
@@ -122,11 +160,12 @@ export class PlaylistInfoComponent {
                 this.playlist.password &&
                 this.playlist.serverUrl;
 
-            if (isXtream) {
+            // Only persist Xtream details to Electron SQLite when in Electron; on PWA/Capacitor the effect persists to IndexedDB via updatePlaylistMeta
+            if (isXtream && typeof window !== 'undefined' && (window as unknown as { electron?: unknown }).electron) {
                 await this.updateXtreamPlaylist(playlist);
             }
 
-            // Dispatch store action to update UI
+            // Dispatch store action to update UI (and IndexedDB on PWA via effect)
             this.store.dispatch(
                 PlaylistActions.updatePlaylistMeta({ playlist })
             );

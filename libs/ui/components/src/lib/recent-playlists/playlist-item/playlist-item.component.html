@@ -58,14 +58,6 @@
             ></span>
         </div>
     }
-    @if (item.macAddress) {
-        <mat-icon
-            matListItemIcon
-            class="upload-type-icon"
-            [matTooltip]="'HOME.PLAYLISTS.STALKER_PORTAL' | translate"
-            >dashboard</mat-icon
-        >
-    }
     <div matListItemTitle>
         {{ item.title || item.filename }}
     </div>
@@ -90,11 +82,7 @@
                 >
             }
         } @else {
-            @if (item.macAddress) {
-                Stalker Portal
-            } @else {
-                Xtream Code Playlist
-            }
+            Xtream Code Playlist
             @if (item.importDate.length > 3) {
                 | {{ 'HOME.PLAYLISTS.ADDED' | translate }}:
                 {{ item.importDate | date }}

@@ -1,57 +1,43 @@
-@use '@angular/material' as mat;
-
 :host {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-}
-
-.mat-list-base {
-    padding-top: 0;
+    display: block;
+    width: 100%;
 }
 
 .playlists-list {
     padding: 0;
+    margin: 0;
+    list-style: none;
     width: 100%;
-    overflow-x: hidden;
 }
 
 .meta {
-    font-size: 12px !important;
-    color: #666;
-    margin-top: 2px !important;
+    font-size: var(--fractals-text-xs);
+    color: var(--fractals-header-text-muted);
+    margin-top: var(--fractals-space-1);
 }
-
-// Light theme
-@media (prefers-color-scheme: light) {
-    .meta {
-        color: #757575;
-    }
-}
-
 
 #skeleton-container {
-    padding-top: 10px;
+    padding-top: var(--fractals-space-3);
     width: 100%;
 
     .skeleton-item {
         display: flex;
-        padding: 0 20px;
-        height: 72px;
+        padding: 0 var(--fractals-space-4);
+        height: 64px;
+        align-items: center;
 
         .text {
             flex: 1;
-            align-self: center;
-            padding-left: 6px;
-            flex-direction: column;
+            padding-left: var(--fractals-space-2);
             display: flex;
+            flex-direction: column;
+            gap: var(--fractals-space-1);
         }
     }
 }
 
-@media only screen and (max-width: 480px) {
+@media (max-width: 480px) {
     .favorites-icon {
-        padding-left: 0 !important;
-        display: none
+        display: none;
     }
 }

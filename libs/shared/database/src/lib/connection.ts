@@ -1,7 +1,7 @@
 /**
- * Database connection and initialization for IPTVnator
+ * Database connection and initialization for Fractals
  * Uses Drizzle ORM with better-sqlite3
- * Stores database file under ~/.iptvnator/databases/
+ * Stores database file under ~/.fractals/databases/
  *
  * Provides two connection modes:
  * - Full access (for electron-backend): creates tables, read-write
@@ -26,14 +26,14 @@ let initPromise: Promise<DatabaseInstance> | null = null;
  * Get the database file path
  */
 export function getDatabasePath(): string {
-    const dbDir = join(homedir(), '.iptvnator', 'databases');
+    const dbDir = join(homedir(), '.fractals', 'databases');
 
     // Ensure the directory exists
     if (!existsSync(dbDir)) {
         mkdirSync(dbDir, { recursive: true });
     }
 
-    return join(dbDir, 'iptvnator.db');
+    return join(dbDir, 'fractals.db');
 }
 
 /**

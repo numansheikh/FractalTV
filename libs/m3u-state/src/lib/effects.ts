@@ -295,9 +295,7 @@ export class PlaylistEffects {
                 map((playlist: Playlist) => {
                     if (playlist.serverUrl && !this.dataService.isElectron) {
                         this.router.navigate(['/xtreams/', playlist._id]);
-                    } else if (playlist.macAddress) {
-                        this.router.navigate(['stalker', playlist._id]);
-                    } else {
+                    } else if (!playlist.macAddress) {
                         this.router.navigate(['/playlists/', playlist._id]);
                     }
                     return playlist;
@@ -314,15 +312,6 @@ export class PlaylistEffects {
                             type: 'xtream',
                         });
                         this.router.navigate(['/xtreams/', playlist._id]);
-                    } else if (playlist.macAddress && this.dataService.isElectron) {
-                        // Create Stalker playlist in SQLite
-                        await window.electron.dbCreatePlaylist({
-                            id: playlist._id.toString(),
-                            name: playlist.title || '',
-                            macAddress: playlist.macAddress || '',
-                            url: playlist.portalUrl || '',
-                            type: 'stalker',
-                        });
                     }
                 })
             );

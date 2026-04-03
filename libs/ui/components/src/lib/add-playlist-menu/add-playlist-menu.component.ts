@@ -4,7 +4,7 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatMenu, MatMenuModule } from '@angular/material/menu';
 import { TranslateModule } from '@ngx-translate/core';
 
-export type PlaylistType = 'xtream' | 'url' | 'text' | 'file' | 'stalker';
+export type PlaylistType = 'xtream' | 'url' | 'text' | 'file';
 
 @Component({
     selector: 'app-add-playlist-menu',

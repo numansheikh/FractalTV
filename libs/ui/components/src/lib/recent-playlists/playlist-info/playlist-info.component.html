@@ -5,21 +5,70 @@
     <h2 mat-dialog-title>
         {{ 'HOME.PLAYLISTS.INFO_DIALOG.PLAYLIST_DETAILS' | translate }}
     </h2>
-    <mat-dialog-content class="mat-typography">
-        <mat-form-field class="full-width">
-            <mat-label>{{
-                'HOME.PLAYLISTS.INFO_DIALOG.TITLE' | translate
-            }}</mat-label>
-            <input formControlName="title" matInput />
-        </mat-form-field>
-        @if (playlist.portalUrl) {
+    <mat-dialog-content
+        class="mat-typography playlist-details-content"
+        tabindex="0"
+        (focusin)="scrollFocusedFieldIntoView($event)"
+        (keydown)="onDialogContentKeydown($event)"
+    >
+        <!-- Core details: 2x2 grid at top -->
+        <div class="playlist-details-grid">
+            
             <mat-form-field class="full-width">
                 <mat-label>{{
-                    'HOME.PLAYLISTS.INFO_DIALOG.SERVER_URL' | translate
+                    'HOME.PLAYLISTS.INFO_DIALOG.TITLE' | translate
                 }}</mat-label>
-                <input matInput formControlName="portalUrl" />
+                <input formControlName="title" matInput />
             </mat-form-field>
+
+            @if (playlist.serverUrl) {
+                <mat-form-field class="full-width">
+                    <mat-label>{{
+                        'HOME.PLAYLISTS.INFO_DIALOG.SERVER_URL' | translate
+                    }}</mat-label>
+                    <input matInput formControlName="serverUrl" />
+                </mat-form-field>
+            }
+            @if (playlist.portalUrl) {
+                <mat-form-field class="full-width">
+                    <mat-label>{{
+                        'HOME.PLAYLISTS.INFO_DIALOG.SERVER_URL' | translate
+                    }}</mat-label>
+                    <input matInput formControlName="portalUrl" />
+                </mat-form-field>
+            }
+            @if (playlist.username) {
+                <mat-form-field class="full-width">
+                    <mat-label>{{
+                        'HOME.PLAYLISTS.INFO_DIALOG.USERNAME' | translate
+                    }}</mat-label>
+                    <input matInput formControlName="username" />
+                </mat-form-field>
+            }
+            @if (playlist.password) {
+                <mat-form-field class="full-width">
+                    <mat-label>{{
+                        'HOME.PLAYLISTS.INFO_DIALOG.PASSWORD' | translate
+                    }}</mat-label>
+                    <input matInput formControlName="password" />
+                </mat-form-field>
+            }
+        </div>
+
+        @if (isTVLayout && (playlist.macAddress || playlist.portalUrl || playlist.url || playlist.filename || playlist.count || isDesktop || playlist.filePath)) {
+            <button
+                type="button"
+                mat-stroked-button
+                class="advanced-toggle"
+                (click)="advancedExpanded.set(!advancedExpanded())"
+            >
+                <mat-icon>{{ advancedExpanded() ? 'expand_less' : 'expand_more' }}</mat-icon>
+                {{ 'HOME.PLAYLISTS.INFO_DIALOG.ADVANCED' | translate }}
+            </button>
         }
+
+        @if (advancedExpanded() || !isTVLayout) {
+        <!-- Stalker / advanced portal settings -->
         @if (playlist.macAddress) {
             <mat-form-field class="full-width">
                 <mat-label>{{
@@ -60,30 +109,8 @@
                 <input matInput formControlName="stalkerSignature2" />
             </mat-form-field>
         }
-        @if (playlist.serverUrl) {
-            <mat-form-field class="full-width">
-                <mat-label>{{
-                    'HOME.PLAYLISTS.INFO_DIALOG.SERVER_URL' | translate
-                }}</mat-label>
-                <input matInput formControlName="serverUrl" />
-            </mat-form-field>
-        }
-        @if (playlist.username) {
-            <mat-form-field class="full-width">
-                <mat-label>{{
-                    'HOME.PLAYLISTS.INFO_DIALOG.USERNAME' | translate
-                }}</mat-label>
-                <input matInput formControlName="username" />
-            </mat-form-field>
-        }
-        @if (playlist.password) {
-            <mat-form-field class="full-width">
-                <mat-label>{{
-                    'HOME.PLAYLISTS.INFO_DIALOG.PASSWORD' | translate
-                }}</mat-label>
-                <input matInput formControlName="password" />
-            </mat-form-field>
-        }
+
+        <!-- Metadata / read-only-ish info -->
         @if (playlist.url) {
             <mat-form-field class="full-width">
                 <mat-label>{{
@@ -123,6 +150,8 @@
                 <input matInput formControlName="count" />
             </mat-form-field>
         }
+
+        <!-- Desktop-only advanced options -->
         @if (isDesktop) {
             <mat-form-field class="full-width mb-10">
                 <mat-label>{{
@@ -160,6 +189,7 @@
                         | translate
                 }}
             </p>
+        }
         }
     </mat-dialog-content>
     <mat-dialog-actions align="end">
