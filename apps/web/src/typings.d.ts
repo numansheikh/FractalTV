@@ -75,12 +75,6 @@ declare global {
             }>;
             setMpvPlayerPath: (mpvPlayerPath: string) => Promise<void>;
             setVlcPlayerPath: (vlcPlayerPath: string) => Promise<void>;
-            stalkerRequest: (payload: {
-                url: string;
-                macAddress: string;
-                params: Record<string, string>;
-                token?: string;
-            }) => Promise<any>;
             xtreamRequest: (payload: {
                 url: string;
                 params: Record<string, string>;
@@ -151,13 +145,17 @@ declare global {
                 playlistId: string,
                 searchTerm: string,
                 types: string[],
-                excludeHidden?: boolean
-            ) => Promise<any[]>;
+                excludeHidden?: boolean,
+                offset?: number,
+                limit?: number
+            ) => Promise<{ results: any[]; total: number }>;
             dbGlobalSearch: (
                 searchTerm: string,
                 types: string[],
-                excludeHidden?: boolean
-            ) => Promise<any[]>;
+                excludeHidden?: boolean,
+                offset?: number,
+                limit?: number
+            ) => Promise<{ results: any[]; total: number }>;
             dbGetRecentlyViewed: () => Promise<any[]>;
             dbClearRecentlyViewed: () => Promise<{ success: boolean }>;
             // Favorites

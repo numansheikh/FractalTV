@@ -10,12 +10,14 @@ import { filter, take } from 'rxjs';
 import { DataService, EpgService } from 'services';
 import {
     AUTO_UPDATE_PLAYLISTS,
+    ColorScheme,
     Language,
     OPEN_FILE,
     Settings,
     STORE_KEY,
     Theme,
 } from 'shared-interfaces';
+import { FormFactorService } from './services/form-factor.service';
 import { SettingsService } from './services/settings.service';
 import { EpgProgressPanelComponent } from './shared/epg-progress-panel/epg-progress-panel.component';
 import { GlobalRecentlyViewedComponent } from './xtream-electron/recently-viewed/global-recently-viewed.component';
@@ -32,6 +34,15 @@ export class AppComponent implements OnInit {
             window.electron && navigator.platform.toLowerCase().includes('mac')
         );
     }
+
+    @HostBinding('class.form-factor-tv') get isTV() {
+        return this.formFactor.isTV();
+    }
+
+    @HostBinding('class.form-factor-tablet') get isTablet() {
+        return this.formFactor.isTablet();
+    }
+
     private actions$ = inject(Actions);
     private dataService = inject(DataService);
     private dialog = inject(MatDialog);
@@ -40,6 +51,7 @@ export class AppComponent implements OnInit {
     private router = inject(Router);
     private store = inject(Store);
     private translate = inject(TranslateService);
+    private formFactor = inject(FormFactorService);
     private settingsService = inject(SettingsService);
 
     /** Default language as fallback */
@@ -117,8 +129,14 @@ export class AppComponent implements OnInit {
                     } else {
                         this.detectDarkMode();
                     }
+                    if (settings.colorScheme !== undefined) {
+                        this.settingsService.changeColorScheme(settings.colorScheme);
+                    } else {
+                        this.settingsService.changeColorScheme(ColorScheme.Modern);
+                    }
                 } else {
                     this.detectDarkMode();
+                    this.settingsService.changeColorScheme(ColorScheme.Modern);
                 }
             });
     }

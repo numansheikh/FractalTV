@@ -1,3 +1,4 @@
+import { ColorScheme } from './color-scheme.enum';
 import { Language } from './language.enum';
 import { StreamFormat } from './stream-format.enum';
 import { Theme } from './theme.enum';
@@ -23,6 +24,12 @@ export interface Settings {
     language: Language;
     showCaptions: boolean;
     theme: Theme;
+    /** Visual style: Modern (default) or Vintage (warm, retro) */
+    colorScheme: ColorScheme;
+    /** When TMDB enrichment is used: prefer TMDB poster/backdrop over provider thumbnail */
+    preferTmdbPoster: boolean;
+    /** Per-category override: key = `${playlistId}_${categoryId}`, value = prefer TMDB poster for that category */
+    preferTmdbPosterByCategory?: Record<string, boolean>;
     mpvPlayerPath: string;
     mpvReuseInstance: boolean;
     vlcPlayerPath: string;

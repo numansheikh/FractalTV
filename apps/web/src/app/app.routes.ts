@@ -1,5 +1,4 @@
 import { Routes } from '@angular/router';
-import { stalkerRoutes } from './stalker/stalker.routes';
 import { xtreamRoutes } from './xtream-electron/xtream.routes';
 
 export const routes: Routes = [
@@ -47,14 +46,6 @@ export const routes: Routes = [
                       ),
               },
           ]),
-    {
-        path: 'portals/:id',
-        loadComponent: () =>
-            import('./stalker/stalker-main-container.component').then(
-                (c) => c.StalkerMainContainerComponent
-            ),
-    },
-    ...stalkerRoutes,
     {
         path: '**',
         redirectTo: '',

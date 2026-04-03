@@ -1,3 +1,4 @@
+export * from './lib/color-scheme.enum';
 export * from './lib/channel.interface';
 export * from './lib/channel.model';
 export * from './lib/constants';
