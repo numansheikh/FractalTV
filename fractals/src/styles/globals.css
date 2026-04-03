@@ -1,27 +1,27 @@
 @import "tailwindcss";
 
 @theme {
-  /* Color palette */
-  --color-bg: #0a0a0f;
-  --color-surface: #111118;
-  --color-card: #18181f;
-  --color-card-hover: #1f1f2a;
-  --color-border: rgba(255, 255, 255, 0.07);
-  --color-border-strong: rgba(255, 255, 255, 0.12);
+  /* ─── Lifted dark theme — atmospheric navy, not pure black ─────────────── */
+  --color-bg: #0e0e1a;
+  --color-surface: #141422;
+  --color-card: #1c1c2e;
+  --color-card-hover: #242438;
+  --color-border: rgba(255, 255, 255, 0.08);
+  --color-border-strong: rgba(255, 255, 255, 0.14);
 
   --color-primary: #7c4dff;
   --color-primary-hover: #9462ff;
-  --color-primary-dim: rgba(124, 77, 255, 0.15);
+  --color-primary-dim: rgba(124, 77, 255, 0.12);
   --color-accent: #b388ff;
 
-  --color-text-primary: #e2dff5;
-  --color-text-secondary: #6e6882;
-  --color-text-muted: #3e3a52;
+  --color-text-primary: #e4e0f8;
+  --color-text-secondary: #7872a0;
+  --color-text-muted: #45405e;
 
   --color-success: #4ade80;
   --color-warning: #fbbf24;
   --color-error: #f87171;
-  --color-live: #f87171;
+  --color-live: #fb7185;
   --color-movie: #60a5fa;
   --color-series: #86efac;
 
@@ -60,7 +60,7 @@ body {
   -webkit-app-region: no-drag;
 }
 
-/* Scrollbar styling */
+/* Scrollbar */
 ::-webkit-scrollbar {
   width: 4px;
   height: 4px;
@@ -69,11 +69,11 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.1);
   border-radius: 2px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.18);
 }
 
 /* Focus ring */
@@ -83,7 +83,6 @@ body {
   border-radius: 4px;
 }
 
-/* Transition defaults */
 button {
   cursor: pointer;
 }
