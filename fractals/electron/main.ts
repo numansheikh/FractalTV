@@ -1,5 +1,7 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, shell } from 'electron'
 import { join } from 'path'
+import { getDb } from './database/connection'
+import { registerHandlers } from './ipc/handlers'
 
 const isDev = !app.isPackaged
 
@@ -46,7 +48,8 @@ if (!gotTheLock) {
   })
 
   app.whenReady().then(() => {
-    ipcMain.handle('ping', () => 'pong')
+    getDb() // Initialize database on startup
+    registerHandlers()
     createWindow()
 
     app.on('activate', () => {

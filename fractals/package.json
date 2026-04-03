@@ -15,14 +15,18 @@
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.2.2",
+    "better-sqlite3": "^12.8.0",
+    "drizzle-orm": "^0.45.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "tailwindcss": "^4.2.2"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",
+    "drizzle-kit": "^0.31.10",
     "electron": "^35.1.5",
     "electron-builder": "^25.1.8",
     "electron-vite": "^5.0.0",
