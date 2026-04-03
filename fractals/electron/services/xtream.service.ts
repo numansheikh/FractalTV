@@ -1,7 +1,13 @@
 import { getDb, getSqlite } from '../database/connection'
 import { sources, categories, content, contentSources } from '../database/schema'
-import { eq, and } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import { randomUUID } from 'crypto'
+
+/** Strip diacritics for accent-insensitive FTS indexing. */
+function normalize(text: string | null | undefined): string | null {
+  if (!text) return null
+  return text.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+}
 
 // ─── Xtream API Types ─────────────────────────────────────────────────────────
 
@@ -288,7 +294,7 @@ export class XtreamService {
           stream.tv_archive ? 1 : 0, stream.tv_archive_duration || 0
         )
         insertSource.run(contentSourceId, contentId, sourceId, String(stream.stream_id))
-        updateFts.run(contentId, stream.name)
+        updateFts.run(contentId, normalize(stream.name))
       }
     })
 
@@ -332,7 +338,7 @@ export class XtreamService {
           stream.container_extension || null
         )
         insertSource.run(contentSourceId, contentId, sourceId, String(stream.stream_id))
-        updateFts.run(contentId, stream.name)
+        updateFts.run(contentId, normalize(stream.name))
       }
     })
 
@@ -375,7 +381,7 @@ export class XtreamService {
           series.rating_5based ? series.rating_5based * 2 : null
         )
         insertSource.run(contentSourceId, contentId, sourceId, String(series.series_id))
-        updateFts.run(contentId, series.name, series.plot || null, series.cast || null, series.director || null)
+        updateFts.run(contentId, normalize(series.name), normalize(series.plot), normalize(series.cast), normalize(series.director))
       }
     })
 

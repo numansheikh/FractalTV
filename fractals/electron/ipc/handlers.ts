@@ -64,7 +64,13 @@ export function registerHandlers() {
     offset?: number
   }) => {
     const sqlite = getSqlite()
-    const { query, type, limit = 50, offset = 0 } = args
+    const { type, limit = 50, offset = 0 } = args
+    // Normalize: decompose accented chars then strip combining marks
+    // "café" → "cafe", "ñ" → "n", "Ö" → "O" — matches both ways
+    const query = args.query
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim()
 
     if (!query || query.trim().length === 0) {
       // Empty query = return recent/browse content

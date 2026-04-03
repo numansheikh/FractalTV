@@ -143,6 +143,8 @@ function createTables(db: Database.Database) {
     );
 
     -- FTS5 virtual table for full-text search
+    -- unicode61 with remove_diacritics=2 strips accents at index AND query time
+    -- so "o" matches "ò ô œ ö ó ø" etc, "e" matches "é è ê ë", etc.
     CREATE VIRTUAL TABLE IF NOT EXISTS content_fts USING fts5(
       content_id UNINDEXED,
       title,
@@ -152,7 +154,7 @@ function createTables(db: Database.Database) {
       director,
       genres,
       keywords,
-      tokenize = 'unicode61'
+      tokenize = 'unicode61 remove_diacritics 2'
     );
 
     -- Indexes
