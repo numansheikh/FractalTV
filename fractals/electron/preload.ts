@@ -37,6 +37,13 @@ export const api = {
     toggleWatchlist: (contentId: string) => ipcRenderer.invoke('user:toggle-watchlist', contentId),
   },
 
+  // TMDB enrichment
+  enrichment: {
+    setApiKey: (key: string) => ipcRenderer.invoke('enrichment:set-api-key', key),
+    status: () => ipcRenderer.invoke('enrichment:status'),
+    start: (apiKey?: string) => ipcRenderer.invoke('enrichment:start', apiKey),
+  },
+
   // Events from main process
   on: (channel: string, callback: (...args: unknown[]) => void) => {
     ipcRenderer.on(channel, (_event, ...args) => callback(...args))

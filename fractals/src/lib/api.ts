@@ -48,6 +48,15 @@ export const api = {
       isElectron ? window.api.user.toggleWatchlist(contentId) : Promise.resolve({ watchlist: false }),
   },
 
+  enrichment: {
+    setApiKey: (key: string) =>
+      isElectron ? window.api.enrichment.setApiKey(key) : Promise.resolve({ success: false }),
+    status: () =>
+      isElectron ? window.api.enrichment.status() : Promise.resolve({ total: 0, enriched: 0, pending: 0 }),
+    start: (apiKey?: string) =>
+      isElectron ? window.api.enrichment.start(apiKey) : Promise.resolve({ success: false }),
+  },
+
   on: (channel: string, callback: (...args: unknown[]) => void) => {
     if (isElectron) return window.api.on(channel, callback)
     return () => {}

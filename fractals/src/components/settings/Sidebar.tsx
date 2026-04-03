@@ -6,9 +6,10 @@ interface Props {
   onAddSource: () => void
   onSyncSource: (id: string) => void
   onRemoveSource: (id: string) => void
+  onOpenSettings: () => void
 }
 
-export function Sidebar({ sources, onAddSource, onSyncSource, onRemoveSource }: Props) {
+export function Sidebar({ sources, onAddSource, onSyncSource, onRemoveSource, onOpenSettings }: Props) {
   return (
     <div
       className="flex h-full flex-shrink-0 flex-col"
@@ -88,14 +89,25 @@ export function Sidebar({ sources, onAddSource, onSyncSource, onRemoveSource }: 
 
       {/* Footer */}
       <div
-        style={{
-          padding: '10px 16px',
-          borderTop: '1px solid var(--color-border)',
-        }}
+        className="flex items-center justify-between"
+        style={{ padding: '10px 12px 10px 16px', borderTop: '1px solid var(--color-border)' }}
       >
         <span className="font-mono text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
           v0.1.0
         </span>
+        <button
+          onClick={onOpenSettings}
+          className="flex items-center justify-center rounded-md p-1.5 transition-colors"
+          style={{ color: 'var(--color-text-muted)' }}
+          title="Settings (⌘,)"
+          onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--color-text-secondary)'; e.currentTarget.style.background = 'var(--color-card)' }}
+          onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--color-text-muted)'; e.currentTarget.style.background = 'transparent' }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round">
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+          </svg>
+        </button>
       </div>
     </div>
   )

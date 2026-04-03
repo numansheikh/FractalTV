@@ -8,6 +8,7 @@ import { BrowseView } from '@/components/browse/BrowseView'
 import { Sidebar } from '@/components/settings/Sidebar'
 import { AddSourceDialog } from '@/components/settings/AddSourceDialog'
 import { Player } from '@/components/player/Player'
+import { SettingsDialog } from '@/components/settings/SettingsDialog'
 import { ContentItem } from '@/components/browse/ContentCard'
 
 const queryClient = new QueryClient({
@@ -25,6 +26,7 @@ export function App() {
 function AppShell() {
   const { sources, setSources, updateSource } = useSourcesStore()
   const [showAddSource, setShowAddSource] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
   const [selectedContent, setSelectedContent] = useState<ContentItem | null>(null)
 
   // Load sources on mount
@@ -85,6 +87,7 @@ function AppShell() {
         onAddSource={() => setShowAddSource(true)}
         onSyncSource={handleSync}
         onRemoveSource={handleRemove}
+        onOpenSettings={() => setShowSettings(true)}
       />
 
       {/* Main content area */}
@@ -104,6 +107,9 @@ function AppShell() {
             onClose={() => setShowAddSource(false)}
             onAdded={handleSourceAdded}
           />
+        )}
+        {showSettings && (
+          <SettingsDialog onClose={() => setShowSettings(false)} />
         )}
       </AnimatePresence>
 

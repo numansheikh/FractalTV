@@ -3,6 +3,7 @@ import { getDb, getSqlite } from '../database/connection'
 import { sources } from '../database/schema'
 import { eq } from 'drizzle-orm'
 import { xtreamService, SyncProgress } from '../services/xtream.service'
+import { tmdbService } from '../services/tmdb.service'
 
 export function registerHandlers() {
 
@@ -207,5 +208,46 @@ export function registerHandlers() {
     `).run(contentId)
     const row = sqlite.prepare('SELECT watchlist FROM user_data WHERE content_id = ?').get(contentId) as any
     return { watchlist: !!row?.watchlist }
+  })
+
+  // ── TMDB enrichment ──────────────────────────────────────────────────────
+
+  ipcMain.handle('enrichment:set-api-key', (_event, key: string) => {
+    tmdbService.setApiKey(key)
+    return { success: true }
+  })
+
+  ipcMain.handle('enrichment:status', () => {
+    const sqlite = getSqlite()
+    const total = (sqlite.prepare('SELECT COUNT(*) as n FROM content WHERE type != "live"').get() as any).n
+    const enriched = (sqlite.prepare('SELECT COUNT(*) as n FROM content WHERE type != "live" AND enriched = 1').get() as any).n
+    return { total, enriched, pending: total - enriched }
+  })
+
+  ipcMain.handle('enrichment:start', async (event, apiKey?: string) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const sqlite = getSqlite()
+
+    if (apiKey) tmdbService.setApiKey(apiKey)
+
+    // Get unenriched content IDs (batch up to 500 at a time to avoid memory issues)
+    const rows = sqlite.prepare(
+      'SELECT id FROM content WHERE type != "live" AND enriched = 0 ORDER BY updated_at DESC LIMIT 500'
+    ).all() as { id: string }[]
+
+    if (rows.length === 0) return { success: true, message: 'Nothing to enrich' }
+
+    const ids = rows.map((r) => r.id)
+
+    // Run in background, send progress events
+    tmdbService.enrichBatch(ids, (done, total) => {
+      win?.webContents.send('enrichment:progress', { done, total })
+    }).then(() => {
+      win?.webContents.send('enrichment:progress', { done: ids.length, total: ids.length, complete: true })
+    }).catch((err) => {
+      win?.webContents.send('enrichment:progress', { error: String(err) })
+    })
+
+    return { success: true, message: `Enriching ${ids.length} items…` }
   })
 }
