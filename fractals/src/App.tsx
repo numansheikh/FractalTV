@@ -35,7 +35,6 @@ function AppShell() {
   useEffect(() => {
     const unsub = api.on('sync:progress', (progress: any) => {
       if (progress.phase === 'done') {
-        // Refresh sources list after sync
         api.sources.list().then((list) => setSources(list as Source[]))
         queryClient.invalidateQueries({ queryKey: ['search'] })
       } else if (progress.phase === 'syncing' || progress.phase === 'error') {
@@ -69,7 +68,16 @@ function AppShell() {
   }
 
   return (
-    <div className="flex h-full w-full overflow-hidden" style={{ background: 'var(--color-bg)' }}>
+    <div
+      className="flex h-full w-full overflow-hidden"
+      style={{ background: 'var(--color-bg)' }}
+    >
+      {/* macOS drag region — sits behind everything at the top */}
+      <div
+        className="drag-region pointer-events-none fixed inset-x-0 top-0 z-10"
+        style={{ height: '28px' }}
+      />
+
       {/* Sidebar */}
       <Sidebar
         sources={sources}
@@ -98,12 +106,25 @@ function AppShell() {
         )}
       </AnimatePresence>
 
-      {/* TODO: Content detail + Player (Phase 6) */}
+      {/* TODO: Content detail + Player */}
       {selectedContent && (
-        <div className="fixed bottom-4 right-4 rounded-lg px-3 py-2 text-xs shadow-lg"
-          style={{ background: 'var(--color-card)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}>
-          Selected: <span style={{ color: 'var(--color-text-primary)' }}>{selectedContent.title}</span>
-          <button onClick={() => setSelectedContent(null)} className="ml-2" style={{ color: 'var(--color-text-muted)' }}>✕</button>
+        <div
+          className="fixed bottom-4 right-4 z-50 rounded-lg px-3 py-2 text-xs shadow-xl"
+          style={{
+            background: 'var(--color-card)',
+            color: 'var(--color-text-secondary)',
+            border: '1px solid var(--color-border-strong)',
+          }}
+        >
+          Selected:{' '}
+          <span style={{ color: 'var(--color-text-primary)' }}>{selectedContent.title}</span>
+          <button
+            onClick={() => setSelectedContent(null)}
+            className="ml-2 transition-colors"
+            style={{ color: 'var(--color-text-muted)' }}
+          >
+            ✕
+          </button>
         </div>
       )}
     </div>

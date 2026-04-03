@@ -13,7 +13,6 @@ export function AddSourceDialog({ onClose, onAdded }: Props) {
   const [step, setStep] = useState<Step>('form')
   const [error, setError] = useState('')
   const [syncMessage, setSyncMessage] = useState('')
-
   const [form, setForm] = useState({ name: '', serverUrl: '', username: '', password: '' })
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -23,8 +22,10 @@ export function AddSourceDialog({ onClose, onAdded }: Props) {
     setStep('testing')
     setError('')
 
-    // Derive name from URL if not provided
-    const name = form.name.trim() || new URL(form.serverUrl.startsWith('http') ? form.serverUrl : `http://${form.serverUrl}`).hostname
+    const name =
+      form.name.trim() ||
+      new URL(form.serverUrl.startsWith('http') ? form.serverUrl : `http://${form.serverUrl}`)
+        .hostname
 
     const result = await api.sources.addXtream({ ...form, name })
 
@@ -34,18 +35,19 @@ export function AddSourceDialog({ onClose, onAdded }: Props) {
       return
     }
 
-    // Trigger sync
     setStep('syncing')
-    setSyncMessage('Starting sync...')
+    setSyncMessage('Starting sync…')
 
-    // Listen for progress
     const unsub = api.on('sync:progress', (progress: any) => {
       setSyncMessage(progress.message)
       if (progress.phase === 'done' || progress.phase === 'error') {
         unsub()
         if (progress.phase === 'done') {
           setStep('done')
-          setTimeout(() => { onAdded(); onClose() }, 1200)
+          setTimeout(() => {
+            onAdded()
+            onClose()
+          }, 1000)
         } else {
           setStep('error')
           setError(progress.message)
@@ -58,140 +60,239 @@ export function AddSourceDialog({ onClose, onAdded }: Props) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
-      {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
 
       <motion.div
-        initial={{ opacity: 0, scale: 0.95, y: 8 }}
+        initial={{ opacity: 0, scale: 0.96, y: 6 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.95, y: 8 }}
+        exit={{ opacity: 0, scale: 0.96, y: 6 }}
         transition={{ duration: 0.15 }}
-        className="relative w-full max-w-md rounded-xl border p-6 shadow-2xl"
-        style={{ background: 'var(--color-surface)', borderColor: 'var(--color-border)' }}
+        className="relative w-full max-w-sm rounded-xl shadow-2xl"
+        style={{
+          background: 'var(--color-surface)',
+          border: '1px solid var(--color-border-strong)',
+        }}
       >
-        <h2 className="mb-5 text-base font-semibold" style={{ color: 'var(--color-text-primary)' }}>
-          Add Xtream Source
-        </h2>
+        {/* Header */}
+        <div
+          className="flex items-center justify-between"
+          style={{ padding: '16px 20px 0' }}
+        >
+          <h2
+            className="text-sm font-semibold"
+            style={{ color: 'var(--color-text-primary)' }}
+          >
+            Add Xtream Source
+          </h2>
+          <button
+            onClick={onClose}
+            className="flex items-center justify-center rounded-md p-1 transition-colors"
+            style={{ color: 'var(--color-text-muted)' }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--color-text-secondary)' }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--color-text-muted)' }}
+          >
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+              <path d="M1 1l12 12M13 1L1 13" />
+            </svg>
+          </button>
+        </div>
 
-        <AnimatePresence mode="wait">
-          {step === 'form' && (
-            <motion.form key="form" onSubmit={handleSubmit} className="flex flex-col gap-3">
-              <Field
-                label="Name (optional)"
-                placeholder="My IPTV Provider"
-                value={form.name}
-                onChange={(v) => setForm((f) => ({ ...f, name: v }))}
-              />
-              <Field
-                label="Server URL"
-                placeholder="http://provider.example.com:8080"
-                value={form.serverUrl}
-                onChange={(v) => setForm((f) => ({ ...f, serverUrl: v }))}
-                required
-              />
-              <div className="grid grid-cols-2 gap-3">
+        {/* Body */}
+        <div style={{ padding: '16px 20px 20px' }}>
+          <AnimatePresence mode="wait">
+            {step === 'form' && (
+              <motion.form
+                key="form"
+                onSubmit={handleSubmit}
+                className="flex flex-col gap-3"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+              >
                 <Field
-                  label="Username"
-                  placeholder="username"
-                  value={form.username}
-                  onChange={(v) => setForm((f) => ({ ...f, username: v }))}
-                  required
+                  label="Name"
+                  placeholder="My IPTV (auto-detected if blank)"
+                  value={form.name}
+                  onChange={(v) => setForm((f) => ({ ...f, name: v }))}
                 />
                 <Field
-                  label="Password"
-                  placeholder="password"
-                  type="password"
-                  value={form.password}
-                  onChange={(v) => setForm((f) => ({ ...f, password: v }))}
+                  label="Server URL"
+                  placeholder="http://provider.example.com:8080"
+                  value={form.serverUrl}
+                  onChange={(v) => setForm((f) => ({ ...f, serverUrl: v }))}
                   required
                 />
-              </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field
+                    label="Username"
+                    placeholder="username"
+                    value={form.username}
+                    onChange={(v) => setForm((f) => ({ ...f, username: v }))}
+                    required
+                  />
+                  <Field
+                    label="Password"
+                    placeholder="password"
+                    type="password"
+                    value={form.password}
+                    onChange={(v) => setForm((f) => ({ ...f, password: v }))}
+                    required
+                  />
+                </div>
 
-              <div className="mt-2 flex gap-2">
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className="flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-colors"
-                  style={{ background: 'var(--color-card)', color: 'var(--color-text-secondary)' }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 rounded-lg px-4 py-2 text-sm font-semibold transition-opacity hover:opacity-90"
-                  style={{ background: 'var(--color-primary)', color: '#fff' }}
-                >
-                  Connect
-                </button>
-              </div>
-            </motion.form>
-          )}
+                <div className="mt-1 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    className="flex-1 rounded-lg py-2 text-xs font-medium transition-colors"
+                    style={{
+                      background: 'var(--color-card)',
+                      color: 'var(--color-text-secondary)',
+                      border: '1px solid var(--color-border)',
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--color-text-primary)' }}
+                    onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--color-text-secondary)' }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 rounded-lg py-2 text-xs font-semibold transition-opacity hover:opacity-90"
+                    style={{ background: 'var(--color-primary)', color: '#fff' }}
+                  >
+                    Connect
+                  </button>
+                </div>
+              </motion.form>
+            )}
 
-          {(step === 'testing' || step === 'syncing') && (
-            <motion.div key="progress" className="flex flex-col items-center gap-4 py-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-              <Spinner />
-              <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-                {step === 'testing' ? 'Testing connection...' : syncMessage}
-              </p>
-            </motion.div>
-          )}
+            {(step === 'testing' || step === 'syncing') && (
+              <motion.div
+                key="progress"
+                className="flex flex-col items-center gap-4 py-6"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+              >
+                <Spinner />
+                <div className="text-center">
+                  <p className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>
+                    {step === 'testing' ? 'Testing connection…' : 'Syncing library'}
+                  </p>
+                  {step === 'syncing' && syncMessage && (
+                    <p className="mt-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                      {syncMessage}
+                    </p>
+                  )}
+                </div>
+              </motion.div>
+            )}
 
-          {step === 'done' && (
-            <motion.div key="done" className="flex flex-col items-center gap-3 py-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-              <div className="text-2xl">✓</div>
-              <p className="text-sm font-medium" style={{ color: 'var(--color-success)' }}>Sync complete!</p>
-            </motion.div>
-          )}
+            {step === 'done' && (
+              <motion.div
+                key="done"
+                className="flex flex-col items-center gap-3 py-6"
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0 }}
+              >
+                <div
+                  className="flex h-10 w-10 items-center justify-center rounded-full"
+                  style={{ background: 'rgba(74, 222, 128, 0.15)' }}
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--color-success)' }}>
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                </div>
+                <p className="text-sm font-medium" style={{ color: 'var(--color-success)' }}>
+                  Sync complete
+                </p>
+              </motion.div>
+            )}
 
-          {step === 'error' && (
-            <motion.div key="error" className="flex flex-col gap-3" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-              <p className="rounded-lg p-3 text-sm" style={{ background: 'rgba(239,83,80,0.1)', color: 'var(--color-error)' }}>
-                {error}
-              </p>
-              <div className="flex gap-2">
-                <button
-                  onClick={onClose}
-                  className="flex-1 rounded-lg px-4 py-2 text-sm"
-                  style={{ background: 'var(--color-card)', color: 'var(--color-text-secondary)' }}
+            {step === 'error' && (
+              <motion.div
+                key="error"
+                className="flex flex-col gap-3"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+              >
+                <div
+                  className="rounded-lg p-3 text-xs"
+                  style={{
+                    background: 'rgba(248, 113, 113, 0.08)',
+                    color: 'var(--color-error)',
+                    border: '1px solid rgba(248, 113, 113, 0.2)',
+                    lineHeight: '1.5',
+                  }}
                 >
-                  Cancel
-                </button>
-                <button
-                  onClick={() => setStep('form')}
-                  className="flex-1 rounded-lg px-4 py-2 text-sm font-medium"
-                  style={{ background: 'var(--color-card-hover)', color: 'var(--color-text-primary)' }}
-                >
-                  Try Again
-                </button>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+                  {error}
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={onClose}
+                    className="flex-1 rounded-lg py-2 text-xs"
+                    style={{
+                      background: 'var(--color-card)',
+                      color: 'var(--color-text-secondary)',
+                      border: '1px solid var(--color-border)',
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => setStep('form')}
+                    className="flex-1 rounded-lg py-2 text-xs font-medium"
+                    style={{ background: 'var(--color-card-hover)', color: 'var(--color-text-primary)' }}
+                  >
+                    Try again
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
       </motion.div>
     </div>
   )
 }
 
-function Field({ label, placeholder, value, onChange, type = 'text', required }: {
-  label: string; placeholder: string; value: string
-  onChange: (v: string) => void; type?: string; required?: boolean
+function Field({
+  label,
+  placeholder,
+  value,
+  onChange,
+  type = 'text',
+  required,
+}: {
+  label: string
+  placeholder: string
+  value: string
+  onChange: (v: string) => void
+  type?: string
+  required?: boolean
 }) {
   return (
     <div className="flex flex-col gap-1">
-      <label className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>{label}</label>
+      <label className="text-[11px] font-medium" style={{ color: 'var(--color-text-secondary)' }}>
+        {label}
+      </label>
       <input
         type={type}
         placeholder={placeholder}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         required={required}
-        className="rounded-lg px-3 py-2 text-sm outline-none transition-colors"
+        className="rounded-lg px-3 py-2 text-xs outline-none"
         style={{
           background: 'var(--color-card)',
           border: '1px solid var(--color-border)',
           color: 'var(--color-text-primary)',
+          caretColor: 'var(--color-primary)',
+          transition: 'border-color 0.15s',
         }}
-        onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--color-primary)' }}
+        onFocus={(e) => { e.currentTarget.style.borderColor = 'rgba(124,77,255,0.4)' }}
         onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--color-border)' }}
       />
     </div>
@@ -201,8 +302,8 @@ function Field({ label, placeholder, value, onChange, type = 'text', required }:
 function Spinner() {
   return (
     <div
-      className="h-8 w-8 animate-spin rounded-full border-2 border-t-transparent"
-      style={{ borderColor: 'var(--color-primary)', borderTopColor: 'transparent' }}
+      className="h-7 w-7 animate-spin rounded-full border-2"
+      style={{ borderColor: 'var(--color-primary-dim)', borderTopColor: 'var(--color-primary)' }}
     />
   )
 }

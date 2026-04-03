@@ -11,81 +11,244 @@ interface Props {
 export function Sidebar({ sources, onAddSource, onSyncSource, onRemoveSource }: Props) {
   return (
     <div
-      className="flex h-full w-52 flex-shrink-0 flex-col border-r"
-      style={{ background: 'var(--color-surface)', borderColor: 'var(--color-border)' }}
+      className="flex h-full flex-shrink-0 flex-col"
+      style={{
+        width: '200px',
+        background: 'var(--color-surface)',
+        borderRight: '1px solid var(--color-border)',
+      }}
     >
-      {/* Logo */}
-      <div className="flex items-center gap-2.5 px-4 py-4 border-b" style={{ borderColor: 'var(--color-border)' }}>
-        <FractalsIcon size={24} />
-        <span className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>Fractals</span>
+      {/* Logo — drag region safe zone with macOS traffic lights offset */}
+      <div
+        className="drag-region flex items-center gap-2.5"
+        style={{
+          paddingTop: '18px',
+          paddingBottom: '10px',
+          paddingLeft: '16px',
+          paddingRight: '16px',
+          borderBottom: '1px solid var(--color-border)',
+        }}
+      >
+        <div className="no-drag flex items-center gap-2.5">
+          <FractalsIcon size={20} />
+          <span
+            className="text-sm font-semibold tracking-tight"
+            style={{ color: 'var(--color-text-primary)', letterSpacing: '-0.01em' }}
+          >
+            Fractals
+          </span>
+        </div>
       </div>
 
-      {/* Sources */}
-      <div className="flex-1 overflow-y-auto p-3">
-        <div className="mb-2 flex items-center justify-between">
-          <span className="text-[10px] font-semibold uppercase tracking-widest"
-            style={{ color: 'var(--color-text-muted)' }}>
+      {/* Sources section */}
+      <div className="flex-1 overflow-y-auto" style={{ padding: '12px 8px' }}>
+        {/* Section header */}
+        <div
+          className="no-drag mb-1 flex items-center justify-between"
+          style={{ padding: '0 8px 4px' }}
+        >
+          <span
+            className="text-[10px] font-semibold uppercase tracking-widest"
+            style={{ color: 'var(--color-text-muted)', letterSpacing: '0.08em' }}
+          >
             Sources
           </span>
           <button
             onClick={onAddSource}
-            className="rounded px-1.5 py-0.5 text-xs transition-colors"
+            className="no-drag flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium transition-all"
             style={{ color: 'var(--color-primary)' }}
-            title="Add source"
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'var(--color-primary-dim)'
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'transparent'
+            }}
           >
-            + Add
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+              <path d="M5 1v8M1 5h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+            Add
           </button>
         </div>
 
         {sources.length === 0 ? (
-          <p className="text-xs py-2" style={{ color: 'var(--color-text-muted)' }}>
-            No sources yet
-          </p>
+          <div style={{ padding: '8px 8px' }}>
+            <p className="text-xs" style={{ color: 'var(--color-text-muted)', lineHeight: '1.5' }}>
+              No sources yet
+            </p>
+          </div>
         ) : (
-          <div className="flex flex-col gap-1">
+          <div className="flex flex-col gap-0.5">
             {sources.map((src) => (
-              <div key={src.id} className="group rounded-lg p-2.5"
-                style={{ background: 'var(--color-card)' }}>
-                <div className="flex items-center justify-between mb-0.5">
-                  <span className="truncate text-xs font-medium" style={{ color: 'var(--color-text-primary)' }}>
-                    {src.name}
-                  </span>
-                  <StatusDot status={src.status} />
-                </div>
-                <p className="text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
-                  {src.itemCount > 0 ? `${src.itemCount.toLocaleString()} items` : src.status === 'syncing' ? 'Syncing...' : 'Not synced'}
-                </p>
-                {/* Action buttons — visible on hover */}
-                <div className="mt-1.5 hidden gap-1 group-hover:flex">
-                  <button onClick={() => onSyncSource(src.id)}
-                    className="rounded px-2 py-0.5 text-[10px] transition-colors"
-                    style={{ background: 'var(--color-surface)', color: 'var(--color-text-secondary)' }}>
-                    ↻ Sync
-                  </button>
-                  <button onClick={() => onRemoveSource(src.id)}
-                    className="rounded px-2 py-0.5 text-[10px] transition-colors"
-                    style={{ background: 'var(--color-surface)', color: 'var(--color-error)' }}>
-                    ✕
-                  </button>
-                </div>
-              </div>
+              <SourceRow
+                key={src.id}
+                source={src}
+                onSync={onSyncSource}
+                onRemove={onRemoveSource}
+              />
             ))}
           </div>
         )}
       </div>
 
-      {/* Version */}
-      <div className="border-t px-4 py-3" style={{ borderColor: 'var(--color-border)' }}>
-        <span className="text-[10px] font-mono" style={{ color: 'var(--color-text-muted)' }}>v0.1.0</span>
+      {/* Footer */}
+      <div
+        style={{
+          padding: '8px 16px',
+          borderTop: '1px solid var(--color-border)',
+        }}
+      >
+        <span
+          className="font-mono text-[10px]"
+          style={{ color: 'var(--color-text-muted)' }}
+        >
+          v0.1.0
+        </span>
       </div>
     </div>
   )
 }
 
-function StatusDot({ status }: { status: Source['status'] }) {
-  const colors = { active: '#4caf50', error: '#ef5350', syncing: '#ffab40' }
+function SourceRow({
+  source,
+  onSync,
+  onRemove,
+}: {
+  source: Source
+  onSync: (id: string) => void
+  onRemove: (id: string) => void
+}) {
   return (
-    <div className="h-1.5 w-1.5 flex-shrink-0 rounded-full"
-      style={{ background: colors[status], boxShadow: status === 'syncing' ? `0 0 4px ${colors.syncing}` : undefined }} />
+    <div
+      className="group rounded-md"
+      style={{ padding: '6px 8px' }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = 'var(--color-card)'
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = 'transparent'
+      }}
+    >
+      <div className="flex items-center gap-2">
+        <StatusDot status={source.status} />
+        <span
+          className="min-w-0 flex-1 truncate text-xs font-medium"
+          style={{ color: 'var(--color-text-primary)' }}
+        >
+          {source.name}
+        </span>
+        {/* Action icons — appear on hover */}
+        <div className="hidden shrink-0 items-center gap-0.5 group-hover:flex">
+          <IconButton
+            title="Sync"
+            onClick={() => onSync(source.id)}
+            disabled={source.status === 'syncing'}
+          >
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              style={{ transform: source.status === 'syncing' ? 'rotate(360deg)' : undefined }}
+            >
+              <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+              <path d="M21 3v5h-5" />
+              <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+              <path d="M8 16H3v5" />
+            </svg>
+          </IconButton>
+          <IconButton
+            title="Remove"
+            onClick={() => onRemove(source.id)}
+            danger
+          >
+            <svg
+              width="10"
+              height="10"
+              viewBox="0 0 10 10"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+            >
+              <path d="M1 1l8 8M9 1L1 9" />
+            </svg>
+          </IconButton>
+        </div>
+      </div>
+
+      <div style={{ paddingLeft: '16px' }}>
+        <p className="text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
+          {source.status === 'syncing'
+            ? 'Syncing...'
+            : source.itemCount > 0
+              ? `${source.itemCount.toLocaleString()} items`
+              : 'Not synced'}
+        </p>
+      </div>
+    </div>
+  )
+}
+
+function IconButton({
+  children,
+  title,
+  onClick,
+  disabled,
+  danger,
+}: {
+  children: React.ReactNode
+  title: string
+  onClick: () => void
+  disabled?: boolean
+  danger?: boolean
+}) {
+  return (
+    <button
+      title={title}
+      onClick={(e) => {
+        e.stopPropagation()
+        onClick()
+      }}
+      disabled={disabled}
+      className="flex items-center justify-center rounded p-1 transition-colors disabled:opacity-40"
+      style={{ color: danger ? 'var(--color-error)' : 'var(--color-text-secondary)' }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = danger
+          ? 'rgba(248, 113, 113, 0.1)'
+          : 'var(--color-card-hover)'
+        e.currentTarget.style.color = danger
+          ? 'var(--color-error)'
+          : 'var(--color-text-primary)'
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = 'transparent'
+        e.currentTarget.style.color = danger ? 'var(--color-error)' : 'var(--color-text-secondary)'
+      }}
+    >
+      {children}
+    </button>
+  )
+}
+
+function StatusDot({ status }: { status: Source['status'] }) {
+  const color =
+    status === 'active'
+      ? 'var(--color-success)'
+      : status === 'error'
+        ? 'var(--color-error)'
+        : 'var(--color-warning)'
+
+  return (
+    <div
+      className="h-1.5 w-1.5 shrink-0 rounded-full"
+      style={{
+        background: color,
+        boxShadow: status === 'syncing' ? `0 0 5px var(--color-warning)` : undefined,
+      }}
+    />
   )
 }
