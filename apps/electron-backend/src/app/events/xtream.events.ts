@@ -52,6 +52,16 @@ function formatXtreamError(error: unknown, requestUrl: string, action?: string) 
 /**
  * Handle Xtream Codes API requests
  */
+/**
+ * Normalize Xtream base URL so we don't get double slashes or wrong paths.
+ * Example: "http://server.com:8080/" -> "http://server.com:8080"
+ */
+function normalizeXtreamBaseUrl(url: string): string {
+    const trimmed = (url || '').trim();
+    if (!trimmed) return trimmed;
+    return trimmed.replace(/\/+$/, '');
+}
+
 ipcMain.handle(
     'XTREAM_REQUEST',
     async (
@@ -64,20 +74,35 @@ ipcMain.handle(
         try {
             const { url, params } = payload;
 
+            // Normalize base URL (no trailing slash) so /player_api.php is correct
+            const baseUrl = normalizeXtreamBaseUrl(url);
+            if (!baseUrl) {
+                throw {
+                    type: 'ERROR',
+                    message: 'Server URL is missing or invalid',
+                    status: 400,
+                };
+            }
+
             // Build URL with query parameters
             // Xtream API endpoint is always at /player_api.php
-            const apiUrl = new URL(`${url}/player_api.php`);
+            const apiUrl = new URL(`${baseUrl}/player_api.php`);
+
+            // Trim params that are often pasted with spaces (credentials)
             Object.entries(params).forEach(([key, value]) => {
-                apiUrl.searchParams.append(key, value);
+                const v =
+                    typeof value === 'string' ? value.trim() : String(value);
+                apiUrl.searchParams.append(key, v);
             });
 
             // Configure axios request
+            // Use a common browser User-Agent; some providers reject Node/Electron or incomplete UAs
             const config: AxiosRequestConfig = {
                 method: 'GET',
                 url: apiUrl.toString(),
                 headers: {
                     'User-Agent':
-                        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                     Accept: 'application/json',
                 },
                 timeout: 30000, // 30 seconds timeout for Xtream API

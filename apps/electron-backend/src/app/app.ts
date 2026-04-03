@@ -1,7 +1,37 @@
 import { app, BrowserWindow, Menu, screen, shell } from 'electron';
+import * as http from 'http';
 import { join } from 'path';
 import { rendererAppName, rendererAppPort } from './constants';
 import { store, WINDOW_BOUNDS } from './services/store.service';
+
+const DEV_SERVER_POLL_MS = 500;
+const DEV_SERVER_TIMEOUT_MS = 120000; // 2 minutes for cold start
+
+/** In dev mode, wait for the Angular dev server to respond before loading. */
+function waitForDevServer(port: number): Promise<void> {
+    const url = `http://localhost:${port}`;
+    const start = Date.now();
+    return new Promise((resolve, reject) => {
+        const tryOnce = () => {
+            const req = http.get(url, (res) => {
+                res.destroy();
+                resolve();
+            });
+            req.on('error', () => {
+                if (Date.now() - start >= DEV_SERVER_TIMEOUT_MS) {
+                    reject(new Error(`Dev server at ${url} did not respond within ${DEV_SERVER_TIMEOUT_MS / 1000}s`));
+                    return;
+                }
+                setTimeout(tryOnce, DEV_SERVER_POLL_MS);
+            });
+            req.setTimeout(5000, () => {
+                req.destroy();
+                tryOnce();
+            });
+        };
+        tryOnce();
+    });
+}
 
 export default class App {
     // Keep a global reference of the window object, if you don't, the window will
@@ -69,10 +99,11 @@ export default class App {
 
         // Create the browser window.
         App.mainWindow = new BrowserWindow({
-            title: 'IPTVnator',
+            title: 'Fractals',
             width: width,
             height: height,
             show: false,
+            resizable: true,
             webPreferences: {
                 contextIsolation: true,
                 backgroundThrottling: false,
@@ -157,10 +188,30 @@ export default class App {
     }
 
     private static loadMainWindow() {
-        // load the index.html of the app.
         if (App.isDevelopmentMode()) {
-            App.mainWindow.loadURL(`http://localhost:${rendererAppPort}`);
-            App.mainWindow.webContents.openDevTools();
+            // Wait for the Angular dev server to be ready so the window doesn't show empty HTML
+            waitForDevServer(rendererAppPort)
+                .then(() => {
+                    App.mainWindow.loadURL(
+                        `http://localhost:${rendererAppPort}`
+                    );
+                    if (process.env.OPEN_DEVTOOLS === '1') {
+                        App.mainWindow.webContents.openDevTools();
+                    }
+                })
+                .catch((err) => {
+                    console.error(
+                        '[Fractals] Dev server wait failed:',
+                        err?.message ?? err
+                    );
+                    // Load anyway so user sees the error in the window
+                    App.mainWindow.loadURL(
+                        `http://localhost:${rendererAppPort}`
+                    );
+                    if (process.env.OPEN_DEVTOOLS === '1') {
+                        App.mainWindow.webContents.openDevTools();
+                    }
+                });
         } else {
             App.mainWindow.loadFile(
                 join(__dirname, '..', rendererAppName, 'index.html')

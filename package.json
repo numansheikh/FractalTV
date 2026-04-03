@@ -1,12 +1,12 @@
 {
-    "name": "iptvnator",
+    "name": "fractals",
     "version": "0.20.0",
     "license": "MIT",
-    "description": "IPTV player application.",
-    "homepage": "https://github.com/4gray/iptvnator",
+    "description": "Fractals - IPTV player application.",
+    "homepage": "https://github.com/FractalTV/fractals",
     "author": {
-        "name": "4gray",
-        "email": "fourgray@proton.me"
+        "name": "FractalTV",
+        "email": ""
     },
     "keywords": [
         "angular",
@@ -21,8 +21,10 @@
     ],
     "scripts": {
         "postinstall": "electron-builder install-app-deps",
+        "rebuild:native": "electron-builder install-app-deps",
         "build:frontend": "nx build web",
         "build:frontend:pwa": "nx build web --configuration=pwa",
+        "build:frontend:mobile": "nx build web --configuration=mobile",
         "build:backend": "nx build electron-backend --configuration=production",
         "serve:frontend": "nx serve web --no-tui",
         "serve:frontend:pwa": "nx serve web --configuration=pwa --no-tui",
@@ -31,6 +33,10 @@
         "test:backend": "nx test electron-backend",
         "package:app": "nx run electron-backend:make --prepackageOnly",
         "make:app": "nx run electron-backend:make",
+        "make:app:all": "nx run electron-backend:make --platform=mac --platform=windows --platform=linux",
+        "make:app:mac:arm64": "node scripts/set-mac-arch.js arm64 && nx run electron-backend:make && node scripts/set-mac-arch.js restore",
+        "make:app:mac:x64": "node scripts/set-mac-arch.js x64 && nx run electron-backend:make && node scripts/set-mac-arch.js restore",
+        "make:app:win": "nx run electron-backend:make --platform=windows",
         "serve:website": "nx serve website",
         "build:website": "nx build website"
     },
@@ -47,6 +53,10 @@
         "@angular/platform-browser": "~21.1.5",
         "@angular/platform-browser-dynamic": "~21.1.5",
         "@angular/router": "~21.1.5",
+        "@capacitor/android": "8.1.0",
+        "@capacitor/cli": "8.1.0",
+        "@capacitor/core": "8.1.0",
+        "@capacitor/ios": "8.1.0",
         "@ngrx/component-store": "21.0.1",
         "@ngrx/effects": "21.0.1",
         "@ngrx/entity": "21.0.1",

@@ -141,12 +141,6 @@ contextBridge.exposeInMainWorld('electron', {
     updateSettings: (settings: any) =>
         ipcRenderer.invoke('SETTINGS_UPDATE', settings),
     getAiSettings: () => ipcRenderer.invoke('GET_AI_SETTINGS'),
-    stalkerRequest: (payload: {
-        url: string;
-        macAddress: string;
-        params: Record<string, string>;
-        token?: string;
-    }) => ipcRenderer.invoke('STALKER_REQUEST', payload),
     xtreamRequest: (payload: { url: string; params: Record<string, string> }) =>
         ipcRenderer.invoke('XTREAM_REQUEST', payload),
     // Database operations
@@ -206,10 +200,34 @@ contextBridge.exposeInMainWorld('electron', {
         playlistId: string,
         searchTerm: string,
         types: string[],
-        excludeHidden?: boolean
-    ) => ipcRenderer.invoke('DB_SEARCH_CONTENT', playlistId, searchTerm, types, excludeHidden),
-    dbGlobalSearch: (searchTerm: string, types: string[], excludeHidden?: boolean) =>
-        ipcRenderer.invoke('DB_GLOBAL_SEARCH', searchTerm, types, excludeHidden),
+        excludeHidden?: boolean,
+        offset?: number,
+        limit?: number
+    ) =>
+        ipcRenderer.invoke(
+            'DB_SEARCH_CONTENT',
+            playlistId,
+            searchTerm,
+            types,
+            excludeHidden,
+            offset ?? 0,
+            limit ?? 50
+        ),
+    dbGlobalSearch: (
+        searchTerm: string,
+        types: string[],
+        excludeHidden?: boolean,
+        offset?: number,
+        limit?: number
+    ) =>
+        ipcRenderer.invoke(
+            'DB_GLOBAL_SEARCH',
+            searchTerm,
+            types,
+            excludeHidden,
+            offset ?? 0,
+            limit ?? 50
+        ),
     dbGetRecentlyViewed: () => ipcRenderer.invoke('DB_GET_RECENTLY_VIEWED'),
     dbClearRecentlyViewed: () => ipcRenderer.invoke('DB_CLEAR_RECENTLY_VIEWED'),
     // Favorites

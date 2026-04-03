@@ -147,11 +147,11 @@ const PROGRAM_BATCH_SIZE = 1000;
  * Get database file path (same as main app)
  */
 function getDatabasePath(): string {
-    const dbDir = join(homedir(), '.iptvnator', 'databases');
+    const dbDir = join(homedir(), '.fractals', 'databases');
     if (!existsSync(dbDir)) {
         mkdirSync(dbDir, { recursive: true });
     }
-    return join(dbDir, 'iptvnator.db');
+    return join(dbDir, 'fractals.db');
 }
 
 /**

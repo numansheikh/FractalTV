@@ -1,5 +1,18 @@
 import { app, BrowserWindow } from 'electron';
 import fixPath from 'fix-path';
+
+// Prevent EPIPE from crashing the app when stdout/stderr pipe is closed
+// (e.g. parent process or terminal disconnects but Electron keeps running)
+function ignorePipeError(stream: NodeJS.WriteStream): void {
+    if (stream && typeof stream.on === 'function') {
+        stream.on('error', (err: NodeJS.ErrnoException) => {
+            if (err?.code === 'EPIPE') return;
+            throw err;
+        });
+    }
+}
+ignorePipeError(process.stdout);
+ignorePipeError(process.stderr);
 import App from './app/app';
 import { initDatabase } from './app/database/connection';
 import DatabaseEvents from './app/events/database.events';
@@ -15,10 +28,22 @@ import RemoteControlEvents from './app/events/remote-control.events';
 import SettingsEvents from './app/events/settings.events';
 import SharedEvents from './app/events/shared.events';
 import SquirrelEvents from './app/events/squirrel.events';
-import StalkerEvents from './app/events/stalker.events';
 import XtreamEvents from './app/events/xtream.events';
 
-app.setName('iptvnator');
+app.setName('fractals');
+
+// Prevent multiple app instances (e.g. from serve:backend watch or double-launch)
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+    app.quit();
+} else {
+    app.on('second-instance', () => {
+        if (App.mainWindow) {
+            if (App.mainWindow.isMinimized()) App.mainWindow.restore();
+            App.mainWindow.focus();
+        }
+    });
+}
 
 export default class Main {
     static initialize() {
@@ -41,7 +66,6 @@ export default class Main {
         SharedEvents.bootstrapSharedEvents();
         PlayerEvents.bootstrapPlayerEvents();
         SettingsEvents.bootstrapSettingsEvents();
-        StalkerEvents.bootstrapStalkerEvents();
         XtreamEvents.bootstrapXtreamEvents();
         DatabaseEvents.bootstrapDatabaseEvents();
         EpgEvents.bootstrapEpgEvents();

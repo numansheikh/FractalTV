@@ -257,14 +257,26 @@ ipcMain.handle(
     }
 );
 
+const SEARCH_CANDIDATES_LIMIT = 2000;
+const SEARCH_DEFAULT_PAGE_SIZE = 50;
+
 /**
- * Search content within a specific playlist
+ * Search content within a specific playlist (paginated)
  */
 ipcMain.handle(
     'DB_SEARCH_CONTENT',
-    async (event, playlistId: string, searchTerm: string, types: string[], excludeHidden = false) => {
+    async (
+        event,
+        playlistId: string,
+        searchTerm: string,
+        types: string[],
+        excludeHidden = false,
+        offset = 0,
+        limit = SEARCH_DEFAULT_PAGE_SIZE
+    ) => {
         try {
-            if (!types || types.length === 0) return [];
+            if (!types || types.length === 0)
+                return { results: [], total: 0 };
             const db = await getDatabase();
             const searchTermLower = searchTerm.toLocaleLowerCase();
             const likePatterns = buildLikePatterns(searchTerm);
@@ -272,8 +284,6 @@ ipcMain.handle(
                 pattern => sql`${schema.content.title} LIKE ${pattern} ESCAPE '\\'`
             );
 
-            // Pre-filter with SQL LIKE (case-insensitive for ASCII, handled in native C code).
-            // This avoids loading the entire content table into JS memory.
             const conditions = [
                 eq(schema.categories.playlistId, playlistId),
                 inArray(
@@ -291,6 +301,7 @@ ipcMain.handle(
                 .select({
                     id: schema.content.id,
                     category_id: schema.content.categoryId,
+                    category_name: schema.categories.name,
                     title: schema.content.title,
                     rating: schema.content.rating,
                     added: schema.content.added,
@@ -304,17 +315,14 @@ ipcMain.handle(
                     eq(schema.content.categoryId, schema.categories.id)
                 )
                 .where(and(...conditions))
-                .limit(200);
+                .limit(SEARCH_CANDIDATES_LIMIT);
 
-            // Post-filter for proper Unicode case-insensitive matching
-            // (SQLite LIKE is only case-insensitive for ASCII)
-            const result = candidates
-                .filter(item =>
-                    item.title?.toLocaleLowerCase().includes(searchTermLower)
-                )
-                .slice(0, 50);
-
-            return result;
+            const filtered = candidates.filter(item =>
+                item.title?.toLocaleLowerCase().includes(searchTermLower)
+            );
+            const total = filtered.length;
+            const results = filtered.slice(offset, offset + limit);
+            return { results, total };
         } catch (error) {
             console.error('Error searching content:', error);
             throw error;
@@ -323,13 +331,21 @@ ipcMain.handle(
 );
 
 /**
- * Global search across all playlists
+ * Global search across all playlists (paginated)
  */
 ipcMain.handle(
     'DB_GLOBAL_SEARCH',
-    async (event, searchTerm: string, types: string[], excludeHidden = false) => {
+    async (
+        event,
+        searchTerm: string,
+        types: string[],
+        excludeHidden = false,
+        offset = 0,
+        limit = SEARCH_DEFAULT_PAGE_SIZE
+    ) => {
         try {
-            if (!types || types.length === 0) return [];
+            if (!types || types.length === 0)
+                return { results: [], total: 0 };
             const db = await getDatabase();
             const searchTermLower = searchTerm.toLocaleLowerCase();
             const likePatterns = buildLikePatterns(searchTerm);
@@ -337,10 +353,6 @@ ipcMain.handle(
                 pattern => sql`${schema.content.title} LIKE ${pattern} ESCAPE '\\'`
             );
 
-            // Pre-filter with SQL LIKE (case-insensitive for ASCII, handled in native C code).
-            // This avoids loading the entire content table into JS memory.
-            // Previously this query loaded ALL content rows (potentially 100k+),
-            // created JS objects for each, then filtered in JS — blocking the main process.
             const conditions = [
                 inArray(
                     schema.content.type,
@@ -357,6 +369,7 @@ ipcMain.handle(
                 .select({
                     id: schema.content.id,
                     category_id: schema.content.categoryId,
+                    category_name: schema.categories.name,
                     title: schema.content.title,
                     rating: schema.content.rating,
                     added: schema.content.added,
@@ -377,17 +390,14 @@ ipcMain.handle(
                 )
                 .where(and(...conditions))
                 .orderBy(schema.content.title)
-                .limit(200);
+                .limit(SEARCH_CANDIDATES_LIMIT);
 
-            // Post-filter for proper Unicode case-insensitive matching
-            // (SQLite LIKE is only case-insensitive for ASCII)
-            const result = candidates
-                .filter(item =>
-                    item.title?.toLocaleLowerCase().includes(searchTermLower)
-                )
-                .slice(0, 50);
-
-            return result;
+            const filtered = candidates.filter(item =>
+                item.title?.toLocaleLowerCase().includes(searchTermLower)
+            );
+            const total = filtered.length;
+            const results = filtered.slice(offset, offset + limit);
+            return { results, total };
         } catch (error) {
             console.error('Error in global search:', error);
             throw error;
