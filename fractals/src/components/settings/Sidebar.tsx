@@ -1,6 +1,8 @@
 import { useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { FractalsIcon } from '@/components/shared/FractalsIcon'
 import { Source, useSourcesStore } from '@/stores/sources.store'
+import { buildColorMap, SourceColor } from '@/lib/sourceColors'
 import { api } from '@/lib/api'
 
 interface Props {
@@ -13,13 +15,14 @@ interface Props {
 
 export function Sidebar({ sources, onAddSource, onSyncSource, onRemoveSource, onOpenSettings }: Props) {
   const { selectedSourceIds, toggleSourceFilter, clearSourceFilter } = useSourcesStore()
+  const colorMap = buildColorMap(sources.map((s) => s.id))
 
   return (
     <div
       className="flex h-full flex-shrink-0 flex-col"
-      style={{ width: '212px', background: 'var(--color-surface)', borderRight: '1px solid var(--color-border)' }}
+      style={{ width: '220px', background: 'var(--color-surface)', borderRight: '1px solid var(--color-border)' }}
     >
-      {/* Logo — drag region with macOS traffic light offset */}
+      {/* Logo */}
       <div className="drag-region flex items-center gap-2.5"
         style={{ paddingTop: '20px', paddingBottom: '12px', paddingLeft: '16px', paddingRight: '16px', borderBottom: '1px solid var(--color-border)' }}>
         <div className="no-drag flex items-center gap-2.5">
@@ -32,46 +35,39 @@ export function Sidebar({ sources, onAddSource, onSyncSource, onRemoveSource, on
 
       {/* Sources */}
       <div className="flex-1 overflow-y-auto" style={{ padding: '14px 10px 10px' }}>
-        <div className="no-drag mb-2 flex items-center justify-between" style={{ padding: '0 6px 2px' }}>
+        <div className="no-drag mb-3 flex items-center justify-between" style={{ padding: '0 6px 0' }}>
           <span className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: 'var(--color-text-muted)' }}>
             Sources
           </span>
-          <button onClick={onAddSource}
-            className="no-drag flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-all"
-            style={{ color: 'var(--color-primary)' }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-primary-dim)' }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}>
-            <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
-              <path d="M5 1v8M1 5h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-            </svg>
-            Add
-          </button>
-        </div>
-
-        {/* Filter hint */}
-        {selectedSourceIds.length > 0 && (
-          <div className="mb-2 flex items-center justify-between rounded-lg px-2 py-1.5"
-            style={{ background: 'var(--color-primary-dim)', border: '1px solid rgba(124,77,255,0.2)' }}>
-            <span className="text-[10px]" style={{ color: 'var(--color-accent)' }}>
-              {selectedSourceIds.length} source{selectedSourceIds.length > 1 ? 's' : ''} filtered
-            </span>
-            <button onClick={clearSourceFilter} className="text-[10px] transition-colors"
-              style={{ color: 'var(--color-accent)' }}
-              onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.7' }}
-              onMouseLeave={(e) => { e.currentTarget.style.opacity = '1' }}>
-              clear
+          <div className="flex items-center gap-1">
+            {selectedSourceIds.length > 0 && (
+              <button onClick={clearSourceFilter} className="rounded-md px-2 py-0.5 text-[10px] transition-all"
+                style={{ color: 'var(--color-accent)', background: 'var(--color-primary-dim)' }}>
+                Show all
+              </button>
+            )}
+            <button onClick={onAddSource}
+              className="no-drag flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-all"
+              style={{ color: 'var(--color-primary)' }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-primary-dim)' }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}>
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+                <path d="M5 1v8M1 5h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+              Add
             </button>
           </div>
-        )}
+        </div>
 
         {sources.length === 0 ? (
           <p className="px-2 py-2 text-xs" style={{ color: 'var(--color-text-muted)', lineHeight: '1.6' }}>No sources yet</p>
         ) : (
-          <div className="flex flex-col gap-0.5">
+          <div className="flex flex-col gap-1">
             {sources.map((src) => (
               <SourceRow
                 key={src.id}
                 source={src}
+                color={colorMap[src.id]}
                 selected={selectedSourceIds.includes(src.id)}
                 onToggleFilter={() => toggleSourceFilter(src.id)}
                 onSync={onSyncSource}
@@ -102,9 +98,10 @@ export function Sidebar({ sources, onAddSource, onSyncSource, onRemoveSource, on
 }
 
 function SourceRow({
-  source, selected, onToggleFilter, onSync, onRemove,
+  source, color, selected, onToggleFilter, onSync, onRemove,
 }: {
   source: Source
+  color: SourceColor
   selected: boolean
   onToggleFilter: () => void
   onSync: (id: string) => void
@@ -112,31 +109,33 @@ function SourceRow({
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const { updateSource } = useSourcesStore()
+  const qc = useQueryClient()
 
   const handleToggleDisabled = async (e: React.MouseEvent) => {
     e.stopPropagation()
     const res = await api.sources.toggleDisabled(source.id)
     updateSource(source.id, { disabled: (res as any).disabled })
+    qc.invalidateQueries({ queryKey: ['categories'] })
+    qc.invalidateQueries({ queryKey: ['browse'] })
+    qc.invalidateQueries({ queryKey: ['search'] })
   }
 
   if (confirmDelete) {
     return (
-      <div className="rounded-lg p-2.5" style={{ background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.2)' }}>
-        <p className="mb-2 text-[11px] font-medium" style={{ color: 'var(--color-error)' }}>
-          Remove "{source.name}"?
-        </p>
-        <p className="mb-2.5 text-[10px]" style={{ color: 'var(--color-text-muted)', lineHeight: '1.5' }}>
-          Deletes all synced content from this source.
+      <div className="rounded-xl p-3" style={{ background: 'rgba(224,108,117,0.08)', border: '1px solid rgba(224,108,117,0.2)' }}>
+        <p className="mb-1 text-xs font-semibold" style={{ color: 'var(--color-error)' }}>Remove "{source.name}"?</p>
+        <p className="mb-3 text-[10px]" style={{ color: 'var(--color-text-muted)', lineHeight: '1.6' }}>
+          Permanently deletes all synced content from this account.
         </p>
         <div className="flex gap-1.5">
           <button onClick={() => setConfirmDelete(false)}
-            className="flex-1 rounded-md py-1 text-[11px] transition-colors"
+            className="flex-1 rounded-lg py-1.5 text-[11px] transition-colors"
             style={{ background: 'var(--color-card)', color: 'var(--color-text-secondary)' }}>
             Cancel
           </button>
           <button onClick={() => { setConfirmDelete(false); onRemove(source.id) }}
-            className="flex-1 rounded-md py-1 text-[11px] font-medium transition-colors"
-            style={{ background: 'rgba(248,113,113,0.2)', color: 'var(--color-error)' }}>
+            className="flex-1 rounded-lg py-1.5 text-[11px] font-semibold"
+            style={{ background: 'rgba(224,108,117,0.2)', color: 'var(--color-error)' }}>
             Delete
           </button>
         </div>
@@ -144,71 +143,81 @@ function SourceRow({
     )
   }
 
+  const isActive = !source.disabled
+  const isSyncing = source.status === 'syncing'
+
   return (
     <div
-      className="group rounded-lg cursor-pointer"
+      className="group relative cursor-pointer overflow-hidden rounded-xl transition-all"
       style={{
-        padding: '8px 8px 6px',
-        background: selected ? 'var(--color-primary-dim)' : 'transparent',
-        border: `1px solid ${selected ? 'rgba(124,77,255,0.2)' : 'transparent'}`,
-        opacity: source.disabled ? 0.45 : 1,
+        background: selected ? color.dim : 'var(--color-card)',
+        border: `1px solid ${selected ? color.accent + '40' : 'var(--color-border)'}`,
+        opacity: source.disabled ? 0.5 : 1,
       }}
-      onMouseEnter={(e) => { if (!selected) e.currentTarget.style.background = 'var(--color-card)' }}
-      onMouseLeave={(e) => { if (!selected) e.currentTarget.style.background = 'transparent' }}
       onClick={onToggleFilter}
+      onMouseEnter={(e) => { if (!selected) e.currentTarget.style.borderColor = color.accent + '30' }}
+      onMouseLeave={(e) => { if (!selected) e.currentTarget.style.borderColor = 'var(--color-border)' }}
     >
-      <div className="flex items-center gap-2">
-        <StatusDot status={source.status} disabled={source.disabled} />
-        <span className="min-w-0 flex-1 truncate text-xs font-medium"
-          style={{ color: selected ? 'var(--color-accent)' : 'var(--color-text-primary)' }}>
-          {source.name}
-        </span>
-        {/* Action icons — hover */}
-        <div className="hidden shrink-0 items-center gap-0.5 group-hover:flex" onClick={(e) => e.stopPropagation()}>
-          {/* Disable/enable toggle */}
-          <IconButton
-            title={source.disabled ? 'Enable source' : 'Disable source (hides content)'}
-            onClick={handleToggleDisabled}
-            active={source.disabled}
-          >
-            {source.disabled ? (
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
-                <line x1="1" y1="1" x2="23" y2="23" />
-              </svg>
-            ) : (
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                <circle cx="12" cy="12" r="3" />
-              </svg>
-            )}
-          </IconButton>
-          {/* Sync */}
-          {!source.disabled && (
-            <IconButton title="Sync" onClick={() => onSync(source.id)} disabled={source.status === 'syncing'}>
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
-                <path d="M21 3v5h-5" />
-                <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
-                <path d="M8 16H3v5" />
-              </svg>
-            </IconButton>
+      {/* Colored left stripe */}
+      <div
+        className="absolute left-0 top-0 h-full w-1 rounded-l-xl"
+        style={{ background: isActive ? color.accent : 'var(--color-text-muted)', opacity: selected ? 1 : 0.5 }}
+      />
+
+      <div style={{ padding: '10px 10px 8px 14px' }}>
+        <div className="flex items-center gap-2">
+          {/* Source name */}
+          <span className="min-w-0 flex-1 truncate text-xs font-semibold"
+            style={{ color: selected ? color.accent : 'var(--color-text-primary)' }}>
+            {source.name}
+          </span>
+
+          {/* Status indicator */}
+          {isSyncing && (
+            <div className="h-1.5 w-1.5 animate-pulse rounded-full shrink-0"
+              style={{ background: 'var(--color-warning)', boxShadow: '0 0 5px var(--color-warning)' }} />
           )}
-          {/* Delete */}
-          <IconButton title="Remove source" onClick={() => setConfirmDelete(true)} danger>
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <polyline points="3 6 5 6 21 6" />
-              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-              <path d="M10 11v6M14 11v6" />
-              <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
-            </svg>
-          </IconButton>
+          {!isSyncing && source.status === 'error' && (
+            <div className="h-1.5 w-1.5 rounded-full shrink-0" style={{ background: 'var(--color-error)' }} />
+          )}
+
+          {/* Hover actions */}
+          <div className="hidden shrink-0 items-center gap-0.5 group-hover:flex" onClick={(e) => e.stopPropagation()}>
+            <IconBtn title={source.disabled ? 'Enable' : 'Disable'} onClick={handleToggleDisabled}>
+              {source.disabled ? (
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+                  <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+                  <line x1="1" y1="1" x2="23" y2="23" />
+                </svg>
+              ) : (
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
+              )}
+            </IconBtn>
+            {isActive && (
+              <IconBtn title="Sync" onClick={() => onSync(source.id)} disabled={isSyncing}>
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+                  <path d="M21 3v5h-5M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16M8 16H3v5" />
+                </svg>
+              </IconBtn>
+            )}
+            <IconBtn title="Delete" onClick={() => setConfirmDelete(true)} danger>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <polyline points="3 6 5 6 21 6" />
+                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+              </svg>
+            </IconBtn>
+          </div>
         </div>
-      </div>
-      <div style={{ paddingLeft: '18px', marginTop: '2px' }}>
-        <p className="text-[10px]" style={{ color: selected ? 'var(--color-accent)' : 'var(--color-text-muted)' }}>
+
+        {/* Subtitle */}
+        <p className="mt-0.5 text-[10px]" style={{ color: selected ? color.accent + 'aa' : 'var(--color-text-muted)' }}>
           {source.disabled ? 'Disabled' :
-           source.status === 'syncing' ? 'Syncing…' :
+           isSyncing ? 'Syncing…' :
            source.itemCount > 0 ? `${source.itemCount.toLocaleString()} items` : 'Not synced'}
         </p>
       </div>
@@ -216,34 +225,23 @@ function SourceRow({
   )
 }
 
-function IconButton({ children, title, onClick, disabled, danger, active }: {
-  children: React.ReactNode; title: string; onClick: (e: React.MouseEvent) => void
-  disabled?: boolean; danger?: boolean; active?: boolean
+function IconBtn({ children, title, onClick, disabled, danger }: {
+  children: React.ReactNode; title: string
+  onClick: (e: React.MouseEvent) => void; disabled?: boolean; danger?: boolean
 }) {
   return (
     <button title={title} onClick={onClick} disabled={disabled}
-      className="flex items-center justify-center rounded p-1.5 transition-colors disabled:opacity-40"
-      style={{ color: active ? 'var(--color-warning)' : danger ? 'var(--color-error)' : 'var(--color-text-secondary)' }}
+      className="flex items-center justify-center rounded-md p-1.5 transition-colors disabled:opacity-40"
+      style={{ color: danger ? 'var(--color-error)' : 'var(--color-text-muted)' }}
       onMouseEnter={(e) => {
-        e.currentTarget.style.background = danger ? 'rgba(248,113,113,0.1)' : 'var(--color-card-hover)'
-        if (!active) e.currentTarget.style.color = danger ? 'var(--color-error)' : 'var(--color-text-primary)'
+        e.currentTarget.style.background = danger ? 'rgba(224,108,117,0.15)' : 'rgba(255,255,255,0.08)'
+        e.currentTarget.style.color = danger ? 'var(--color-error)' : 'var(--color-text-primary)'
       }}
       onMouseLeave={(e) => {
         e.currentTarget.style.background = 'transparent'
-        e.currentTarget.style.color = active ? 'var(--color-warning)' : danger ? 'var(--color-error)' : 'var(--color-text-secondary)'
+        e.currentTarget.style.color = danger ? 'var(--color-error)' : 'var(--color-text-muted)'
       }}>
       {children}
     </button>
-  )
-}
-
-function StatusDot({ status, disabled }: { status: Source['status']; disabled: boolean }) {
-  if (disabled) return (
-    <div className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: 'var(--color-text-muted)' }} />
-  )
-  const color = status === 'active' ? 'var(--color-success)' : status === 'error' ? 'var(--color-error)' : 'var(--color-warning)'
-  return (
-    <div className="h-1.5 w-1.5 shrink-0 rounded-full"
-      style={{ background: color, boxShadow: status === 'syncing' ? `0 0 6px var(--color-warning)` : undefined }} />
   )
 }

@@ -340,3 +340,37 @@ Error:          #ef5350
 - Not a Netflix clone — no hero banners, no autoplay, no algorithm-driven "feed"
 - Not a social app — no sharing, no public profiles, no cloud sync (for now)
 - Not a content provider — ships with zero content, user brings their own sources
+
+## Implementation status (as of 2026-04-04)
+
+**Complete:** Phases 1–6 (scaffold, DB + Xtream sync, TMDB enrichment, FTS5 search, browse/search UI, video player).
+**Partial:** Phase 10 settings (appearance, player, enrichment done; profiles + EPG config pending). Phase 12 user data (IPC handlers complete, Phase 12A done).
+**Not started:** Phase 7 (EPG/catchup), Phase 8 (semantic search), Phase 9 (M3U), Phase 11 (Capacitor/mobile).
+
+## Key architecture decisions (implemented)
+
+- **Worker threads for heavy operations** — Sync and delete run in `electron/workers/` via `worker_threads`, each opening its own better-sqlite3 connection (WAL mode allows concurrent access). Prevents main process blocking on 200k+ row operations.
+
+- **Hybrid FTS5 + LIKE search** — FTS5 for fast ranked prefix matches, LIKE for substring matches ("dar" finds "undark"). Results merged with deduplication. Space-aware tokenization: trailing space = exact word, no trailing space = prefix.
+
+- **Source-scoped content IDs** — Format `{sourceId}:{type}:{streamId}` ensures correct credentials used for playback. Same stream_id on same server returns HTTP 405 with wrong account credentials.
+
+- **On-demand TMDB enrichment** — ContentDetail panel auto-triggers enrichment when opened for unenriched movie/series. Multi-candidate title cleaning: strips language prefixes ("EN - "), extracts embedded years ("(2015)"), tries with/without subtitles after ":" or " - ". Manual search fallback with editable title/year when auto fails.
+
+- **Source identity colors** — Each source gets a distinct hue from a palette ordered for maximum visual distance. Dots show source color (not generic green/red status). Red only for error/expired.
+
+## Known limitations & open work
+
+- **International character search (partial)** — European diacritics (accented Latin: é, ü, ñ, etc.) are handled via `any-ascii` transliteration at index time, so searching "Borgen" finds "Börgen". Arabic, Hebrew, Cyrillic, and CJK scripts are not yet transliterated.
+
+- **M3U/M3U8 playlist support not yet implemented** — Only Xtream Codes accounts can be added as sources. M3U URL + local file import is Phase 9.
+
+- **Semantic / embedding search not yet wired** — `embeddings` table and `sqlite-vec` extension are in the schema. The embedding generation worker has not been built. All search is currently keyword-only via FTS5. Phase 8.
+
+- **EPG / program guide not yet implemented** — `epg` table exists in schema. No XMLTV parser, no program overlay in player, no catch-up/timeshift playback. Phase 7.
+
+- **Favorites and watchlist have no dedicated view** — The heart/bookmark toggles in ContentDetail write to `user_data` table and persist, but there is no "My Favorites" or "Watchlist" browse section yet.
+
+- **Watch history / resume position has no browse section** — `last_position` and `last_watched_at` are saved to `user_data` when watching, but there is no "Continue Watching" row in the browse view yet.
+
+- **Capacitor / mobile not yet implemented** — The codebase is Electron-only. `CapacitorService` abstraction has not been built. Android, iOS, and Tizen targets are Phase 11.

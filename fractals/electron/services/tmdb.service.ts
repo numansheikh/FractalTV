@@ -98,20 +98,31 @@ export class TmdbService {
     this.apiKey = key
   }
 
+  hasKey(): boolean {
+    return !!(this.apiKey || process.env.TMDB_API_KEY)
+  }
+
   private get key(): string {
     return this.apiKey ?? process.env.TMDB_API_KEY ?? ''
   }
 
   private async fetch<T>(path: string, params: Record<string, string> = {}): Promise<T | null> {
-    if (!this.key) return null
+    if (!this.key) {
+      console.warn('[TMDB] No API key set — skipping fetch')
+      return null
+    }
     await limiter.acquire()
     const qs = new URLSearchParams({ api_key: this.key, language: 'en-US', ...params })
     const url = `https://api.themoviedb.org/3${path}?${qs}`
     try {
       const res = await globalThis.fetch(url, { signal: AbortSignal.timeout(8000) })
-      if (!res.ok) return null
+      if (!res.ok) {
+        console.warn(`[TMDB] ${path} → HTTP ${res.status}`)
+        return null
+      }
       return res.json() as Promise<T>
-    } catch {
+    } catch (err) {
+      console.warn(`[TMDB] ${path} → fetch error:`, err)
       return null
     }
   }
@@ -169,19 +180,13 @@ export class TmdbService {
       if (!item || item.enriched) { done++; continue }
       if (item.type === 'live') { done++; continue } // skip live channels
 
-      const year = item.year ?? undefined
-
-      // Clean up title — strip common IPTV prefixes like "IR - ", "TR | ", "US: "
-      const cleanTitle = item.title
-        .replace(/^[A-Z]{2,4}[\s\-:|]+/i, '')
-        .replace(/\s*(HD|FHD|4K|SD|UHD)\s*$/i, '')
-        .trim()
+      const { titles, year } = this.buildSearchCandidates(item.title, item.year)
 
       try {
         if (item.type === 'movie') {
-          await this.enrichMovie(sqlite, item, cleanTitle, year)
+          await this.enrichMovie(sqlite, item, titles, year)
         } else if (item.type === 'series') {
-          await this.enrichSeries(sqlite, item, cleanTitle, year)
+          await this.enrichSeries(sqlite, item, titles, year)
         }
       } catch {
         // Non-fatal — mark as attempted so we don't retry immediately
@@ -192,10 +197,82 @@ export class TmdbService {
     }
   }
 
-  private async enrichMovie(sqlite: any, item: any, title: string, year?: number) {
-    // Try with year, then without
-    let match = await this.searchMovie(title, year)
-    if (!match && year) match = await this.searchMovie(title)
+  /**
+   * Build progressively cleaned title candidates from an IPTV title.
+   * Returns unique candidates in order of specificity (most specific first).
+   *
+   * Examples:
+   *   "EN - Henry Danger: The Movie (2025)" → ["Henry Danger: The Movie", "Henry Danger"]
+   *   "GR – Synchronicity (2015)"           → ["Synchronicity"]
+   *   "AR - WWESmackdownLive12-02-"         → ["WWESmackdownLive12-02-"]
+   *   "The Dark Knight (2008)"              → ["The Dark Knight"]
+   */
+  /**
+   * Enrich a single content item using a user-provided search title.
+   * Used for manual retry when automatic title cleaning fails.
+   */
+  async enrichWithTitle(contentId: string, searchTitle: string, type: string, year?: number): Promise<void> {
+    const sqlite = getSqlite()
+    const item = sqlite.prepare('SELECT * FROM content WHERE id = ?').get(contentId) as any
+    if (!item) return
+
+    if (type === 'movie') {
+      await this.enrichMovie(sqlite, item, [searchTitle], year)
+    } else if (type === 'series') {
+      await this.enrichSeries(sqlite, item, [searchTitle], year)
+    }
+  }
+
+  private buildSearchCandidates(rawTitle: string, dbYear?: number | null): { titles: string[]; year?: number } {
+    // Step 1: strip language prefix "XX - ", "XX | ", "XX: ", "XXX - ", etc.
+    let base = rawTitle
+      .replace(/^[A-Z]{2,4}[\s]*[\-–:|][\s]*/i, '')
+      .replace(/\s*(HD|FHD|4K|SD|UHD)\s*$/i, '')
+      .trim()
+
+    // Step 2: extract year from title if DB year is null
+    let year = dbYear ?? undefined
+    if (!year) {
+      const yearMatch = base.match(/\((\d{4})\)\s*$/)
+      if (yearMatch) {
+        year = parseInt(yearMatch[1])
+        base = base.replace(/\s*\(\d{4}\)\s*$/, '').trim()
+      }
+    }
+
+    const candidates: string[] = [base]
+
+    // Step 3: strip subtitle after colon — "Henry Danger: The Movie" → "Henry Danger"
+    const colonIdx = base.indexOf(':')
+    if (colonIdx > 2) {
+      candidates.push(base.substring(0, colonIdx).trim())
+    }
+
+    // Step 4: strip subtitle after dash (surrounded by spaces) — "Avengers - Endgame" → "Avengers"
+    const dashIdx = base.indexOf(' - ')
+    if (dashIdx > 2) {
+      candidates.push(base.substring(0, dashIdx).trim())
+    }
+
+    // Deduplicate while preserving order
+    const seen = new Set<string>()
+    const unique = candidates.filter(t => {
+      if (!t || seen.has(t)) return false
+      seen.add(t)
+      return true
+    })
+
+    return { titles: unique, year }
+  }
+
+  private async enrichMovie(sqlite: any, item: any, titles: string[], year?: number) {
+    // Try each title candidate with year, then without
+    let match: TmdbMovie | null = null
+    for (const title of titles) {
+      match = await this.searchMovie(title, year)
+      if (!match && year) match = await this.searchMovie(title)
+      if (match) break
+    }
     if (!match) {
       this.markEnriched(sqlite, item.id)
       return
@@ -248,9 +325,13 @@ export class TmdbService {
     })
   }
 
-  private async enrichSeries(sqlite: any, item: any, title: string, year?: number) {
-    let match = await this.searchTv(title, year)
-    if (!match && year) match = await this.searchTv(title)
+  private async enrichSeries(sqlite: any, item: any, titles: string[], year?: number) {
+    let match: TmdbTv | null = null
+    for (const title of titles) {
+      match = await this.searchTv(title, year)
+      if (!match && year) match = await this.searchTv(title)
+      if (match) break
+    }
     if (!match) { this.markEnriched(sqlite, item.id); return }
 
     const details = await this.getTvDetails(match.id)

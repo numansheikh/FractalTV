@@ -9,7 +9,11 @@ export default defineConfig({
     build: {
       outDir: 'dist-electron/main',
       lib: {
-        entry: resolve(__dirname, 'electron/main.ts'),
+        entry: {
+          main: resolve(__dirname, 'electron/main.ts'),
+          'sync.worker': resolve(__dirname, 'electron/workers/sync.worker.ts'),
+          'delete.worker': resolve(__dirname, 'electron/workers/delete.worker.ts'),
+        },
       },
     },
   },

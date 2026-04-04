@@ -98,13 +98,13 @@ export function AddSourceDialog({ onClose, onAdded }: Props) {
         </div>
 
         {/* Body */}
-        <div style={{ padding: '16px 20px 20px' }}>
+        <div style={{ padding: '14px 20px 20px' }}>
           <AnimatePresence mode="wait">
             {step === 'form' && (
               <motion.form
                 key="form"
                 onSubmit={handleSubmit}
-                className="flex flex-col gap-3"
+                style={{ display: 'flex', flexDirection: 'column', gap: 12 }}
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
@@ -122,7 +122,7 @@ export function AddSourceDialog({ onClose, onAdded }: Props) {
                   onChange={(v) => setForm((f) => ({ ...f, serverUrl: v }))}
                   required
                 />
-                <div className="grid grid-cols-2 gap-3">
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                   <Field
                     label="Username"
                     placeholder="username"
@@ -140,25 +140,29 @@ export function AddSourceDialog({ onClose, onAdded }: Props) {
                   />
                 </div>
 
-                <div className="mt-1 flex gap-2">
+                <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
                   <button
                     type="button"
                     onClick={onClose}
-                    className="flex-1 rounded-lg py-2 text-xs font-medium transition-colors"
                     style={{
-                      background: 'var(--color-card)',
-                      color: 'var(--color-text-secondary)',
-                      border: '1px solid var(--color-border)',
+                      flex: 1, padding: '8px 0', borderRadius: 8, fontSize: 12, fontWeight: 500,
+                      background: 'transparent', border: '1px solid var(--color-border-strong)',
+                      color: 'var(--color-text-secondary)', cursor: 'pointer', transition: 'all 0.1s',
                     }}
-                    onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--color-text-primary)' }}
-                    onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--color-text-secondary)' }}
+                    onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--color-text-muted)'; e.currentTarget.style.color = 'var(--color-text-primary)' }}
+                    onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--color-border-strong)'; e.currentTarget.style.color = 'var(--color-text-secondary)' }}
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
-                    className="flex-1 rounded-lg py-2 text-xs font-semibold transition-opacity hover:opacity-90"
-                    style={{ background: 'var(--color-primary)', color: '#fff' }}
+                    style={{
+                      flex: 1, padding: '8px 0', borderRadius: 8, fontSize: 12, fontWeight: 600,
+                      background: 'var(--color-primary)', color: '#fff', border: 'none', cursor: 'pointer',
+                      transition: 'opacity 0.1s',
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.88' }}
+                    onMouseLeave={(e) => { e.currentTarget.style.opacity = '1' }}
                   >
                     Connect
                   </button>
@@ -274,8 +278,8 @@ function Field({
   required?: boolean
 }) {
   return (
-    <div className="flex flex-col gap-1">
-      <label className="text-[11px] font-medium" style={{ color: 'var(--color-text-secondary)' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+      <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-secondary)', letterSpacing: '0.01em' }}>
         {label}
       </label>
       <input
@@ -284,16 +288,28 @@ function Field({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         required={required}
-        className="rounded-lg px-3 py-2 text-xs outline-none"
         style={{
-          background: 'var(--color-card)',
-          border: '1px solid var(--color-border)',
+          background: 'var(--color-bg)',
+          border: '1px solid var(--color-border-strong)',
+          borderRadius: 8,
+          padding: '8px 12px',
+          fontSize: 12,
           color: 'var(--color-text-primary)',
           caretColor: 'var(--color-primary)',
-          transition: 'border-color 0.15s',
+          outline: 'none',
+          fontFamily: 'inherit',
+          transition: 'border-color 0.15s, box-shadow 0.15s',
+          width: '100%',
+          boxSizing: 'border-box',
         }}
-        onFocus={(e) => { e.currentTarget.style.borderColor = 'rgba(124,77,255,0.4)' }}
-        onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--color-border)' }}
+        onFocus={(e) => {
+          e.currentTarget.style.borderColor = 'var(--color-primary)'
+          e.currentTarget.style.boxShadow = '0 0 0 3px var(--color-primary-dim)'
+        }}
+        onBlur={(e) => {
+          e.currentTarget.style.borderColor = 'var(--color-border-strong)'
+          e.currentTarget.style.boxShadow = 'none'
+        }}
       />
     </div>
   )

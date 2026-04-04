@@ -15,9 +15,12 @@ export const sources = sqliteTable('sources', {
   m3uUrl: text('m3u_url'),
   // Status
   status: text('status', { enum: ['active', 'error', 'syncing'] }).notNull().default('active'),
+  disabled: integer('disabled', { mode: 'boolean' }).notNull().default(false),
   lastSync: integer('last_sync', { mode: 'timestamp' }),
   lastError: text('last_error'),
   itemCount: integer('item_count').notNull().default(0),
+  expDate: text('exp_date'),
+  maxConnections: integer('max_connections'),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
 })
 
@@ -29,6 +32,7 @@ export const categories = sqliteTable('categories', {
   externalId: text('external_id').notNull(), // category_id from Xtream
   name: text('name').notNull(),
   type: text('type', { enum: ['live', 'movie', 'series'] }).notNull(),
+  position: integer('position').notNull().default(0), // order from provider API
 })
 
 // ─── Content ─────────────────────────────────────────────────────────────────

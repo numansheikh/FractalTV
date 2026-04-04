@@ -12,13 +12,24 @@ export const api = {
     testXtream: (args: { serverUrl: string; username: string; password: string }) =>
       ipcRenderer.invoke('sources:test-xtream', args),
     remove: (sourceId: string) => ipcRenderer.invoke('sources:remove', sourceId),
+    update: (args: { sourceId: string; name?: string; serverUrl?: string; username?: string; password?: string }) =>
+      ipcRenderer.invoke('sources:update', args),
     toggleDisabled: (sourceId: string) => ipcRenderer.invoke('sources:toggle-disabled', sourceId),
     sync: (sourceId: string) => ipcRenderer.invoke('sources:sync', sourceId),
+    accountInfo: (sourceId: string) => ipcRenderer.invoke('sources:account-info', sourceId),
+    startupCheck: () => ipcRenderer.invoke('sources:startup-check'),
+    totalCount: () => ipcRenderer.invoke('sources:total-count'),
+  },
+
+  // Categories
+  categories: {
+    list: (args: { type?: 'live' | 'movie' | 'series'; sourceIds?: string[] }) =>
+      ipcRenderer.invoke('categories:list', args),
   },
 
   // Search
   search: {
-    query: (args: { query: string; type?: 'live' | 'movie' | 'series'; limit?: number; offset?: number }) =>
+    query: (args: { query: string; type?: 'live' | 'movie' | 'series'; sourceIds?: string[]; limit?: number; offset?: number }) =>
       ipcRenderer.invoke('search:query', args),
   },
 
@@ -27,6 +38,13 @@ export const api = {
     get: (contentId: string) => ipcRenderer.invoke('content:get', contentId),
     getStreamUrl: (args: { contentId: string; sourceId?: string }) =>
       ipcRenderer.invoke('content:get-stream-url', args),
+    browse: (args: { type?: 'live' | 'movie' | 'series'; categoryName?: string; sourceIds?: string[]; sortBy?: string; sortDir?: string; limit?: number; offset?: number }) =>
+      ipcRenderer.invoke('content:browse', args),
+  },
+
+  // Series
+  series: {
+    getInfo: (contentId: string) => ipcRenderer.invoke('series:get-info', { contentId }),
   },
 
   // User data
@@ -36,6 +54,23 @@ export const api = {
       ipcRenderer.invoke('user:set-position', { contentId, position }),
     toggleFavorite: (contentId: string) => ipcRenderer.invoke('user:toggle-favorite', contentId),
     toggleWatchlist: (contentId: string) => ipcRenderer.invoke('user:toggle-watchlist', contentId),
+    favorites: (args?: { type?: 'live' | 'movie' | 'series' }) =>
+      ipcRenderer.invoke('user:favorites', args),
+    watchlist: (args?: { type?: 'live' | 'movie' | 'series' }) =>
+      ipcRenderer.invoke('user:watchlist', args),
+    continueWatching: () => ipcRenderer.invoke('user:continue-watching'),
+    history: (args?: { limit?: number }) => ipcRenderer.invoke('user:history', args),
+    bulkGetData: (contentIds: string[]) => ipcRenderer.invoke('user:bulk-get-data', contentIds),
+    setCompleted: (contentId: string) => ipcRenderer.invoke('user:set-completed', contentId),
+    setRating: (contentId: string, rating: number | null) =>
+      ipcRenderer.invoke('user:set-rating', { contentId, rating }),
+  },
+
+  // External player
+  player: {
+    openExternal: (args: { player: 'mpv' | 'vlc'; url: string; title: string; customPath?: string }) =>
+      ipcRenderer.invoke('player:open-external', args),
+    detectExternal: () => ipcRenderer.invoke('player:detect-external'),
   },
 
   // TMDB enrichment
@@ -43,6 +78,18 @@ export const api = {
     setApiKey: (key: string) => ipcRenderer.invoke('enrichment:set-api-key', key),
     status: () => ipcRenderer.invoke('enrichment:status'),
     start: (apiKey?: string) => ipcRenderer.invoke('enrichment:start', apiKey),
+    enrichSingle: (contentId: string) => ipcRenderer.invoke('enrichment:enrich-single', contentId),
+    enrichManual: (args: { contentId: string; title: string; year?: number }) => ipcRenderer.invoke('enrichment:enrich-manual', args),
+  },
+
+  // Debug
+  debug: {
+    categoryItems: (search: string) => ipcRenderer.invoke('debug:category-items', search),
+  },
+
+  // Settings (key-value store)
+  settings: {
+    get: (key: string) => ipcRenderer.invoke('settings:get', key),
   },
 
   // Events from main process
@@ -61,6 +108,7 @@ contextBridge.exposeInMainWorld('electronDevTools', () => {
 
 declare global {
   interface Window {
-    api: typeof api
+    api: typeof api & { settings: { get: (key: string) => Promise<string | null> } }
+    electronDevTools: () => void
   }
 }
