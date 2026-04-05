@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fractals — Library</title>
+<link rel="stylesheet" href="design-tokens.css">
+<style>
+  html, body { height: 100%; overflow: hidden; }
+
+  .app { display: flex; height: 100vh; }
+
+  /* ── Nav Rail ── */
+  .nav-rail {
+    width: 48px; flex-shrink: 0;
+    background: var(--bg-1);
+    border-right: 1px solid var(--border-subtle);
+    display: flex; flex-direction: column; align-items: center;
+    padding: var(--space-6) 0;
+    gap: var(--space-5);
+  }
+  .nav-icon {
+    width: 32px; height: 32px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-2);
+    border-radius: var(--radius-md);
+    position: relative;
+    cursor: pointer;
+  }
+  .nav-icon:hover { color: var(--text-1); }
+  .nav-icon.active { color: var(--accent-interactive); }
+  .nav-icon.active::before {
+    content: '';
+    position: absolute; left: -8px; top: 4px; bottom: 4px;
+    width: 3px; border-radius: 0 2px 2px 0;
+    background: var(--accent-interactive);
+  }
+  .nav-icon svg { width: 20px; height: 20px; }
+
+  /* ── Main Area ── */
+  .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+  /* ── Command Bar ── */
+  .command-bar {
+    height: 44px; flex-shrink: 0;
+    background: var(--bg-1);
+    border-bottom: 1px solid var(--border-subtle);
+    display: flex; align-items: center;
+    padding: 0 var(--space-6);
+    gap: var(--space-5);
+  }
+  .cmd-search {
+    flex: 1;
+    background: var(--bg-2);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: var(--space-2) var(--space-4);
+    color: var(--text-2);
+    font-size: 12px;
+    font-family: var(--font-ui);
+    outline: none;
+    min-width: 180px;
+  }
+  .cmd-search::placeholder { color: var(--text-3); }
+
+  /* ── Content Area ── */
+  .content-area {
+    flex: 1; overflow-y: auto;
+    padding: 16px 16px 32px;
+  }
+
+  /* ── Section ── */
+  .lib-section { margin-bottom: 0; }
+  .lib-section + .lib-section {
+    padding-top: 24px;
+    border-top: 1px solid var(--border-subtle);
+    margin-top: 24px;
+  }
+
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .section-title {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-2);
+  }
+  .section-count {
+    font-size: 11px;
+    color: var(--text-2);
+    font-family: var(--font-mono);
+  }
+  .section-pills {
+    display: flex; gap: 4px;
+    margin-left: 12px;
+  }
+  .pill {
+    font-size: 11px;
+    font-weight: 500;
+    padding: 2px 10px;
+    border-radius: var(--radius-full);
+    cursor: pointer;
+    white-space: nowrap;
+    background: var(--bg-3);
+    color: var(--text-2);
+  }
+  .pill.active {
+    background: var(--accent-interactive-dim);
+    color: var(--accent-interactive);
+  }
+
+  .section-link {
+    display: inline-block;
+    font-size: 11px;
+    color: var(--accent-interactive);
+    margin-top: 10px;
+    cursor: pointer;
+    text-decoration: none;
+  }
+  .section-link:hover { text-decoration: underline; }
+
+  /* ── Poster Grid ── */
+  .poster-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    gap: 8px;
+  }
+  .poster-card {
+    position: relative;
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    cursor: pointer;
+    background: var(--bg-2);
+  }
+  .poster-card:hover { outline: 1px solid var(--border-strong); }
+  .poster-img {
+    width: 100%; aspect-ratio: 2/3;
+    display: block;
+  }
+  .poster-info {
+    padding: var(--space-2) var(--space-3);
+  }
+  .poster-title {
+    font-size: 11px; font-weight: 600; color: var(--text-0);
+    line-height: 1.3;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .poster-meta {
+    font-size: 10px; color: var(--text-2);
+    margin-top: 1px;
+    display: flex; align-items: center; gap: var(--space-2);
+  }
+
+  /* Indicator badges */
+  .badge {
+    position: absolute; top: 5px; right: 5px;
+    width: 18px; height: 18px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 50%;
+    font-size: 10px;
+    line-height: 1;
+  }
+  .badge-heart {
+    background: rgba(244, 63, 94, 0.85);
+    color: #fff;
+  }
+  .badge-bookmark {
+    background: rgba(139, 92, 246, 0.85);
+    color: #fff;
+  }
+  .badge-check {
+    background: rgba(34, 197, 94, 0.85);
+    color: #fff;
+    font-size: 9px;
+  }
+
+  /* Progress bar on poster */
+  .poster-progress {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 3px;
+    background: var(--bg-4);
+  }
+  .poster-progress-fill {
+    height: 100%;
+    background: var(--accent-interactive);
+  }
+
+  /* Type badge for channel cards */
+  .type-badge {
+    position: absolute; top: 5px; left: 5px;
+    font-size: 8px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 1px 5px;
+    border-radius: var(--radius-sm);
+    color: #fff;
+  }
+  .type-live { background: var(--accent-live); }
+  .type-series { background: var(--accent-series); }
+
+  /* Source dot */
+  .src-dot {
+    position: absolute; top: 5px; right: 5px;
+    width: 6px; height: 6px; border-radius: 50%;
+  }
+
+  /* Gradient placeholders */
+  .grad-1 { background: linear-gradient(135deg, #1a1a3e, #2d1b4e); }
+  .grad-2 { background: linear-gradient(135deg, #1b2838, #0f3460); }
+  .grad-3 { background: linear-gradient(135deg, #2b1a1a, #4a1942); }
+  .grad-4 { background: linear-gradient(135deg, #0d2137, #1a3a2a); }
+  .grad-5 { background: linear-gradient(135deg, #2a1f0f, #3d2b1f); }
+  .grad-6 { background: linear-gradient(135deg, #1f0f2a, #2f1f3a); }
+  .grad-7 { background: linear-gradient(135deg, #0f1f2a, #1a2a3f); }
+  .grad-8 { background: linear-gradient(135deg, #2a0f1a, #3f1a2a); }
+
+  /* Channel card (landscape) */
+  .channel-card {
+    position: relative;
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    cursor: pointer;
+    background: var(--bg-2);
+  }
+  .channel-card:hover { outline: 1px solid var(--border-strong); }
+  .channel-img {
+    width: 100%; aspect-ratio: 2/3;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px; font-weight: 700; color: var(--text-2);
+    letter-spacing: -0.02em;
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- Nav Rail -->
+  <nav class="nav-rail">
+    <div class="nav-icon" title="Home">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/></svg>
+    </div>
+    <div class="nav-icon" title="Live TV">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 010 8.49m-8.48-.01a6 6 0 010-8.49m11.31-2.82a10 10 0 010 14.14m-14.14 0a10 10 0 010-14.14"/></svg>
+    </div>
+    <div class="nav-icon" title="Films">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg>
+    </div>
+    <div class="nav-icon" title="Series">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="15" rx="2" ry="2"/><polyline points="17 2 12 7 7 2"/></svg>
+    </div>
+    <!-- Library (active) -->
+    <div class="nav-icon active" title="Library">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z"/></svg>
+    </div>
+    <div class="nav-icon" style="margin-top:auto" title="Settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+    </div>
+  </nav>
+
+  <!-- Main Content -->
+  <div class="main">
+
+    <!-- Command Bar -->
+    <div class="command-bar">
+      <input class="cmd-search" type="text" placeholder="Search library...">
+    </div>
+
+    <!-- Content Area -->
+    <div class="content-area">
+
+      <!-- FAVORITES -->
+      <div class="lib-section">
+        <div class="section-header">
+          <span class="section-title">Favorites</span>
+          <span class="section-count">(24)</span>
+          <div class="section-pills">
+            <span class="pill active">All</span>
+            <span class="pill">Live</span>
+            <span class="pill">Movies</span>
+            <span class="pill">Series</span>
+          </div>
+        </div>
+
+        <div class="poster-grid">
+          <!-- Movie posters with hearts -->
+          <div class="poster-card">
+            <div class="poster-img grad-1"></div>
+            <span class="badge badge-heart">&hearts;</span>
+            <div class="poster-info"><div class="poster-title">The Dark Knight</div><div class="poster-meta">2008</div></div>
+          </div>
+          <div class="poster-card">
+            <div class="poster-img grad-2"></div>
+            <span class="badge badge-heart">&hearts;</span>
+            <div class="poster-info"><div class="poster-title">Inception</div><div class="poster-meta">2010</div></div>
+          </div>
+          <!-- Channel card with heart -->
+          <div class="channel-card">
+            <div class="channel-img grad-3" style="font-size: 13px; color: var(--text-1);">BBC One</div>
+            <span class="type-badge type-live">LIVE</span>
+            <span class="badge badge-heart">&hearts;</span>
+            <div class="poster-info"><div class="poster-title">BBC One HD</div><div class="poster-meta">UK</div></div>
+          </div>
+          <div class="poster-card">
+            <div class="poster-img grad-4"></div>
+            <span class="badge badge-heart">&hearts;</span>
+            <div class="poster-info"><div class="poster-title">Breaking Bad</div><div class="poster-meta">2008</div></div>
+          </div>
+          <div class="poster-card">
+            <div class="poster-img grad-5"></div>
+            <span class="badge badge-heart">&hearts;</span>
+            <div class="poster-info"><div class="poster-title">Interstellar</div><div class="poster-meta">2014</div></div>
+          </div>
+          <!-- Another channel -->
+          <div class="channel-card">
+            <div class="channel-img grad-6" style="font-size: 13px; color: var(--text-1);">ESPN</div>
+            <span class="type-badge type-live">LIVE</span>
+            <span class="badge badge-heart">&hearts;</span>
+            <div class="poster-info"><div class="poster-title">ESPN HD</div><div class="poster-meta">Sports</div></div>
+          </div>
+          <div class="poster-card">
+            <div class="poster-img grad-7"></div>
+            <span class="badge badge-heart">&hearts;</span>
+            <div class="poster-info"><div class="poster-title">Blade Runner 2049</div><div class="poster-meta">2017</div></div>
+          </div>
+          <div class="poster-card">
+            <div class="poster-img grad-8"></div>
+            <span class="badge badge-heart">&hearts;</span>
+            <span class="type-badge type-series">SERIES</span>
+            <div class="poster-info"><div class="poster-title">The Bear</div><div class="poster-meta">2022</div></div>
+          </div>
+          <div class="poster-card">
+            <div class="poster-img grad-1"></div>
+            <span class="badge badge-heart">&hearts;</span>
+            <div class="poster-info"><div class="poster-title">Dune: Part Two</div><div class="poster-meta">2024</div></div>
+          </div>
+          <div class="poster-card">
+            <div class="poster-img grad-3"></div>
+            <span class="badge badge-heart">&hearts;</span>
+            <div class="poster-info"><div class="poster-title">Oppenheimer</div><div class="poster-meta">2023</div></div>
+          </div>
+          <div class="channel-card">
+            <div class="channel-img grad-5" style="font-size: 13px; color: var(--text-1);">Sky News</div>
+            <span class="type-badge type-live">LIVE</span>
+            <span class="badge badge-heart">&hearts;</span>
+            <div class="poster-info"><div class="poster-title">Sky News HD</div><div class="poster-meta">News</div></div>
+          </div>
+          <div class="poster-card">
+            <div class="poster-img grad-4"></div>
+            <span class="badge badge-heart">&hearts;</span>
+            <span class="type-badge type-series">SERIES</span>
+            <div class="poster-info"><div class="poster-title">Severance</div><div class="poster-meta">2022</div></div>
+          </div>
+        </div>
+
+        <a class="section-link" href="#">Show all favorites &rarr;</a>
+      </div>
+
+      <!-- WATCHLIST -->
+      <div class="lib-section">
+        <div class="section-header">
+          <span class="section-title">Watchlist</span>
+          <span class="section-count">(8)</span>
+        </div>
+
+        <div class="poster-grid">
+          <div class="poster-card">
+            <div class="poster-img grad-2"></div>
+            <span class="badge badge-bookmark">&#9898;</span>
+            <div class="poster-info"><div class="poster-title">The Substance</div><div class="poster-meta">2024</div></div>
+          </div>
+          <div class="poster-card">
+            <div class="poster-img grad-6"></div>
+            <span class="badge badge-bookmark">&#9898;</span>
+            <span class="type-badge type-series">SERIES</span>
+            <div class="poster-info"><div class="poster-title">Shogun</div><div class="poster-meta">2024</div></div>
+          </div>
+          <div class="poster-card">
+            <div class="poster-img grad-4"></div>
+            <span class="badge badge-bookmark">&#9898;</span>
+            <div class="poster-info"><div class="poster-title">Civil War</div><div class="poster-meta">2024</div></div>
+          </div>
+          <div class="poster-card">
+            <div class="poster-img grad-8"></div>
+            <span class="badge badge-bookmark">&#9898;</span>
+            <div class="poster-info"><div class="poster-title">Poor Things</div><div class="poster-meta">2023</div></div>
+          </div>
+          <div class="poster-card">
+            <div class="poster-img grad-1"></div>
+            <span class="badge badge-bookmark">&#9898;</span>
+            <span class="type-badge type-series">SERIES</span>
+            <div class="poster-info"><div class="poster-title">Fallout</div><div class="poster-meta">2024</div></div>
+          </div>
+          <div class="poster-card">
+            <div class="poster-img grad-3"></div>
+            <span class="badge badge-bookmark">&#9898;</span>
+            <div class="poster-info"><div class="poster-title">Furiosa</div><div class="poster-meta">2024</div></div>
+          </div>
+          <div class="poster-card">
+            <div class="poster-img grad-7"></div>
+            <span class="badge badge-bookmark">&#9898;</span>
+            <span class="type-badge type-series">SERIES</span>
+            <div class="poster-info"><div class="poster-title">3 Body Problem</div><div class="poster-meta">2024</div></div>
+          </div>
+          <div class="poster-card">
+            <div class="poster-img grad-5"></div>
+            <span class="badge badge-bookmark">&#9898;</span>
+            <div class="poster-info"><div class="poster-title">Anora</div><div class="poster-meta">2024</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- WATCH HISTORY -->
+      <div class="lib-section">
+        <div class="section-header">
+          <span class="section-title">Watch History</span>
+          <span class="section-count">(156)</span>
+        </div>
+
+        <div class="poster-grid">
+          <!-- In-progress items (with progress bar) -->
+          <div class="poster-card">
+            <div class="poster-img grad-6"></div>
+            <div class="poster-progress"><div class="poster-progress-fill" style="width: 65%"></div></div>
+            <div class="poster-info"><div class="poster-title">Dune: Part Two</div><div class="poster-meta">65% watched</div></div>
+          </div>
+          <div class="poster-card">
+            <div class="poster-img grad-2"></div>
+            <div class="poster-progress"><div class="poster-progress-fill" style="width: 30%"></div></div>
+            <span class="type-badge type-series">SERIES</span>
+            <div class="poster-info"><div class="poster-title">Severance S2E4</div><div class="poster-meta">30% watched</div></div>
+          </div>
+          <div class="poster-card">
+            <div class="poster-img grad-8"></div>
+            <div class="poster-progress"><div class="poster-progress-fill" style="width: 12%"></div></div>
+            <div class="poster-info"><div class="poster-title">Oppenheimer</div><div class="poster-meta">12% watched</div></div>
+          </div>
+          <!-- Completed items (with checkmark) -->
+          <div class="poster-card">
+            <div class="poster-img grad-1"></div>
+            <span class="badge badge-check">&#10003;</span>
+            <div class="poster-info"><div class="poster-title">The Dark Knight</div><div class="poster-meta">Watched 2d ago</div></div>
+          </div>
+          <div class="poster-card">
+            <div class="poster-img grad-4"></div>
+            <span class="badge badge-check">&#10003;</span>
+            <div class="poster-info"><div class="poster-title">Inception</div><div class="poster-meta">Watched 3d ago</div></div>
+          </div>
+          <div class="poster-card">
+            <div class="poster-img grad-3"></div>
+            <span class="badge badge-check">&#10003;</span>
+            <span class="type-badge type-series">SERIES</span>
+            <div class="poster-info"><div class="poster-title">The Bear S3</div><div class="poster-meta">Watched 4d ago</div></div>
+          </div>
+          <div class="poster-card">
+            <div class="poster-img grad-5"></div>
+            <span class="badge badge-check">&#10003;</span>
+            <div class="poster-info"><div class="poster-title">Poor Things</div><div class="poster-meta">Watched 5d ago</div></div>
+          </div>
+          <div class="poster-card">
+            <div class="poster-img grad-7"></div>
+            <span class="badge badge-check">&#10003;</span>
+            <div class="poster-info"><div class="poster-title">Killers of the Flower Moon</div><div class="poster-meta">Watched 1w ago</div></div>
+          </div>
+          <div class="poster-card">
+            <div class="poster-img grad-2"></div>
+            <div class="poster-progress"><div class="poster-progress-fill" style="width: 80%"></div></div>
+            <span class="type-badge type-series">SERIES</span>
+            <div class="poster-info"><div class="poster-title">Shogun S1E8</div><div class="poster-meta">80% watched</div></div>
+          </div>
+          <div class="poster-card">
+            <div class="poster-img grad-6"></div>
+            <span class="badge badge-check">&#10003;</span>
+            <div class="poster-info"><div class="poster-title">Civil War</div><div class="poster-meta">Watched 1w ago</div></div>
+          </div>
+          <div class="poster-card">
+            <div class="poster-img grad-8"></div>
+            <span class="badge badge-check">&#10003;</span>
+            <div class="poster-info"><div class="poster-title">The Zone of Interest</div><div class="poster-meta">Watched 2w ago</div></div>
+          </div>
+          <div class="poster-card">
+            <div class="poster-img grad-4"></div>
+            <span class="badge badge-check">&#10003;</span>
+            <div class="poster-info"><div class="poster-title">Past Lives</div><div class="poster-meta">Watched 2w ago</div></div>
+          </div>
+        </div>
+
+        <a class="section-link" href="#">Load more history...</a>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

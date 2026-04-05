@@ -1,18 +1,22 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { AnimatePresence } from 'framer-motion'
 import { api } from '@/lib/api'
 import { useSourcesStore, Source, SyncProgress } from '@/stores/sources.store'
-import { useSearchStore } from '@/stores/search.store'
-import { SearchBar } from '@/components/search/SearchBar'
-import { BrowseView } from '@/components/browse/BrowseView'
-import { BrowseViewH } from '@/components/browse/BrowseViewH'
-import { AddSourceDialog } from '@/components/settings/AddSourceDialog'
-import { Player } from '@/components/player/Player'
-import { ContentDetail } from '@/components/content/ContentDetail'
-import { SettingsDialog } from '@/components/settings/SettingsDialog'
-import { ContentItem } from '@/components/browse/ContentCard'
+import { useAppStore } from '@/stores/app.store'
+import { NavRail } from '@/components/layout/NavRail'
+import { CommandBar } from '@/components/layout/CommandBar'
+import { ContentArea } from '@/components/layout/ContentArea'
 import { ErrorBoundary } from '@/components/shared/ErrorBoundary'
+import { ContentItem } from '@/lib/types'
+
+// Detail + player panels loaded lazily (agents write them)
+const MovieDetail = lazy(() => import('@/components/detail/MovieDetail').then((m) => ({ default: m.MovieDetail })))
+const SeriesDetail = lazy(() => import('@/components/detail/SeriesDetail').then((m) => ({ default: m.SeriesDetail })))
+const PlayerOverlay = lazy(() => import('@/components/player/PlayerOverlay').then((m) => ({ default: m.PlayerOverlay })))
+const SettingsPanel = lazy(() => import('@/components/settings/SettingsPanel').then((m) => ({ default: m.SettingsPanel })))
+const SourcesPanel = lazy(() => import('@/components/sources/SourcesPanel').then((m) => ({ default: m.SourcesPanel })))
+
+import { lazy, Suspense } from 'react'
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, retry: 1 } },
@@ -29,79 +33,55 @@ export function App() {
 }
 
 function AppShell() {
-  const { sources, setSources, updateSource, setSyncProgress, toggleSourceFilter, clearSourceFilter, selectedSourceIds } = useSourcesStore()
-  const searchStore = useSearchStore()
-  const [showAddSource, setShowAddSource] = useState(false)
-  const [showSettings, setShowSettings] = useState(false)
-  const [selectedContent, setSelectedContent] = useState<ContentItem | null>(null)
-  const [playingContent, setPlayingContent] = useState<ContentItem | null>(null)
-  const [layoutH, setLayoutH] = useState(() => {
-    const saved = localStorage.getItem('fractals-layout-h')
-    return saved !== null ? saved === 'true' : true
-  })
+  const { sources, setSources, updateSource, setSyncProgress } = useSourcesStore()
+  const {
+    selectedContent, playingContent, showSettings, showSources,
+    setSelectedContent, setPlayingContent, setShowSettings, setShowSources,
+    setView, setTypeFilter, setCategoryFilter, clearSourceFilter, toggleSourceFilter,
+  } = useAppStore()
 
-  // Breadcrumb navigation: close overlay and set browse filters
-  const handleBreadcrumbNav = (nav: { type?: 'live' | 'movie' | 'series'; sourceId?: string; category?: string }) => {
-    setSelectedContent(null)
-    // Set type filter
-    if (nav.type) {
-      searchStore.setType(nav.type)
-    } else {
-      searchStore.setType('all')
-    }
-    // Set category filter
-    if (nav.category) {
-      searchStore.setActiveCategory(nav.category)
-    }
-    // Set source filter
-    if (nav.sourceId) {
-      clearSourceFilter()
-      toggleSourceFilter(nav.sourceId)
-    }
-    // Clear search query
-    searchStore.setQuery('')
-  }
+  const [sort, setSort] = useState('updated:desc')
 
+  // Load sources + auto-sync new ones
   useEffect(() => {
     api.sources.list().then((list) => {
       const loaded = list as Source[]
       setSources(loaded)
-      // Auto-sync sources that have never been synced
       for (const src of loaded) {
-        if (!src.disabled && !src.lastSync) {
-          handleSync(src.id)
-        }
+        if (!src.disabled && !src.lastSync) handleSync(src.id)
       }
-      // Check connectivity for all sources and update status (clears stale 'error' dots)
       if (loaded.length > 0) api.sources.startupCheck()
     })
 
-    // ⌘, opens settings / ⌘R reloads renderer
+    // Global keyboard shortcuts
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === ',') { e.preventDefault(); setShowSettings(true) }
       if ((e.metaKey || e.ctrlKey) && e.key === 'r') { e.preventDefault(); window.location.reload() }
+      if ((e.metaKey || e.ctrlKey) && e.key === '1') { e.preventDefault(); setView('home') }
+      if ((e.metaKey || e.ctrlKey) && e.key === '2') { e.preventDefault(); setView('live') }
+      if ((e.metaKey || e.ctrlKey) && e.key === '3') { e.preventDefault(); setView('films') }
+      if ((e.metaKey || e.ctrlKey) && e.key === '4') { e.preventDefault(); setView('series') }
+      if ((e.metaKey || e.ctrlKey) && e.key === '5') { e.preventDefault(); setView('library') }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [setSources])
 
+  // Source health events
   useEffect(() => {
-    const unsub = api.on('source:health', (data: any) => {
+    return api.on('source:health', (data: any) => {
       updateSource(data.sourceId, {
         status: data.ok ? 'active' : 'error',
         lastError: data.ok ? undefined : data.error,
       })
     })
-    return unsub
   }, [updateSource])
 
+  // Sync progress events
   useEffect(() => {
-    // Track the last phase per source to detect phase transitions
     const lastPhase: Record<string, string> = {}
-
-    const unsub = api.on('sync:progress', (progress: any) => {
+    return api.on('sync:progress', (progress: any) => {
       const p = progress as SyncProgress & { sourceId: string }
-
       if (p.phase === 'done') {
         setSyncProgress(p.sourceId, null)
         api.sources.list().then((list) => setSources(list as Source[]))
@@ -113,9 +93,6 @@ function AppShell() {
       } else {
         setSyncProgress(p.sourceId, { phase: p.phase, current: p.current, total: p.total, message: p.message })
         updateSource(p.sourceId, { status: 'syncing' })
-
-        // When phase transitions (live→movies, movies→series), the previous phase's
-        // content is fully in the DB — invalidate so the UI shows it immediately
         if (lastPhase[p.sourceId] && lastPhase[p.sourceId] !== p.phase) {
           queryClient.invalidateQueries({ queryKey: ['browse'] })
           queryClient.invalidateQueries({ queryKey: ['categories'] })
@@ -123,7 +100,6 @@ function AppShell() {
         lastPhase[p.sourceId] = p.phase
       }
     })
-    return unsub
   }, [setSources, updateSource, setSyncProgress])
 
   const handleSync = async (sourceId: string) => {
@@ -139,7 +115,8 @@ function AppShell() {
 
   const handleRemove = async (sourceId: string) => {
     await api.sources.remove(sourceId)
-    setSources(sources.filter((s) => s.id !== sourceId))
+    const list = await api.sources.list()
+    setSources(list as Source[])
     queryClient.invalidateQueries({ queryKey: ['browse'] })
     queryClient.invalidateQueries({ queryKey: ['categories'] })
   }
@@ -151,76 +128,93 @@ function AppShell() {
     queryClient.invalidateQueries({ queryKey: ['categories'] })
   }
 
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%', background: 'var(--color-bg)', overflow: 'hidden' }}>
+  const handleSelectContent = (item: ContentItem) => {
+    if (item.type === 'live') {
+      setPlayingContent(item)
+    } else {
+      setSelectedContent(item)
+    }
+  }
 
-      {/* Header: logo + search + settings */}
-      <SearchBar
+  const handleBreadcrumbNav = (nav: { type?: 'live' | 'movie' | 'series'; sourceId?: string; category?: string }) => {
+    setSelectedContent(null)
+    if (nav.type) setTypeFilter(nav.type)
+    if (nav.category) setCategoryFilter(nav.category)
+    if (nav.sourceId) { clearSourceFilter(); toggleSourceFilter(nav.sourceId) }
+  }
+
+  const isSeries = selectedContent?.type === 'series'
+
+  return (
+    <div style={{
+      display: 'flex',
+      height: '100vh',
+      width: '100vw',
+      background: 'var(--bg-0)',
+      color: 'var(--text-0)',
+      fontFamily: 'var(--font-ui)',
+      fontSize: 13,
+      overflow: 'hidden',
+    }}>
+      {/* Nav Rail */}
+      <NavRail
+        onOpenSources={() => setShowSources(true)}
         onOpenSettings={() => setShowSettings(true)}
-        layoutH={layoutH}
-        onToggleLayout={() => setLayoutH(v => { const next = !v; localStorage.setItem('fractals-layout-h', String(next)); return next })}
       />
 
-      {/* Content: category nav + poster grid */}
-      {layoutH ? (
-        <BrowseViewH
-          sourcesCount={sources.length}
-          onAddSource={() => setShowAddSource(true)}
-          onSyncSource={handleSync}
-          onRemoveSource={handleRemove}
-          onSelectContent={(item) => {
-            if (item.type === 'live') setPlayingContent(item)
-            else setSelectedContent(item)
-          }}
+      {/* Main column */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
+        <CommandBar sort={sort} onSortChange={setSort} />
+        <ContentArea
+          sort={sort}
+          onSelectContent={handleSelectContent}
+          onAddSource={() => setShowSources(true)}
         />
-      ) : (
-        <BrowseView
-          sourcesCount={sources.length}
-          onAddSource={() => setShowAddSource(true)}
-          onSyncSource={handleSync}
-          onRemoveSource={handleRemove}
-          onSelectContent={(item) => {
-            if (item.type === 'live') setPlayingContent(item)
-            else setSelectedContent(item)
-          }}
-        />
-      )}
+      </div>
 
-      {/* Dialogs */}
-      <AnimatePresence>
-        {showAddSource && (
-          <AddSourceDialog
-            onClose={() => setShowAddSource(false)}
-            onAdded={handleSourceAdded}
-          />
-        )}
-        {showSettings && (
-          <SettingsDialog onClose={() => setShowSettings(false)} />
-        )}
-      </AnimatePresence>
-
-      {/* Content detail panel (movies + series) — stays mounted behind player */}
-      <AnimatePresence>
-        {selectedContent && (
-          <ContentDetail
+      {/* Overlay panels — rendered via Suspense/lazy */}
+      <Suspense fallback={null}>
+        {/* Movie detail */}
+        {selectedContent && !isSeries && (
+          <MovieDetail
             item={selectedContent}
-            onPlay={(item) => setPlayingContent(item)}
+            onPlay={setPlayingContent}
             onClose={() => setSelectedContent(null)}
             onNavigate={handleBreadcrumbNav}
             isPlaying={!!playingContent}
           />
         )}
-      </AnimatePresence>
-
-      {/* Player */}
-      <AnimatePresence>
+        {/* Series detail */}
+        {selectedContent && isSeries && (
+          <SeriesDetail
+            item={selectedContent}
+            onPlay={setPlayingContent}
+            onClose={() => setSelectedContent(null)}
+            onNavigate={handleBreadcrumbNav}
+            isPlaying={!!playingContent}
+          />
+        )}
+        {/* Player */}
         {playingContent && (
-          <Player
+          <PlayerOverlay
             content={playingContent}
             onClose={() => setPlayingContent(null)}
           />
         )}
-      </AnimatePresence>
+        {/* Settings */}
+        {showSettings && (
+          <SettingsPanel onClose={() => setShowSettings(false)} />
+        )}
+        {/* Sources */}
+        {showSources && (
+          <SourcesPanel
+            onClose={() => setShowSources(false)}
+            onSync={handleSync}
+            onRemove={handleRemove}
+            onAdded={handleSourceAdded}
+          />
+        )}
+      </Suspense>
     </div>
   )
 }

@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fractals — Search (No Results)</title>
+<link rel="stylesheet" href="design-tokens.css">
+<style>
+  html, body { height: 100%; overflow: hidden; }
+
+  .app { display: flex; height: 100vh; }
+
+  /* ── Nav Rail ── */
+  .nav-rail {
+    width: 48px; flex-shrink: 0;
+    background: var(--bg-1);
+    border-right: 1px solid var(--border-subtle);
+    display: flex; flex-direction: column; align-items: center;
+    padding: var(--space-6) 0;
+    gap: var(--space-5);
+  }
+  .nav-icon {
+    width: 32px; height: 32px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-2);
+    border-radius: var(--radius-md);
+    position: relative;
+    cursor: pointer;
+  }
+  .nav-icon:hover { color: var(--text-1); }
+  .nav-icon.active { color: var(--text-0); }
+  .nav-icon.active::before {
+    content: '';
+    position: absolute; left: -8px; top: 4px; bottom: 4px;
+    width: 3px; border-radius: 0 2px 2px 0;
+    background: var(--text-0);
+  }
+  .nav-icon svg { width: 20px; height: 20px; }
+
+  /* ── Main ── */
+  .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+  /* ── Command Bar ── */
+  .command-bar {
+    height: 44px; flex-shrink: 0;
+    background: var(--bg-1);
+    border-bottom: 1px solid var(--border-subtle);
+    display: flex; align-items: center;
+    padding: 0 var(--space-6);
+    gap: var(--space-5);
+  }
+  .cmd-dropdown {
+    display: flex; align-items: center; gap: var(--space-2);
+    font-size: 12px; font-weight: 500; color: var(--text-1);
+    background: var(--bg-3);
+    padding: var(--space-2) var(--space-4);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    border: 1px solid var(--border-default);
+  }
+  .cmd-dropdown .chevron { font-size: 10px; color: var(--text-2); }
+  .cmd-search {
+    flex: 1;
+    background: var(--bg-2);
+    border: 1px solid rgba(139,92,246,0.5);
+    border-radius: var(--radius-sm);
+    padding: var(--space-2) var(--space-4);
+    color: var(--text-0);
+    font-size: 12px;
+    font-family: var(--font-ui);
+    outline: none;
+    min-width: 180px;
+  }
+  .cmd-sort {
+    font-size: 11px; color: var(--text-1);
+    display: flex; align-items: center; gap: var(--space-2);
+    cursor: pointer;
+  }
+  .cmd-sort .chevron { font-size: 9px; color: var(--text-2); }
+  .source-dots { display: flex; gap: 4px; align-items: center; margin-left: auto; }
+  .source-dot { width: 6px; height: 6px; border-radius: 50%; }
+
+  /* ── Filter Bar ── */
+  .filter-bar {
+    height: 32px; flex-shrink: 0;
+    background: var(--bg-0);
+    border-bottom: 1px solid var(--border-subtle);
+    display: flex; align-items: center;
+    padding: 0 var(--space-6);
+    gap: var(--space-4);
+  }
+  .pill {
+    display: inline-flex; align-items: center; gap: var(--space-2);
+    font-size: 11px; font-weight: 500;
+    padding: 2px 8px;
+    border-radius: var(--radius-full);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .pill .x { font-size: 10px; opacity: 0.6; }
+  .pill-series { background: rgba(16,185,129,0.2); color: var(--accent-series); }
+
+  /* ── Empty State ── */
+  .content-area {
+    flex: 1; display: flex; align-items: center; justify-content: center;
+  }
+  .empty-state {
+    text-align: center;
+    display: flex; flex-direction: column; align-items: center;
+    gap: var(--space-4);
+  }
+  .empty-icon { color: var(--text-2); }
+  .empty-icon svg { width: 24px; height: 24px; }
+  .empty-title {
+    font-size: 15px; font-weight: 500; color: var(--text-0);
+  }
+  .empty-subtitle {
+    font-size: 13px; color: var(--text-1);
+    margin-top: -4px;
+  }
+  .empty-link {
+    font-size: 13px;
+    color: var(--accent-interactive);
+    text-decoration: underline;
+    cursor: pointer;
+  }
+  .empty-link:hover { color: var(--text-0); }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- Nav Rail -->
+  <nav class="nav-rail">
+    <div class="nav-icon active" title="Home">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/></svg>
+    </div>
+    <div class="nav-icon" title="Live TV">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 010 8.49m-8.48-.01a6 6 0 010-8.49m11.31-2.82a10 10 0 010 14.14m-14.14 0a10 10 0 010-14.14"/></svg>
+    </div>
+    <div class="nav-icon" title="Films">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg>
+    </div>
+    <div class="nav-icon" title="Series">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="15" rx="2" ry="2"/><polyline points="17 2 12 7 7 2"/></svg>
+    </div>
+    <div class="nav-icon" style="margin-top:auto" title="Settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+    </div>
+  </nav>
+
+  <!-- Main -->
+  <div class="main">
+
+    <!-- Command Bar -->
+    <div class="command-bar">
+      <div class="cmd-dropdown">All Types <span class="chevron">&#9662;</span></div>
+      <input class="cmd-search" type="text" value="xyznonexistent">
+      <div class="cmd-sort">Relevance <span class="chevron">&#9662;</span></div>
+      <div class="source-dots">
+        <span class="source-dot" style="background:var(--src-1)"></span>
+        <span class="source-dot" style="background:var(--src-2)"></span>
+        <span class="source-dot" style="background:var(--src-3)"></span>
+        <span class="source-dot" style="background:var(--src-4)"></span>
+      </div>
+    </div>
+
+    <!-- Filter Bar -->
+    <div class="filter-bar">
+      <span class="pill pill-series"><span class="x">&#10005;</span> Series</span>
+    </div>
+
+    <!-- Empty State -->
+    <div class="content-area">
+      <div class="empty-state">
+        <div class="empty-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"/>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          </svg>
+        </div>
+        <div class="empty-title">No results for "xyznonexistent"</div>
+        <div class="empty-subtitle">Try a different search term or remove filters.</div>
+        <a class="empty-link">Remove Series filter</a>
+      </div>
+    </div>
+
+  </div>
+</div>
+</body>
+</html>

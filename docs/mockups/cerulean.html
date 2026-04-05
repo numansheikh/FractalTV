@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Fractals — Cerulean Mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300..700&display=swap" rel="stylesheet" />
+<style>
+  /* ── Dark theme ───────────────────────────────────────────────── */
+  :root,
+  [data-theme="dark"] {
+    --bg:             #0c1a26;
+    --surface:        #132333;
+    --card:           #1a3044;
+    --card-hover:     #1f3a52;
+    --border:         rgba(47,164,231,0.10);
+    --border-strong:  rgba(47,164,231,0.20);
+
+    --primary:        #2fa4e7;
+    --primary-hover:  #4db8f5;
+    --primary-dim:    rgba(47,164,231,0.14);
+    --accent:         #7dd3f8;
+
+    --text-primary:   #e8f4fd;
+    --text-secondary: #7aadcc;
+    --text-muted:     #3f6e8a;
+
+    --success:        #5aaa28;
+    --warning:        #e06820;
+    --error:          #e03030;
+    --live:           #e03030;
+    --movie:          #2fa4e7;
+    --series:         #34c4b0;
+
+    --scrollbar:      rgba(47,164,231,0.15);
+  }
+
+  /* ── Light theme ──────────────────────────────────────────────── */
+  [data-theme="light"] {
+    --bg:             #edf6fd;
+    --surface:        #deeef9;
+    --card:           #cce3f5;
+    --card-hover:     #bcd9f0;
+    --border:         rgba(20,100,160,0.14);
+    --border-strong:  rgba(20,100,160,0.26);
+
+    --primary:        #1a85c8;
+    --primary-hover:  #1470aa;
+    --primary-dim:    rgba(26,133,200,0.13);
+    --accent:         #0d5c94;
+
+    --text-primary:   #0a1e2e;
+    --text-secondary: #1a5070;
+    --text-muted:     #4a88b0;
+
+    --success:        #3a7a18;
+    --warning:        #b84200;
+    --error:          #b01818;
+    --live:           #b01818;
+    --movie:          #1a85c8;
+    --series:         #0a8878;
+
+    --scrollbar:      rgba(20,100,160,0.18);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html { zoom: 1.1; font-size: 16px; }
+
+  body {
+    font-family: 'DM Sans', -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text-primary);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── Theme toggle ─────────────────────────────────────────────── */
+  #theme-toggle {
+    position: fixed;
+    top: 8px;
+    right: 56px;
+    z-index: 999;
+    background: var(--card);
+    border: 1px solid var(--border-strong);
+    color: var(--text-secondary);
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+
+  /* ── Header ───────────────────────────────────────────────────── */
+  .header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 14px 9px 18px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    min-height: 48px;
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    flex-shrink: 0;
+  }
+
+  .logo-icon {
+    width: 22px;
+    height: 22px;
+    background: var(--primary);
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .logo-icon svg { display: block; }
+
+  .logo-text {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-primary);
+    letter-spacing: -0.01em;
+  }
+
+  .search-wrap {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--card);
+    border: 1px solid var(--border-strong);
+    border-radius: 9px;
+    padding: 7px 12px;
+  }
+
+  .search-wrap svg { color: var(--text-muted); flex-shrink: 0; }
+
+  .search-wrap input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    font-size: 13px;
+    color: var(--text-primary);
+    font-family: inherit;
+  }
+
+  .search-wrap input::placeholder { color: var(--text-muted); }
+
+  .kbd {
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-family: monospace;
+    background: var(--surface);
+    color: var(--text-muted);
+    border: 1px solid var(--border-strong);
+  }
+
+  .header-btn {
+    width: 32px; height: 32px;
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+  }
+  .header-btn:hover { background: var(--card); color: var(--text-secondary); }
+
+  /* ── Type tabs ────────────────────────────────────────────────── */
+  .type-tabs {
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .tab {
+    padding: 10px 16px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    cursor: pointer;
+    font-family: inherit;
+    white-space: nowrap;
+  }
+
+  .tab.active-live   { color: var(--live);   border-bottom-color: var(--live);   }
+  .tab.active-movie  { color: var(--movie);  border-bottom-color: var(--movie);  }
+  .tab.active-series { color: var(--series); border-bottom-color: var(--series); }
+  .tab.active-all    { color: var(--accent); border-bottom-color: var(--accent); }
+
+  /* ── Category bar ─────────────────────────────────────────────── */
+  .cat-bar {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 7px 12px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg);
+    flex-shrink: 0;
+  }
+
+  .cat-filter-wrap {
+    position: relative;
+    flex-shrink: 0;
+  }
+
+  .cat-filter-wrap svg {
+    position: absolute;
+    left: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-muted);
+    pointer-events: none;
+  }
+
+  .cat-filter-wrap input {
+    background: var(--card);
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    padding: 4px 8px 4px 24px;
+    font-size: 11px;
+    color: var(--text-primary);
+    width: 140px;
+    outline: none;
+    font-family: inherit;
+  }
+
+  .cat-filter-wrap input::placeholder { color: var(--text-muted); }
+
+  .divider-v {
+    width: 1px;
+    align-self: stretch;
+    background: var(--border-strong);
+    flex-shrink: 0;
+    margin: 2px 0;
+  }
+
+  .cat-pills {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 5px;
+    flex: 1;
+    max-height: 68px;
+    overflow: hidden;
+  }
+
+  .pill {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 9px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 500;
+    white-space: nowrap;
+    cursor: pointer;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--text-secondary);
+    font-family: inherit;
+  }
+
+  .pill:hover { background: var(--card); color: var(--text-primary); }
+
+  .pill.active {
+    border-color: rgba(47,164,231,0.35);
+    background: var(--primary-dim);
+    color: var(--accent);
+  }
+
+  [data-theme="light"] .pill.active {
+    border-color: rgba(26,133,200,0.35);
+    color: var(--primary);
+  }
+
+  .dot {
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    display: inline-block;
+    flex-shrink: 0;
+  }
+
+  .pill-count { font-size: 10px; color: var(--text-muted); font-family: monospace; }
+
+  /* ── Toolbar ──────────────────────────────────────────────────── */
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 12px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    flex-shrink: 0;
+    min-height: 36px;
+  }
+
+  .toolbar-count {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: monospace;
+  }
+
+  .toolbar-count span { color: var(--text-secondary); }
+
+  .toolbar-search-wrap {
+    position: relative;
+  }
+
+  .toolbar-search-wrap svg {
+    position: absolute;
+    left: 7px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-muted);
+    pointer-events: none;
+  }
+
+  .toolbar-search-wrap input {
+    background: var(--card);
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    padding: 3px 8px 3px 22px;
+    font-size: 11px;
+    color: var(--text-primary);
+    width: 180px;
+    outline: none;
+    font-family: inherit;
+  }
+
+  .toolbar-search-wrap input::placeholder { color: var(--text-muted); }
+
+  .spacer { flex: 1; }
+
+  .filter-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 9px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 11px;
+    cursor: pointer;
+    font-family: inherit;
+    opacity: 0.5;
+  }
+
+  .sort-btn {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 9px;
+    border-radius: 6px;
+    border: 1px solid var(--border-strong);
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 11px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+
+  /* ── Poster grid ──────────────────────────────────────────────── */
+  .content-area {
+    flex: 1;
+    overflow-y: auto;
+    padding: 14px 16px 20px;
+  }
+
+  .poster-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(154px, 1fr));
+    gap: 12px;
+  }
+
+  .poster-card {
+    border-radius: 10px;
+    overflow: hidden;
+    background: var(--card);
+    border: 1px solid var(--border);
+    cursor: pointer;
+    position: relative;
+  }
+
+  .poster-card:hover { border-color: var(--border-strong); transform: translateY(-2px); transition: all 0.12s; }
+
+  .poster-img {
+    width: 100%;
+    aspect-ratio: 2/3;
+    background: var(--surface);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+
+  .poster-img img { width: 100%; height: 100%; object-fit: cover; }
+
+  .poster-placeholder {
+    width: 100%;
+    aspect-ratio: 2/3;
+    background: linear-gradient(135deg, var(--card) 0%, var(--surface) 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .poster-info {
+    padding: 8px 9px 9px;
+  }
+
+  .poster-title {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-primary);
+    line-height: 1.35;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    margin-bottom: 5px;
+  }
+
+  .poster-meta {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-wrap: wrap;
+  }
+
+  .badge {
+    font-size: 9px;
+    font-weight: 600;
+    padding: 2px 5px;
+    border-radius: 4px;
+  }
+
+  .badge-movie  { color: var(--movie);  background: rgba(47,164,231,0.12);  border: 1px solid rgba(47,164,231,0.2);  }
+  .badge-series { color: var(--series); background: rgba(52,196,176,0.12); border: 1px solid rgba(52,196,176,0.2); }
+  .badge-live   { color: var(--live);   background: rgba(224,48,48,0.10);  border: 1px solid rgba(224,48,48,0.2);  }
+
+  [data-theme="light"] .badge-movie  { background: rgba(26,133,200,0.12); border-color: rgba(26,133,200,0.25); }
+  [data-theme="light"] .badge-series { background: rgba(10,136,120,0.12); border-color: rgba(10,136,120,0.25); }
+  [data-theme="light"] .badge-live   { background: rgba(176,24,24,0.10);  border-color: rgba(176,24,24,0.2);  }
+
+  .year { font-size: 10px; color: var(--text-muted); }
+
+  .rating {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--warning);
+  }
+
+  .source-dot-card {
+    position: absolute;
+    top: 7px;
+    right: 7px;
+    width: 7px; height: 7px;
+    border-radius: 50%;
+  }
+
+  /* ── Source tab bar ───────────────────────────────────────────── */
+  .source-bar {
+    display: flex;
+    align-items: center;
+    padding: 0 12px;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+    min-height: 36px;
+    gap: 4px;
+  }
+
+  .source-tab {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    border: none;
+    font-family: inherit;
+    background: transparent;
+  }
+
+  .source-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .add-source-btn {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 10px;
+    border-radius: 6px;
+    background: transparent;
+    border: 1px solid var(--border-strong);
+    color: var(--text-muted);
+    font-size: 11px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+
+  .add-source-btn:hover { color: var(--primary); border-color: var(--primary); }
+
+  /* ── Scrollbar ────────────────────────────────────────────────── */
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<button id="theme-toggle" onclick="toggleTheme()">☀ Light mode</button>
+
+<!-- Header -->
+<div class="header">
+  <div class="logo">
+    <div class="logo-icon">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round">
+        <polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5 12 2"/>
+        <line x1="12" y1="2" x2="12" y2="22"/>
+        <line x1="2" y1="8.5" x2="22" y2="8.5"/>
+        <line x1="2" y1="15.5" x2="22" y2="15.5"/>
+      </svg>
+    </div>
+    <span class="logo-text">Fractals</span>
+  </div>
+
+  <div class="search-wrap">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+    </svg>
+    <input placeholder="Search channels, movies, actors, directors…" />
+    <span class="kbd">/</span>
+  </div>
+
+  <!-- Moon icon -->
+  <button class="header-btn" onclick="toggleTheme()">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round">
+      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+    </svg>
+  </button>
+
+  <!-- Settings icon -->
+  <button class="header-btn">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round">
+      <circle cx="12" cy="12" r="3"/>
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+    </svg>
+  </button>
+</div>
+
+<!-- Type tabs -->
+<div class="type-tabs">
+  <button class="tab">All</button>
+  <button class="tab">Live TV</button>
+  <button class="tab active-movie">Movies</button>
+  <button class="tab">Series</button>
+</div>
+
+<!-- Category bar -->
+<div class="cat-bar">
+  <div class="cat-filter-wrap">
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+    <input placeholder="Filter categories…" />
+  </div>
+  <div class="divider-v"></div>
+  <div class="cat-pills">
+    <button class="pill"><span class="dot" style="background:#2fa4e7"></span>DE – FILME ALT<span class="pill-count">8.1k</span></button>
+    <button class="pill"><span class="dot" style="background:#e85a2f"></span>IR – PERSIAN SUB<span class="pill-count">5.8k</span></button>
+    <button class="pill active"><span class="dot" style="background:#2fa4e7"></span>FR – 2021 ANCIEN FILM<span class="pill-count">2.1k</span></button>
+    <button class="pill"><span class="dot" style="background:#e85a2f"></span>ISLAMIC | NAATS<span class="pill-count">3.0k</span></button>
+    <button class="pill"><span class="dot" style="background:#2fa4e7"></span>EN – NEW RELEASE<span class="pill-count">5.6k</span></button>
+    <button class="pill"><span class="dot" style="background:#2fa4e7"></span>NETFLIX MOVIES<span class="pill-count">3.5k</span></button>
+    <button class="pill"><span class="dot" style="background:#e85a2f"></span>IN – HINDI<span class="pill-count">2.8k</span></button>
+    <button class="pill"><span class="dot" style="background:#2fa4e7"></span>GERMANY MOVIES<span class="pill-count">4.5k</span></button>
+    <button class="pill"><span class="dot" style="background:#e85a2f"></span>NORDIC FILM<span class="pill-count">2.7k</span></button>
+    <button class="pill"><span class="dot" style="background:#2fa4e7"></span>EN – DRAMA<span class="pill-count">1.8k</span></button>
+    <button class="pill"><span class="dot" style="background:#2fa4e7"></span>TOP MOVIES BLURAY<span class="pill-count">1.4k</span></button>
+    <button class="pill"><span class="dot" style="background:#e85a2f"></span>ES – PELÍCULAS<span class="pill-count">3.1k</span></button>
+  </div>
+</div>
+
+<!-- Toolbar -->
+<div class="toolbar">
+  <span class="toolbar-count">2,056 items in <span>FR – 2021 ANCIEN FILM</span></span>
+  <div class="toolbar-search-wrap">
+    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+    <input placeholder="Search in FR – 2021 ANCIEN…" />
+  </div>
+  <div class="spacer"></div>
+  <button class="filter-btn">Genre <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg></button>
+  <button class="filter-btn">Year <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg></button>
+  <button class="sort-btn">
+    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M7 12h10M11 18h2"/></svg>
+    Latest
+    <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+  </button>
+</div>
+
+<!-- Poster grid -->
+<div class="content-area">
+  <div class="poster-grid" id="grid"></div>
+</div>
+
+<!-- Source bar -->
+<div class="source-bar">
+  <button class="source-tab" style="background:rgba(47,164,231,0.08)">
+    <span class="source-dot" style="background:#4ade80; box-shadow:0 0 5px #4ade8088"></span>
+    <span style="color:#2fa4e7; font-weight:600">Opplex</span>
+  </button>
+  <button class="source-tab" style="background:rgba(232,90,47,0.08)">
+    <span class="source-dot" style="background:#4ade80; box-shadow:0 0 5px #4ade8088"></span>
+    <span style="color:#e85a2f; font-weight:600">4k Strong</span>
+  </button>
+  <div style="font-size:11px; color:var(--text-muted); margin-left:8px">
+    All <span style="color:var(--text-secondary)">303,385</span>
+    &nbsp;·&nbsp; Opplex <span style="color:#2fa4e7">78,893</span>
+    &nbsp;·&nbsp; 4k Strong <span style="color:#e85a2f">224,492</span>
+  </div>
+  <button class="add-source-btn">
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    Add source
+  </button>
+</div>
+
+<script>
+  // Sample data
+  const movies = [
+    { title: "FR – L'As des as (1982)", year: 1982, rating: 7.0, type: "movie", color: "#2fa4e7", src: "https://image.tmdb.org/t/p/w300/wHpN7isQwIYsGJJgByxhBLiGJbv.jpg" },
+    { title: "FR – Blood Brothers: Malcolm X & Muhammad Ali", year: 2021, rating: 7.2, type: "movie", color: "#2fa4e7", src: "https://image.tmdb.org/t/p/w300/7WsyChQLEftFiDOVTGkv3hFpyyt.jpg" },
+    { title: "Spider-Man 2 (2004)", year: 2004, rating: 7.2, type: "movie", color: "#e85a2f", src: "https://image.tmdb.org/t/p/w300/b2RSn9KBfL4ZXURM27O5bujYPqR.jpg" },
+    { title: "FR – Deux moi (2019)", year: 2019, rating: 6.4, type: "movie", color: "#2fa4e7", src: "" },
+    { title: "FR – Le Monde de Narnia: Le Prince…", year: 2008, rating: 6.6, type: "movie", color: "#2fa4e7", src: "https://image.tmdb.org/t/p/w300/mLGMqyL0H7bnHeSoxh3LHSY3xJR.jpg" },
+    { title: "FR – Rogue One: A Star Wars Story…", year: 2016, rating: 7.4, type: "movie", color: "#e85a2f", src: "https://image.tmdb.org/t/p/w300/i0yw1mFbB7sNGHCs7EXZPzFkdA1.jpg" },
+    { title: "FR – La Controverse de Valladolid (1992)", year: 1992, rating: 6.8, type: "movie", color: "#2fa4e7", src: "" },
+    { title: "FR – Liaison fatale (1987)", year: 1987, rating: 6.8, type: "movie", color: "#2fa4e7", src: "" },
+    { title: "FR – Dark Crystal (1982)", year: 1982, rating: 7.2, type: "movie", color: "#e85a2f", src: "https://image.tmdb.org/t/p/w300/6xAWxG7BLepDlGnIIFL7a87TXMQ.jpg" },
+    { title: "FR – The Alto Knights (2025)", year: 2025, rating: 6.2, type: "movie", color: "#2fa4e7", src: "" },
+    { title: "FR – Snowpiercer (2013)", year: 2013, rating: 7.0, type: "movie", color: "#e85a2f", src: "https://image.tmdb.org/t/p/w300/fm6KqXpknocRQBd2jNXO5OQGTT1.jpg" },
+    { title: "FR – Sous le même toit (2017)", year: 2017, rating: 5.4, type: "movie", color: "#2fa4e7", src: "" },
+    { title: "FR – Sam je suis Sam (2001)", year: 2001, rating: 7.6, type: "movie", color: "#2fa4e7", src: "" },
+    { title: "FR – Bad Sister (2015)", year: 2015, rating: 6.6, type: "movie", color: "#e85a2f", src: "" },
+    { title: "FR – Dans la maison (2012)", year: 2012, rating: 7.2, type: "movie", color: "#2fa4e7", src: "" },
+    { title: "FR – Le Jouet (1976)", year: 1976, rating: 6.8, type: "movie", color: "#2fa4e7", src: "" },
+  ];
+
+  function renderGrid() {
+    const grid = document.getElementById('grid');
+    grid.innerHTML = movies.map(m => `
+      <div class="poster-card">
+        ${m.src
+          ? `<div class="poster-img"><img src="${m.src}" alt="" onerror="this.parentElement.className='poster-placeholder';this.remove();this.parentElement.innerHTML='<svg width=28 height=28 viewBox=&quot;0 0 24 24&quot; fill=none stroke=&quot;${m.color}&quot; stroke-width=1 opacity=0.3><rect x=2 y=2 width=20 height=20 rx=2/><polygon points=&quot;10 8 16 12 10 16 10 8&quot; fill=&quot;${m.color}&quot; stroke=none opacity=0.5/></svg>'"></div>`
+          : `<div class="poster-placeholder"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="${m.color}" stroke-width="1" opacity="0.3"><rect x="2" y="2" width="20" height="20" rx="2"/><polygon points="10 8 16 12 10 16 10 8" fill="${m.color}" stroke="none" opacity="0.5"/></svg></div>`
+        }
+        <span class="source-dot-card" style="background:${m.color};opacity:0.8"></span>
+        <div class="poster-info">
+          <div class="poster-title">${m.title}</div>
+          <div class="poster-meta">
+            <span class="badge badge-${m.type}">${m.type === 'movie' ? 'Film' : m.type}</span>
+            <span class="year">${m.year}</span>
+            ${m.rating ? `<span class="rating"><svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor"><path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>${m.rating}</span>` : ''}
+          </div>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  function toggleTheme() {
+    const html = document.documentElement;
+    const isDark = html.getAttribute('data-theme') === 'dark';
+    html.setAttribute('data-theme', isDark ? 'light' : 'dark');
+    document.getElementById('theme-toggle').textContent = isDark ? '🌙 Dark mode' : '☀ Light mode';
+  }
+
+  renderGrid();
+</script>
+</body>
+</html>

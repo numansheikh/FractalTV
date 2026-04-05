@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fractals — Movie Detail (Unenriched)</title>
+<link rel="stylesheet" href="design-tokens.css">
+<style>
+  /* ── App Shell (dimmed background) ── */
+  .app-shell {
+    display: flex;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* Rail */
+  .rail {
+    width: 52px;
+    background: var(--bg-1);
+    border-right: 1px solid var(--border-default);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 12px 0;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  .rail-logo {
+    width: 28px; height: 28px;
+    background: conic-gradient(#f43f5e, #f59e0b, #10b981, #3b82f6, #8b5cf6, #f43f5e);
+    border-radius: 50%;
+    margin-bottom: 12px;
+  }
+  .rail-icon {
+    width: 32px; height: 32px;
+    border-radius: var(--radius-md);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-2);
+    font-size: 16px;
+  }
+  .rail-icon.active { background: var(--accent-interactive-dim); color: var(--accent-interactive); }
+
+  /* Main content area */
+  .main-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  /* Command bar */
+  .command-bar {
+    height: 48px;
+    background: var(--bg-1);
+    border-bottom: 1px solid var(--border-default);
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    gap: 10px;
+  }
+  .search-box {
+    flex: 1;
+    display: flex; align-items: center; gap: 8px;
+    background: var(--bg-0);
+    border: 1px solid var(--border-default);
+    border-radius: 9px;
+    padding: 7px 12px;
+    height: 34px;
+  }
+  .search-box .icon { color: var(--text-2); font-size: 13px; }
+  .search-box .placeholder { color: var(--text-2); font-size: 13px; }
+  .search-box .kbd {
+    margin-left: auto;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-family: var(--font-mono);
+    background: var(--bg-3);
+    color: var(--text-2);
+    border: 1px solid var(--border-subtle);
+  }
+  .settings-btn {
+    width: 32px; height: 32px;
+    border-radius: var(--radius-md);
+    display: flex; align-items: center; justify-content: center;
+    background: var(--bg-3);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-2);
+    font-size: 14px;
+  }
+
+  /* Content grid (dimmed) */
+  .content-area {
+    flex: 1;
+    padding: 16px;
+    opacity: 0.4;
+    overflow: hidden;
+  }
+  .type-tabs {
+    display: flex; gap: 6px; margin-bottom: 16px;
+  }
+  .type-tab {
+    padding: 5px 14px;
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    font-weight: 600;
+    background: var(--bg-3);
+    color: var(--text-1);
+    border: none;
+  }
+  .type-tab.active {
+    background: var(--accent-interactive);
+    color: #fff;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 12px;
+  }
+  .card {
+    aspect-ratio: 2/3;
+    background: var(--bg-2);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+  }
+  .card img {
+    width: 100%; height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  /* ── Overlay + Panel ── */
+  .overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.45);
+    z-index: 100;
+  }
+
+  .detail-panel {
+    position: fixed;
+    top: 0; right: 0; bottom: 0;
+    width: 420px;
+    background: var(--bg-1);
+    border-left: 1px solid var(--border-default);
+    border-radius: var(--radius-lg) 0 0 var(--radius-lg);
+    z-index: 101;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Panel Header */
+  .panel-header {
+    height: 44px;
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    gap: 10px;
+    flex-shrink: 0;
+  }
+  .close-btn {
+    color: var(--text-2);
+    font-size: 13px;
+    cursor: pointer;
+    background: none;
+    border: none;
+    font-family: var(--font-ui);
+    padding: 4px;
+  }
+  .type-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .type-badge.film {
+    background: rgba(59, 130, 246, 0.15);
+    color: var(--accent-film);
+  }
+  .source-info {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .source-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+  .source-count {
+    font-size: 10px;
+    color: var(--text-2);
+  }
+
+  /* Title block */
+  .title-block {
+    padding: 16px 16px 0;
+  }
+  .title-block h1 {
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--text-0);
+    margin-bottom: 4px;
+    line-height: 1.2;
+  }
+  .meta-line {
+    font-size: 13px;
+    color: var(--text-2);
+    margin-bottom: 16px;
+  }
+
+  /* Action row */
+  .action-row {
+    padding: 0 16px;
+    margin-bottom: 16px;
+  }
+  .play-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    width: 100%;
+    height: 36px;
+    background: var(--accent-interactive);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius-md);
+    font-size: 13px;
+    font-weight: 600;
+    font-family: var(--font-ui);
+    cursor: pointer;
+    margin-bottom: 10px;
+  }
+  .icon-buttons {
+    display: flex;
+    gap: 8px;
+  }
+  .icon-btn {
+    width: 32px; height: 32px;
+    border-radius: var(--radius-md);
+    background: var(--bg-3);
+    border: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: var(--text-1);
+  }
+  .icon-btn svg {
+    width: 16px; height: 16px;
+  }
+  .icon-btn.rated svg { color: var(--accent-warning); fill: var(--accent-warning); }
+  .icon-btn.ext { color: var(--text-2); }
+
+  /* Enrichment section */
+  .enrichment-section {
+    padding: 0 16px;
+    margin-bottom: 16px;
+  }
+
+  .enrichment-status {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+    background: var(--bg-2);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-subtle);
+    margin-bottom: 12px;
+  }
+
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+  .spinner {
+    width: 14px; height: 14px;
+    border: 2px solid var(--bg-4);
+    border-top-color: var(--accent-interactive);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    flex-shrink: 0;
+  }
+  .enrichment-text {
+    font-size: 13px;
+    color: var(--text-2);
+  }
+
+  .state-label {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-2);
+    margin: 16px 0 10px;
+    text-align: center;
+  }
+
+  .enrichment-failed {
+    padding: 12px 14px;
+    background: var(--bg-2);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-subtle);
+  }
+  .failed-text {
+    font-size: 13px;
+    color: var(--accent-warning);
+    margin-bottom: 6px;
+  }
+  .manual-link {
+    font-size: 13px;
+    color: var(--accent-interactive);
+    text-decoration: none;
+    cursor: pointer;
+    display: inline-block;
+    margin-bottom: 12px;
+  }
+  .manual-link:hover { text-decoration: underline; }
+
+  .manual-search-form {
+    display: flex;
+    gap: 6px;
+    margin-top: 8px;
+  }
+  .manual-search-form input {
+    background: var(--bg-3);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-sm);
+    padding: 6px 10px;
+    font-size: 13px;
+    color: var(--text-0);
+    font-family: var(--font-ui);
+    outline: none;
+  }
+  .manual-search-form input:focus {
+    border-color: var(--accent-interactive);
+  }
+  .manual-search-form input.title-input {
+    flex: 1;
+  }
+  .manual-search-form input.year-input {
+    width: 60px;
+  }
+  .manual-search-form button {
+    padding: 6px 12px;
+    background: var(--accent-interactive);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    font-weight: 600;
+    font-family: var(--font-ui);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+  <!-- Rail -->
+  <nav class="rail">
+    <div class="rail-logo"></div>
+    <div class="rail-icon active">
+      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="2" width="12" height="12" rx="2"/></svg>
+    </div>
+    <div class="rail-icon">
+      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="8" cy="8" r="6"/><path d="M8 5v3l2 2"/></svg>
+    </div>
+    <div class="rail-icon">
+      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3H4a1 1 0 00-1 1v8a1 1 0 001 1h8a1 1 0 001-1V4a1 1 0 00-1-1z"/><path d="M7 3v10M3 7h10"/></svg>
+    </div>
+  </nav>
+
+  <div class="main-area">
+    <!-- Command bar -->
+    <div class="command-bar">
+      <div class="search-box">
+        <span class="icon">&#x1F50D;</span>
+        <span class="placeholder">Search movies, series, channels...</span>
+        <span class="kbd">/</span>
+      </div>
+      <div class="settings-btn">&#x2699;</div>
+    </div>
+
+    <!-- Content grid (dimmed) -->
+    <div class="content-area">
+      <div class="type-tabs">
+        <button class="type-tab active">All</button>
+        <button class="type-tab">Live TV</button>
+        <button class="type-tab">Movies</button>
+        <button class="type-tab">Series</button>
+      </div>
+      <div class="grid">
+        <div class="card"><img src="https://placehold.co/140x210/1e1e28/5e5a70?text=Inception" alt=""></div>
+        <div class="card"><img src="https://placehold.co/140x210/1e1e28/5e5a70?text=Interstellar" alt=""></div>
+        <div class="card"><img src="https://placehold.co/140x210/1e1e28/5e5a70?text=Tenet" alt=""></div>
+        <div class="card"><img src="https://placehold.co/140x210/1e1e28/5e5a70?text=Memento" alt=""></div>
+        <div class="card"><img src="https://placehold.co/140x210/1e1e28/5e5a70?text=Dunkirk" alt=""></div>
+        <div class="card"><img src="https://placehold.co/140x210/1e1e28/5e5a70?text=Prestige" alt=""></div>
+        <div class="card"><img src="https://placehold.co/140x210/1e1e28/5e5a70?text=Oppenheimer" alt=""></div>
+        <div class="card"><img src="https://placehold.co/140x210/1e1e28/5e5a70?text=Batman+Begins" alt=""></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Overlay -->
+<div class="overlay"></div>
+
+<!-- Detail Panel -->
+<div class="detail-panel">
+  <!-- Header -->
+  <div class="panel-header">
+    <button class="close-btn">&#x2715;</button>
+    <span class="type-badge film">FILM</span>
+    <div class="source-info">
+      <span class="source-dot" style="background: var(--src-1)"></span>
+      <span class="source-count">1 source</span>
+    </div>
+  </div>
+
+  <!-- No backdrop for unenriched -->
+
+  <!-- Title block -->
+  <div class="title-block">
+    <h1>EN - Beastmaster 1982 HD</h1>
+    <div class="meta-line">Source: MyIPTV &middot; Movie</div>
+  </div>
+
+  <!-- Action row -->
+  <div class="action-row">
+    <button class="play-btn">&#9654; Play</button>
+    <div class="icon-buttons">
+      <!-- Heart -->
+      <button class="icon-btn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>
+      </button>
+      <!-- Bookmark -->
+      <button class="icon-btn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z"/></svg>
+      </button>
+      <!-- Star -->
+      <button class="icon-btn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+      </button>
+      <!-- External player -->
+      <button class="icon-btn ext">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- Enrichment status section -->
+  <div class="enrichment-section">
+    <!-- State 1: Loading -->
+    <div class="enrichment-status">
+      <div class="spinner"></div>
+      <span class="enrichment-text">Fetching metadata from TMDB...</span>
+    </div>
+
+    <div class="state-label">&mdash; OR if enrichment fails: &mdash;</div>
+
+    <!-- State 2: Failed -->
+    <div class="enrichment-failed">
+      <div class="failed-text">Could not find a match on TMDB</div>
+      <a class="manual-link">Search manually</a>
+      <div class="manual-search-form">
+        <input type="text" class="title-input" placeholder="Title...">
+        <input type="text" class="year-input" placeholder="Year">
+        <button>Search</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- No plot, no cast, no breadcrumbs for unenriched -->
+</div>
+
+</body>
+</html>

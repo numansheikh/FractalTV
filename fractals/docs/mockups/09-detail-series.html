@@ -1,0 +1,730 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fractals — Series Detail</title>
+<link rel="stylesheet" href="design-tokens.css">
+<style>
+  /* ── App Shell (dimmed background) ── */
+  .app-shell {
+    display: flex;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* Rail */
+  .rail {
+    width: 52px;
+    background: var(--bg-1);
+    border-right: 1px solid var(--border-default);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 12px 0;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  .rail-logo {
+    width: 28px; height: 28px;
+    background: conic-gradient(#f43f5e, #f59e0b, #10b981, #3b82f6, #8b5cf6, #f43f5e);
+    border-radius: 50%;
+    margin-bottom: 12px;
+  }
+  .rail-icon {
+    width: 32px; height: 32px;
+    border-radius: var(--radius-md);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-2);
+    font-size: 16px;
+  }
+  .rail-icon.active { background: var(--accent-interactive-dim); color: var(--accent-interactive); }
+
+  /* Main content area */
+  .main-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  /* Command bar */
+  .command-bar {
+    height: 48px;
+    background: var(--bg-1);
+    border-bottom: 1px solid var(--border-default);
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    gap: 10px;
+  }
+  .search-box {
+    flex: 1;
+    display: flex; align-items: center; gap: 8px;
+    background: var(--bg-0);
+    border: 1px solid var(--border-default);
+    border-radius: 9px;
+    padding: 7px 12px;
+    height: 34px;
+  }
+  .search-box .icon { color: var(--text-2); font-size: 13px; }
+  .search-box .placeholder { color: var(--text-2); font-size: 13px; }
+  .search-box .kbd {
+    margin-left: auto;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-family: var(--font-mono);
+    background: var(--bg-3);
+    color: var(--text-2);
+    border: 1px solid var(--border-subtle);
+  }
+  .settings-btn {
+    width: 32px; height: 32px;
+    border-radius: var(--radius-md);
+    display: flex; align-items: center; justify-content: center;
+    background: var(--bg-3);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-2);
+    font-size: 14px;
+  }
+
+  /* Content grid (dimmed) */
+  .content-area {
+    flex: 1;
+    padding: 16px;
+    opacity: 0.4;
+    overflow: hidden;
+  }
+  .type-tabs {
+    display: flex; gap: 6px; margin-bottom: 16px;
+  }
+  .type-tab {
+    padding: 5px 14px;
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    font-weight: 600;
+    background: var(--bg-3);
+    color: var(--text-1);
+    border: none;
+  }
+  .type-tab.active {
+    background: var(--accent-interactive);
+    color: #fff;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 12px;
+  }
+  .card {
+    aspect-ratio: 2/3;
+    background: var(--bg-2);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+  }
+  .card img {
+    width: 100%; height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  /* ── Overlay + Panel ── */
+  .overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.45);
+    z-index: 100;
+  }
+
+  .detail-panel {
+    position: fixed;
+    top: 0; right: 0; bottom: 0;
+    width: 720px;
+    background: var(--bg-1);
+    border-left: 1px solid var(--border-default);
+    border-radius: var(--radius-lg) 0 0 var(--radius-lg);
+    z-index: 101;
+    display: flex;
+    flex-direction: row;
+    overflow: hidden;
+  }
+
+  /* ── Left Column: Episodes ── */
+  .left-col {
+    width: 320px;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-1);
+    border-right: 1px solid var(--border-subtle);
+    overflow: hidden;
+  }
+
+  /* Season selector */
+  .season-selector {
+    height: 48px;
+    display: flex;
+    align-items: center;
+    padding: 0 12px;
+    gap: 6px;
+    overflow-x: auto;
+    flex-shrink: 0;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .season-selector::-webkit-scrollbar { display: none; }
+  .season-btn {
+    width: 34px; height: 34px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 600;
+    font-family: var(--font-ui);
+    border: none;
+    cursor: pointer;
+    flex-shrink: 0;
+    background: var(--bg-3);
+    color: var(--text-1);
+  }
+  .season-btn.active {
+    background: var(--accent-interactive);
+    color: #fff;
+  }
+
+  /* Episode list */
+  .episode-list {
+    flex: 1;
+    overflow-y: auto;
+  }
+  .episode-row {
+    display: grid;
+    grid-template-columns: 36px 1fr auto 28px;
+    align-items: center;
+    gap: 4px;
+    padding: 0 12px;
+    height: 52px;
+    cursor: pointer;
+    position: relative;
+  }
+  .episode-row:hover {
+    background: var(--bg-3);
+  }
+  .episode-row:hover .play-icon { opacity: 1; }
+
+  .ep-badge {
+    font-size: 10px;
+    font-family: var(--font-mono);
+    color: var(--text-2);
+  }
+  .ep-info {
+    min-width: 0;
+  }
+  .ep-title {
+    font-size: 13px;
+    color: var(--text-0);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .ep-progress-bar {
+    height: 3px;
+    background: var(--bg-4);
+    border-radius: 2px;
+    margin-top: 4px;
+    overflow: hidden;
+  }
+  .ep-progress-fill {
+    height: 100%;
+    background: var(--accent-interactive);
+    border-radius: 2px;
+  }
+  .ep-duration {
+    font-size: 11px;
+    color: var(--text-2);
+    white-space: nowrap;
+  }
+  .play-icon {
+    font-size: 12px;
+    color: var(--text-1);
+    opacity: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Completed episodes */
+  .episode-row.completed .ep-title { color: var(--text-2); }
+  .episode-row.completed .ep-badge { color: var(--text-3); }
+  .completed-check {
+    font-size: 11px;
+    color: var(--accent-success);
+  }
+
+  /* ── Right Column: Metadata ── */
+  .right-col {
+    width: 400px;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+  }
+
+  /* Panel Header */
+  .panel-header {
+    height: 44px;
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    gap: 10px;
+    flex-shrink: 0;
+  }
+  .close-btn {
+    color: var(--text-2);
+    font-size: 13px;
+    cursor: pointer;
+    background: none;
+    border: none;
+    font-family: var(--font-ui);
+    padding: 4px;
+  }
+  .type-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .type-badge.series {
+    background: rgba(16, 185, 129, 0.15);
+    color: var(--accent-series);
+  }
+  .source-info {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .source-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+  .source-count {
+    font-size: 10px;
+    color: var(--text-2);
+  }
+
+  /* Backdrop */
+  .backdrop-wrap {
+    position: relative;
+    height: 160px;
+    flex-shrink: 0;
+    overflow: hidden;
+  }
+  .backdrop-wrap img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .backdrop-gradient {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 80px;
+    background: linear-gradient(to bottom, transparent, var(--bg-1));
+  }
+
+  /* Title block */
+  .title-block {
+    padding: 0 16px;
+  }
+  .title-block h1 {
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--text-0);
+    margin-bottom: 4px;
+    line-height: 1.2;
+  }
+  .meta-line {
+    font-size: 13px;
+    color: var(--text-1);
+    margin-bottom: 10px;
+  }
+  .genre-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 16px;
+  }
+  .genre-pill {
+    padding: 4px 10px;
+    background: var(--bg-3);
+    color: var(--text-1);
+    border-radius: var(--radius-sm);
+    font-size: 11px;
+  }
+
+  /* Action row */
+  .action-row {
+    padding: 0 16px;
+    margin-bottom: 16px;
+  }
+  .play-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    width: 100%;
+    height: 36px;
+    background: var(--accent-interactive);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius-md);
+    font-size: 13px;
+    font-weight: 600;
+    font-family: var(--font-ui);
+    cursor: pointer;
+    margin-bottom: 10px;
+  }
+  .icon-buttons {
+    display: flex;
+    gap: 8px;
+  }
+  .icon-btn {
+    width: 32px; height: 32px;
+    border-radius: var(--radius-md);
+    background: var(--bg-3);
+    border: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: var(--text-1);
+  }
+  .icon-btn svg {
+    width: 16px; height: 16px;
+  }
+  .icon-btn.ext { color: var(--text-2); }
+
+  /* Plot */
+  .plot {
+    padding: 0 16px;
+    font-size: 13px;
+    color: var(--text-1);
+    line-height: 1.5;
+    margin-bottom: 16px;
+  }
+
+  /* Cast */
+  .cast-section {
+    padding: 0 16px;
+    margin-bottom: 16px;
+    position: relative;
+    overflow: hidden;
+  }
+  .cast-label {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: var(--text-2);
+    letter-spacing: 0.05em;
+    margin-bottom: 8px;
+  }
+  .cast-pills {
+    display: flex;
+    gap: 6px;
+    flex-wrap: nowrap;
+    overflow: hidden;
+    position: relative;
+  }
+  .cast-pill {
+    padding: 4px 10px;
+    background: var(--bg-3);
+    color: var(--text-1);
+    border-radius: var(--radius-sm);
+    font-size: 11px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .cast-fade {
+    position: absolute;
+    top: 0; right: 0; bottom: 0;
+    width: 48px;
+    background: linear-gradient(to right, transparent, var(--bg-1));
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+  <!-- Rail -->
+  <nav class="rail">
+    <div class="rail-logo"></div>
+    <div class="rail-icon active">
+      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="2" width="12" height="12" rx="2"/></svg>
+    </div>
+    <div class="rail-icon">
+      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="8" cy="8" r="6"/><path d="M8 5v3l2 2"/></svg>
+    </div>
+    <div class="rail-icon">
+      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3H4a1 1 0 00-1 1v8a1 1 0 001 1h8a1 1 0 001-1V4a1 1 0 00-1-1z"/><path d="M7 3v10M3 7h10"/></svg>
+    </div>
+  </nav>
+
+  <div class="main-area">
+    <!-- Command bar -->
+    <div class="command-bar">
+      <div class="search-box">
+        <span class="icon">&#x1F50D;</span>
+        <span class="placeholder">Search movies, series, channels...</span>
+        <span class="kbd">/</span>
+      </div>
+      <div class="settings-btn">&#x2699;</div>
+    </div>
+
+    <!-- Content grid (dimmed) -->
+    <div class="content-area">
+      <div class="type-tabs">
+        <button class="type-tab active">All</button>
+        <button class="type-tab">Live TV</button>
+        <button class="type-tab">Movies</button>
+        <button class="type-tab">Series</button>
+      </div>
+      <div class="grid">
+        <div class="card"><img src="https://placehold.co/140x210/1e1e28/5e5a70?text=Breaking+Bad" alt=""></div>
+        <div class="card"><img src="https://placehold.co/140x210/1e1e28/5e5a70?text=The+Office" alt=""></div>
+        <div class="card"><img src="https://placehold.co/140x210/1e1e28/5e5a70?text=Seinfeld" alt=""></div>
+        <div class="card"><img src="https://placehold.co/140x210/1e1e28/5e5a70?text=Frasier" alt=""></div>
+        <div class="card"><img src="https://placehold.co/140x210/1e1e28/5e5a70?text=Cheers" alt=""></div>
+        <div class="card"><img src="https://placehold.co/140x210/1e1e28/5e5a70?text=How+I+Met" alt=""></div>
+        <div class="card"><img src="https://placehold.co/140x210/1e1e28/5e5a70?text=New+Girl" alt=""></div>
+        <div class="card"><img src="https://placehold.co/140x210/1e1e28/5e5a70?text=Parks+%26+Rec" alt=""></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Overlay -->
+<div class="overlay"></div>
+
+<!-- Detail Panel (720px, two columns) -->
+<div class="detail-panel">
+
+  <!-- Left Column: Season selector + Episode list -->
+  <div class="left-col">
+    <div class="season-selector">
+      <button class="season-btn">S1</button>
+      <button class="season-btn">S2</button>
+      <button class="season-btn active">S3</button>
+      <button class="season-btn">S4</button>
+      <button class="season-btn">S5</button>
+      <button class="season-btn">S6</button>
+      <button class="season-btn">S7</button>
+      <button class="season-btn">S8</button>
+    </div>
+
+    <div class="episode-list">
+      <!-- E01 — completed -->
+      <div class="episode-row completed">
+        <span class="ep-badge">E01</span>
+        <div class="ep-info">
+          <div class="ep-title">The One with the Cop</div>
+        </div>
+        <span class="ep-duration">22m</span>
+        <span class="completed-check">&#x2713;</span>
+      </div>
+
+      <!-- E02 — completed -->
+      <div class="episode-row completed">
+        <span class="ep-badge">E02</span>
+        <div class="ep-info">
+          <div class="ep-title">The One with Ross's Teeth</div>
+        </div>
+        <span class="ep-duration">23m</span>
+        <span class="completed-check">&#x2713;</span>
+      </div>
+
+      <!-- E03 — in progress -->
+      <div class="episode-row" style="background: var(--bg-2);">
+        <span class="ep-badge" style="color: var(--accent-interactive);">E03</span>
+        <div class="ep-info">
+          <div class="ep-title" style="color: var(--accent-interactive);">The One Where Everybody Finds Out</div>
+          <div class="ep-progress-bar">
+            <div class="ep-progress-fill" style="width: 65%;"></div>
+          </div>
+        </div>
+        <span class="ep-duration">22m</span>
+        <span class="play-icon" style="opacity: 1;">&#9654;</span>
+      </div>
+
+      <!-- E04 -->
+      <div class="episode-row">
+        <span class="ep-badge">E04</span>
+        <div class="ep-info">
+          <div class="ep-title">The One with Joey's Big Break</div>
+        </div>
+        <span class="ep-duration">23m</span>
+        <span class="play-icon">&#9654;</span>
+      </div>
+
+      <!-- E05 -->
+      <div class="episode-row">
+        <span class="ep-badge">E05</span>
+        <div class="ep-info">
+          <div class="ep-title">The One with the Ball</div>
+        </div>
+        <span class="ep-duration">22m</span>
+        <span class="play-icon">&#9654;</span>
+      </div>
+
+      <!-- E06 -->
+      <div class="episode-row">
+        <span class="ep-badge">E06</span>
+        <div class="ep-info">
+          <div class="ep-title">The One with Ross's Sandwich</div>
+        </div>
+        <span class="ep-duration">23m</span>
+        <span class="play-icon">&#9654;</span>
+      </div>
+
+      <!-- E07 -->
+      <div class="episode-row">
+        <span class="ep-badge">E07</span>
+        <div class="ep-info">
+          <div class="ep-title">The One with the Inappropriate Sister</div>
+        </div>
+        <span class="ep-duration">22m</span>
+        <span class="play-icon">&#9654;</span>
+      </div>
+
+      <!-- E08 -->
+      <div class="episode-row">
+        <span class="ep-badge">E08</span>
+        <div class="ep-info">
+          <div class="ep-title">The One with All the Thanksgivings</div>
+        </div>
+        <span class="ep-duration">23m</span>
+        <span class="play-icon">&#9654;</span>
+      </div>
+
+      <!-- E09 -->
+      <div class="episode-row">
+        <span class="ep-badge">E09</span>
+        <div class="ep-info">
+          <div class="ep-title">The One with Ross's Denial</div>
+        </div>
+        <span class="ep-duration">22m</span>
+        <span class="play-icon">&#9654;</span>
+      </div>
+
+      <!-- E10 -->
+      <div class="episode-row">
+        <span class="ep-badge">E10</span>
+        <div class="ep-info">
+          <div class="ep-title">The One Where Ross Got High</div>
+        </div>
+        <span class="ep-duration">23m</span>
+        <span class="play-icon">&#9654;</span>
+      </div>
+
+      <!-- E11 -->
+      <div class="episode-row">
+        <span class="ep-badge">E11</span>
+        <div class="ep-info">
+          <div class="ep-title">The One with the Apothecary Table</div>
+        </div>
+        <span class="ep-duration">22m</span>
+        <span class="play-icon">&#9654;</span>
+      </div>
+
+      <!-- E12 -->
+      <div class="episode-row">
+        <span class="ep-badge">E12</span>
+        <div class="ep-info">
+          <div class="ep-title">The One with the Girl Who Hits Joey</div>
+        </div>
+        <span class="ep-duration">23m</span>
+        <span class="play-icon">&#9654;</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right Column: Metadata -->
+  <div class="right-col">
+    <!-- Header -->
+    <div class="panel-header">
+      <button class="close-btn">&#x2715;</button>
+      <span class="type-badge series">SERIES</span>
+      <div class="source-info">
+        <span class="source-dot" style="background: var(--src-1)"></span>
+        <span class="source-dot" style="background: var(--src-3)"></span>
+        <span class="source-count">2 sources</span>
+      </div>
+    </div>
+
+    <!-- Backdrop -->
+    <div class="backdrop-wrap">
+      <img src="https://placehold.co/400x160/1e1e28/5e5a70?text=Backdrop" alt="Backdrop">
+      <div class="backdrop-gradient"></div>
+    </div>
+
+    <!-- Title block -->
+    <div class="title-block">
+      <h1>Friends</h1>
+      <div class="meta-line">1994&ndash;2004 &middot; 10 seasons &middot; &#9733; 8.9 &middot; David Crane, Marta Kauffman</div>
+      <div class="genre-pills">
+        <span class="genre-pill">Comedy</span>
+        <span class="genre-pill">Romance</span>
+      </div>
+    </div>
+
+    <!-- Action row -->
+    <div class="action-row">
+      <button class="play-btn">&#9654; Play S3 E03</button>
+      <div class="icon-buttons">
+        <!-- Heart -->
+        <button class="icon-btn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>
+        </button>
+        <!-- Bookmark -->
+        <button class="icon-btn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z"/></svg>
+        </button>
+        <!-- Star -->
+        <button class="icon-btn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+        </button>
+        <!-- External player -->
+        <button class="icon-btn ext">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Plot -->
+    <div class="plot">
+      Follows the personal and professional lives of six twenty to thirty year-old friends living in the Manhattan borough of New York City.
+    </div>
+
+    <!-- Cast -->
+    <div class="cast-section">
+      <div class="cast-label">Cast</div>
+      <div class="cast-pills">
+        <span class="cast-pill">Jennifer Aniston</span>
+        <span class="cast-pill">Courteney Cox</span>
+        <span class="cast-pill">Lisa Kudrow</span>
+        <span class="cast-pill">Matt LeBlanc</span>
+        <span class="cast-pill">Matthew Perry</span>
+        <span class="cast-pill">David Schwimmer</span>
+      </div>
+      <div class="cast-fade"></div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

@@ -1,6 +1,43 @@
 @import "tailwindcss";
 
 /* ════════════════════════════════════════════════════════════════
+   V2 DESIGN TOKENS — new UI system
+════════════════════════════════════════════════════════════════ */
+:root {
+  /* Foundation backgrounds */
+  --bg-0: #08080c;
+  --bg-1: #0e0e14;
+  --bg-2: #16161e;
+  --bg-3: #1e1e28;
+  --bg-4: #282834;
+
+  /* Borders */
+  --border-subtle: rgba(255,255,255,0.04);
+  --border-default: rgba(255,255,255,0.08);
+  --border-strong: rgba(255,255,255,0.14);
+
+  /* Text */
+  --text-0: #f0eef6;
+  --text-1: #a8a4b8;
+  --text-2: #5e5a70;
+  --text-3: #3a3848;
+
+  /* Semantic accents */
+  --accent-live: #f43f5e;
+  --accent-film: #3b82f6;
+  --accent-series: #10b981;
+  --accent-interactive: #8b5cf6;
+  --accent-interactive-dim: rgba(139,92,246,0.12);
+  --accent-warning: #f59e0b;
+  --accent-danger: #ef4444;
+  --accent-success: #22c55e;
+
+  /* Typography */
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", sans-serif;
+  --font-mono: "SF Mono", "JetBrains Mono", "Cascadia Code", "Fira Code", monospace;
+}
+
+/* ════════════════════════════════════════════════════════════════
    BASE THEME — dark purple (default)
    All other themes override only what differs from this.
 ════════════════════════════════════════════════════════════════ */

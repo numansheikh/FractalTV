@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Card Hover States</title>
+<link rel="stylesheet" href="design-tokens.css">
+<style>
+  body {
+    padding: 40px;
+    min-height: 100vh;
+  }
+
+  .section {
+    margin-bottom: 48px;
+  }
+
+  .section-title {
+    font-size: 15px;
+    color: var(--text-0);
+    font-weight: 600;
+    margin-bottom: 16px;
+  }
+
+  .card-row {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+  }
+
+  /* ── POSTER CARDS ── */
+  .poster-slot {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .poster-card {
+    width: 130px;
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    border: 1px solid var(--border-default);
+    background: var(--bg-2);
+    position: relative;
+  }
+
+  .poster-card.hovered {
+    border-color: rgba(255,255,255,0.14);
+  }
+
+  .poster-image-wrap {
+    position: relative;
+    width: 130px;
+    height: 195px;
+    overflow: hidden;
+  }
+
+  .poster-image-wrap img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  /* Source dot (top-right default) */
+  .source-dot {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--src-1);
+    z-index: 2;
+  }
+
+  /* Poster card info area */
+  .poster-info {
+    padding: 6px 8px 8px;
+  }
+
+  .poster-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-0);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .poster-title.dimmed {
+    color: var(--text-2);
+  }
+
+  .poster-meta {
+    font-size: 10px;
+    color: var(--text-2);
+    margin-top: 1px;
+  }
+
+  /* State label below card */
+  .state-label {
+    font-size: 10px;
+    color: var(--text-2);
+    text-align: center;
+  }
+
+  /* ── Hovered overlay ── */
+  .hover-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 3;
+  }
+
+  .hover-play-btn {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--accent-interactive);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .hover-play-btn svg {
+    width: 14px;
+    height: 14px;
+    fill: #fff;
+  }
+
+  .hover-action-tl {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--bg-3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .hover-action-tr {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--bg-3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .hover-action-tl svg,
+  .hover-action-tr svg {
+    width: 12px;
+    height: 12px;
+    fill: none;
+    stroke: var(--text-1);
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  /* ── Favorited pill ── */
+  .fav-pill {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    border-radius: var(--radius-sm);
+    padding: 3px 5px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2;
+  }
+
+  .fav-pill svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  /* ── Progress bar at bottom of poster ── */
+  .progress-bar-wrap {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: rgba(255,255,255,0.1);
+    z-index: 2;
+  }
+
+  .progress-bar-fill {
+    height: 100%;
+    background: var(--accent-interactive);
+  }
+
+  /* ── Completed badge ── */
+  .completed-badge {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--accent-success);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2;
+  }
+
+  .completed-badge svg {
+    width: 10px;
+    height: 10px;
+    fill: none;
+    stroke: #fff;
+    stroke-width: 2.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  /* ── CHANNEL CARDS ── */
+  .channel-card {
+    width: 160px;
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    border: 1px solid var(--border-default);
+    background: var(--bg-2);
+    position: relative;
+  }
+
+  .channel-stripe {
+    height: 2px;
+    width: 100%;
+  }
+
+  .channel-card.hovered {
+    border-color: rgba(244, 114, 182, 0.55);
+    background: var(--bg-3);
+  }
+
+  .channel-logo-wrap {
+    width: 100%;
+    height: 70px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px;
+  }
+
+  .channel-logo-wrap img {
+    max-width: 80px;
+    max-height: 50px;
+    object-fit: contain;
+  }
+
+  .channel-info {
+    padding: 0 8px 8px;
+  }
+
+  .channel-name {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-0);
+  }
+
+  .channel-epg {
+    font-size: 10px;
+    color: var(--text-2);
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .channel-fav-btn {
+    position: absolute;
+    top: 8px;
+    right: 6px;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--bg-3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    cursor: pointer;
+  }
+
+  .channel-fav-btn svg {
+    width: 12px;
+    height: 12px;
+    fill: none;
+    stroke: var(--text-1);
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .channel-fav-pill {
+    position: absolute;
+    top: 8px;
+    right: 6px;
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    border-radius: var(--radius-sm);
+    padding: 3px 5px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2;
+  }
+
+  .channel-fav-pill svg {
+    width: 12px;
+    height: 12px;
+  }
+
+  .channel-slot {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+  }
+
+  /* ── CONTINUE WATCHING CARD ── */
+  .cw-card {
+    width: 280px;
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    border: 1px solid var(--border-default);
+    background: var(--bg-2);
+    position: relative;
+  }
+
+  .cw-backdrop {
+    position: relative;
+    width: 280px;
+    height: 158px;
+    overflow: hidden;
+  }
+
+  .cw-backdrop img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  .cw-gradient {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 80px;
+    background: linear-gradient(to top, var(--bg-2), transparent);
+  }
+
+  .cw-play-btn {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: rgba(139, 92, 246, 0.9);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2;
+  }
+
+  .cw-play-btn svg {
+    width: 16px;
+    height: 16px;
+    fill: #fff;
+    margin-left: 2px;
+  }
+
+  .cw-info {
+    padding: 8px 10px 10px;
+    position: relative;
+    z-index: 1;
+    margin-top: -20px;
+  }
+
+  .cw-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-0);
+  }
+
+  .cw-remaining {
+    font-size: 11px;
+    color: var(--text-2);
+    margin-top: 2px;
+  }
+
+  .cw-progress {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: rgba(255,255,255,0.08);
+  }
+
+  .cw-progress-fill {
+    height: 100%;
+    width: 55%;
+    background: var(--accent-interactive);
+  }
+</style>
+</head>
+<body>
+
+<!-- ===== Section 1: Poster Card States ===== -->
+<div class="section">
+  <div class="section-title">Poster Card States</div>
+  <div class="card-row">
+
+    <!-- 1. Default -->
+    <div class="poster-slot">
+      <div class="poster-card">
+        <div class="poster-image-wrap">
+          <img src="https://placehold.co/130x195/1a1a26/3a3848?text=Inception" alt="Inception">
+          <span class="source-dot"></span>
+        </div>
+        <div class="poster-info">
+          <div class="poster-title">Inception</div>
+          <div class="poster-meta">2010 &#9733;8.8</div>
+        </div>
+      </div>
+      <span class="state-label">Default</span>
+    </div>
+
+    <!-- 2. Hovered -->
+    <div class="poster-slot">
+      <div class="poster-card hovered">
+        <div class="poster-image-wrap">
+          <img src="https://placehold.co/130x195/1a1a26/3a3848?text=Inception" alt="Inception">
+          <div class="hover-overlay">
+            <!-- Heart top-left -->
+            <div class="hover-action-tl">
+              <svg viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 000-7.78z"/></svg>
+            </div>
+            <!-- Bookmark top-right -->
+            <div class="hover-action-tr">
+              <svg viewBox="0 0 24 24"><path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z"/></svg>
+            </div>
+            <!-- Play center -->
+            <div class="hover-play-btn">
+              <svg viewBox="0 0 24 24"><polygon points="8,5 20,12 8,19"/></svg>
+            </div>
+          </div>
+        </div>
+        <div class="poster-info">
+          <div class="poster-title">Inception</div>
+          <div class="poster-meta">2010 &#9733;8.8</div>
+        </div>
+      </div>
+      <span class="state-label">Hovered</span>
+    </div>
+
+    <!-- 3. Favorited -->
+    <div class="poster-slot">
+      <div class="poster-card">
+        <div class="poster-image-wrap">
+          <img src="https://placehold.co/130x195/1a1a26/3a3848?text=Inception" alt="Inception">
+          <span class="source-dot"></span>
+          <div class="fav-pill">
+            <svg viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 000-7.78z" fill="#f43f5e" stroke="none"/></svg>
+          </div>
+        </div>
+        <div class="poster-info">
+          <div class="poster-title">Inception</div>
+          <div class="poster-meta">2010 &#9733;8.8</div>
+        </div>
+      </div>
+      <span class="state-label">Favorited</span>
+    </div>
+
+    <!-- 4. In Progress -->
+    <div class="poster-slot">
+      <div class="poster-card">
+        <div class="poster-image-wrap">
+          <img src="https://placehold.co/130x195/1a1a26/3a3848?text=Inception" alt="Inception">
+          <span class="source-dot"></span>
+          <div class="progress-bar-wrap">
+            <div class="progress-bar-fill" style="width: 45%"></div>
+          </div>
+        </div>
+        <div class="poster-info">
+          <div class="poster-title">Inception</div>
+          <div class="poster-meta">2010 &#9733;8.8</div>
+        </div>
+      </div>
+      <span class="state-label">In Progress</span>
+    </div>
+
+    <!-- 5. Completed -->
+    <div class="poster-slot">
+      <div class="poster-card">
+        <div class="poster-image-wrap">
+          <img src="https://placehold.co/130x195/1a1a26/3a3848?text=Inception" alt="Inception">
+          <div class="completed-badge">
+            <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+          </div>
+        </div>
+        <div class="poster-info">
+          <div class="poster-title dimmed">Inception</div>
+          <div class="poster-meta">2010 &#9733;8.8</div>
+        </div>
+      </div>
+      <span class="state-label">Completed</span>
+    </div>
+
+  </div>
+</div>
+
+<!-- ===== Section 2: Channel Card States ===== -->
+<div class="section">
+  <div class="section-title">Channel Card States</div>
+  <div class="card-row">
+
+    <!-- 1. Default -->
+    <div class="channel-slot">
+      <div class="channel-card">
+        <div class="channel-stripe" style="background: var(--src-2)"></div>
+        <div class="channel-logo-wrap">
+          <img src="https://placehold.co/80x50/1a1a26/6e6c80?text=BBC+One" alt="BBC One logo">
+        </div>
+        <div class="channel-info">
+          <div class="channel-name">BBC One</div>
+        </div>
+      </div>
+      <span class="state-label">Default</span>
+    </div>
+
+    <!-- 2. Hovered -->
+    <div class="channel-slot">
+      <div class="channel-card hovered">
+        <div class="channel-stripe" style="background: var(--src-2)"></div>
+        <div class="channel-logo-wrap">
+          <img src="https://placehold.co/80x50/222230/6e6c80?text=BBC+One" alt="BBC One logo">
+        </div>
+        <button class="channel-fav-btn">
+          <svg viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 000-7.78z"/></svg>
+        </button>
+        <div class="channel-info">
+          <div class="channel-name">BBC One</div>
+        </div>
+      </div>
+      <span class="state-label">Hovered</span>
+    </div>
+
+    <!-- 3. Favorited -->
+    <div class="channel-slot">
+      <div class="channel-card">
+        <div class="channel-stripe" style="background: var(--src-2)"></div>
+        <div class="channel-logo-wrap">
+          <img src="https://placehold.co/80x50/1a1a26/6e6c80?text=BBC+One" alt="BBC One logo">
+        </div>
+        <div class="channel-fav-pill">
+          <svg viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 000-7.78z" fill="#f43f5e" stroke="none"/></svg>
+        </div>
+        <div class="channel-info">
+          <div class="channel-name">BBC One</div>
+        </div>
+      </div>
+      <span class="state-label">Favorited</span>
+    </div>
+
+    <!-- 4. With EPG -->
+    <div class="channel-slot">
+      <div class="channel-card">
+        <div class="channel-stripe" style="background: var(--src-2)"></div>
+        <div class="channel-logo-wrap">
+          <img src="https://placehold.co/80x50/1a1a26/6e6c80?text=BBC+One" alt="BBC One logo">
+        </div>
+        <div class="channel-info">
+          <div class="channel-name">BBC One</div>
+          <div class="channel-epg">NOW: Planet Earth III</div>
+        </div>
+      </div>
+      <span class="state-label">With EPG (future)</span>
+    </div>
+
+  </div>
+</div>
+
+<!-- ===== Section 3: Continue Watching Card ===== -->
+<div class="section">
+  <div class="section-title">Continue Watching Card</div>
+  <div class="card-row">
+    <div class="poster-slot">
+      <div class="cw-card">
+        <div class="cw-backdrop">
+          <img src="https://placehold.co/280x158/1a1a26/3a3848?text=Inception+Backdrop" alt="Inception backdrop">
+          <div class="cw-gradient"></div>
+          <div class="cw-play-btn">
+            <svg viewBox="0 0 24 24"><polygon points="8,5 20,12 8,19"/></svg>
+          </div>
+        </div>
+        <div class="cw-info">
+          <div class="cw-title">Inception</div>
+          <div class="cw-remaining">1h 23m remaining</div>
+        </div>
+        <div class="cw-progress">
+          <div class="cw-progress-fill"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
