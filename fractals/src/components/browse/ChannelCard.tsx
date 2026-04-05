@@ -1,7 +1,9 @@
+import { useState } from 'react'
 import { useSourcesStore } from '@/stores/sources.store'
 import { useUserStore } from '@/stores/user.store'
 import { buildColorMap } from '@/lib/sourceColors'
 import { ContentItem } from './ContentCard'
+import { api } from '@/lib/api'
 
 interface Props {
   item: ContentItem
@@ -12,10 +14,18 @@ export function ChannelCard({ item, onClick }: Props) {
   const { sources } = useSourcesStore()
   const colorMap = buildColorMap(sources.map((s) => s.id))
   const userData = useUserStore((s) => s.data[item.id])
+  const setFav = useUserStore((s) => s.setFavorite)
+  const [hovered, setHovered] = useState(false)
   const primarySourceId = item.primarySourceId ?? item.primary_source_id
   const sourceColor = primarySourceId ? colorMap[primarySourceId] : undefined
   const poster = item.posterUrl ?? item.poster_url
   const isFavorite = userData?.favorite === 1
+
+  const toggleFav = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setFav(item.id, !isFavorite)
+    api.user.toggleFavorite(item.id)
+  }
 
   return (
     <div
@@ -27,14 +37,16 @@ export function ChannelCard({ item, onClick }: Props) {
         background: 'var(--color-card)',
         border: `1px solid ${sourceColor ? sourceColor.accent + '22' : 'var(--color-border)'}`,
         cursor: 'pointer', transition: 'all 0.12s',
-        userSelect: 'none',
+        userSelect: 'none', position: 'relative',
       }}
       onMouseEnter={(e) => {
+        setHovered(true)
         e.currentTarget.style.background = 'var(--color-card-hover)'
         e.currentTarget.style.borderColor = sourceColor ? sourceColor.accent + '55' : 'var(--color-border-strong)'
         e.currentTarget.style.transform = 'translateY(-1px)'
       }}
       onMouseLeave={(e) => {
+        setHovered(false)
         e.currentTarget.style.background = 'var(--color-card)'
         e.currentTarget.style.borderColor = sourceColor ? sourceColor.accent + '22' : 'var(--color-border)'
         e.currentTarget.style.transform = 'translateY(0)'
@@ -71,10 +83,29 @@ export function ChannelCard({ item, onClick }: Props) {
             background: sourceColor.accent, opacity: 0.7,
           }} />
         )}
-        {/* Favorite heart */}
-        {isFavorite && (
+        {/* Hover favorite toggle */}
+        {hovered && (
+          <button onClick={toggleFav} title={isFavorite ? 'Remove favorite' : 'Add to favorites'}
+            style={{
+              position: 'absolute', top: 5, right: 5, zIndex: 2,
+              width: 24, height: 24, borderRadius: 6,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: isFavorite ? 'rgba(239,68,68,0.25)' : 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)',
+              border: `1px solid ${isFavorite ? 'rgba(239,68,68,0.4)' : 'rgba(255,255,255,0.15)'}`,
+              cursor: 'pointer', padding: 0,
+            }}>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill={isFavorite ? '#ef4444' : 'none'} stroke={isFavorite ? '#ef4444' : 'rgba(255,255,255,0.8)'} strokeWidth="2">
+              <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+            </svg>
+          </button>
+        )}
+        {/* Persistent favorite indicator */}
+        {isFavorite && !hovered && (
           <div style={{
             position: 'absolute', top: 5, right: 5,
+            width: 20, height: 20, borderRadius: 5,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)',
           }}>
             <svg width="11" height="11" viewBox="0 0 24 24" fill="#ef4444" stroke="none">
               <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />

@@ -12,6 +12,7 @@ import { useUserStore } from '@/stores/user.store'
 import { buildColorMap } from '@/lib/sourceColors'
 import { SourceTabBar } from '@/components/settings/SourceTabBar'
 import { FractalsIcon } from '@/components/shared/FractalsIcon'
+import { PersonalizedRows } from './PersonalizedRows'
 
 const TYPE_TABS: { label: string; value: ContentType }[] = [
   { label: 'All',     value: 'all'    },
@@ -363,7 +364,7 @@ export function BrowseView({ onAddSource, onSyncSource, onRemoveSource, onSelect
               onSelect={onSelectContent} scopedTo={activeCategory}
             />
           ) : (
-            <BrowsePane key={`browse-${type}-${activeCategory ?? ''}`} items={items} fetching={browseFetching} onSelect={onSelectContent} type={type} />
+            <BrowsePane key={`browse-${type}-${activeCategory ?? ''}`} items={items} fetching={browseFetching} onSelect={onSelectContent} type={type} hasCategory={!!activeCategory} />
           )}
         </AnimatePresence>
       </div>
@@ -467,8 +468,8 @@ function LoadMoreBtn({ onClick }: { onClick: () => void }) {
 
 // ── Browse pane ─────────────────────────────────────────────────────────────
 
-function BrowsePane({ items, fetching, onSelect, type }: {
-  items: ContentItem[]; fetching: boolean; onSelect: (item: ContentItem) => void; type: ContentType
+function BrowsePane({ items, fetching, onSelect, type, hasCategory }: {
+  items: ContentItem[]; fetching: boolean; onSelect: (item: ContentItem) => void; type: ContentType; hasCategory: boolean
 }) {
   const liveItems = items.filter(i => i.type === 'live')
   const mediaItems = items.filter(i => i.type !== 'live')
@@ -476,6 +477,10 @@ function BrowsePane({ items, fetching, onSelect, type }: {
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.1 }}
       style={{ padding: '14px 16px 20px' }}>
+
+      {/* Personalized rows — only on default browse, no category filter */}
+      {!hasCategory && <PersonalizedRows onSelect={onSelect} type={type} />}
+
       {items.length === 0 && (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', paddingTop: 80 }}>
           <p style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>

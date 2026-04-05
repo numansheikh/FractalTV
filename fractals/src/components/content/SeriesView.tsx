@@ -3,20 +3,29 @@ import { useQuery } from '@tanstack/react-query'
 import { motion, AnimatePresence } from 'framer-motion'
 import { api } from '@/lib/api'
 import { ContentItem } from '@/components/browse/ContentCard'
+import { useSourcesStore } from '@/stores/sources.store'
+import { buildColorMap } from '@/lib/sourceColors'
+import { BreadcrumbNav } from './ContentDetail'
 
 interface Props {
   item: ContentItem
   onPlay: (item: ContentItem) => void
   onBack: () => void
+  onNavigate?: (nav: BreadcrumbNav) => void
 }
 
-export function SeriesView({ item, onPlay, onBack }: Props) {
+export function SeriesView({ item, onPlay, onBack, onNavigate }: Props) {
   const [activeSeason, setActiveSeason] = useState<string | null>(null)
 
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onBack() }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopImmediatePropagation()
+        onBack()
+      }
+    }
+    window.addEventListener('keydown', handler, true)
+    return () => window.removeEventListener('keydown', handler, true)
   }, [onBack])
 
   const { data: full } = useQuery({
@@ -31,12 +40,19 @@ export function SeriesView({ item, onPlay, onBack }: Props) {
     staleTime: 5 * 60_000,
   })
 
+  const { sources } = useSourcesStore()
+  const colorMap = buildColorMap(sources.map((s) => s.id))
+
   const c = (full as any) ?? item
   const backdrop = c.backdropUrl ?? c.backdrop_url
   const poster = c.posterUrl ?? c.poster_url
   const plot = c.plot
   const rating = c.ratingTmdb ?? c.rating_tmdb
   const year = c.year
+  const categoryName = c.categoryName ?? c.category_name
+  const primarySourceId = c.primarySourceId ?? c.primary_source_id ?? item.primarySourceId ?? (item as any).primary_source_id
+  const sourceColor = primarySourceId ? colorMap[primarySourceId] : undefined
+  const primarySource = primarySourceId ? sources.find((s) => s.id === primarySourceId) : undefined
 
   const seasons = (seriesData as any)?.seasons ?? {}
   const seriesInfo = (seriesData as any)?.seriesInfo ?? {}
@@ -85,7 +101,7 @@ export function SeriesView({ item, onPlay, onBack }: Props) {
         {/* Gradient to bg */}
         <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to bottom, rgba(0,0,0,0.1) 0%, var(--color-bg) 100%)' }} />
 
-        {/* Breadcrumb + back */}
+        {/* Breadcrumb: ← Back  Source > Series > Category > Title */}
         <div style={{ position: 'absolute', top: 16, left: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
           <button onClick={onBack} style={{
             display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px 5px 8px',
@@ -95,15 +111,23 @@ export function SeriesView({ item, onPlay, onBack }: Props) {
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
               <path d="m12 19-7-7 7-7" /><path d="M19 12H5" />
             </svg>
-            Browse
+            Back
           </button>
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.4)" strokeWidth="2" strokeLinecap="round">
-            <polyline points="9 18 15 12 9 6" />
-          </svg>
-          <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)', fontWeight: 500 }}>Series</span>
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.4)" strokeWidth="2" strokeLinecap="round">
-            <polyline points="9 18 15 12 9 6" />
-          </svg>
+          {primarySource && sourceColor && (
+            <>
+              <BreadcrumbChevron />
+              <BreadcrumbLink color={sourceColor.accent} onClick={() => onNavigate?.({ sourceId: primarySourceId })}>{primarySource.name}</BreadcrumbLink>
+            </>
+          )}
+          <BreadcrumbChevron />
+          <BreadcrumbLink color="rgba(255,255,255,0.7)" onClick={() => onNavigate?.({ type: 'series' })}> Series</BreadcrumbLink>
+          {categoryName && (
+            <>
+              <BreadcrumbChevron />
+              <BreadcrumbLink color="rgba(255,255,255,0.6)" onClick={() => onNavigate?.({ type: 'series', category: categoryName })}>{categoryName}</BreadcrumbLink>
+            </>
+          )}
+          <BreadcrumbChevron />
           <span style={{ fontSize: 12, color: '#fff', fontWeight: 600, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {c.title}
           </span>
@@ -302,5 +326,29 @@ export function SeriesView({ item, onPlay, onBack }: Props) {
         )}
       </div>
     </motion.div>
+  )
+}
+
+function BreadcrumbChevron() {
+  return (
+    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.4)" strokeWidth="2" strokeLinecap="round">
+      <polyline points="9 18 15 12 9 6" />
+    </svg>
+  )
+}
+
+function BreadcrumbLink({ children, color, onClick }: { children: React.ReactNode; color: string; onClick: () => void }) {
+  return (
+    <span
+      onClick={onClick}
+      style={{
+        fontSize: 12, fontWeight: 500, color,
+        cursor: 'pointer', transition: 'opacity 0.1s',
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.7'; e.currentTarget.style.textDecoration = 'underline' }}
+      onMouseLeave={(e) => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.textDecoration = 'none' }}
+    >
+      {children}
+    </span>
   )
 }

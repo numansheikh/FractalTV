@@ -80,6 +80,8 @@ export const api = {
     start: (apiKey?: string) => ipcRenderer.invoke('enrichment:start', apiKey),
     enrichSingle: (contentId: string) => ipcRenderer.invoke('enrichment:enrich-single', contentId),
     enrichManual: (args: { contentId: string; title: string; year?: number }) => ipcRenderer.invoke('enrichment:enrich-manual', args),
+    searchTmdb: (args: { title: string; year?: number; type: 'movie' | 'series' }) => ipcRenderer.invoke('enrichment:search-tmdb', args),
+    enrichById: (args: { contentId: string; tmdbId: number }) => ipcRenderer.invoke('enrichment:enrich-by-id', args),
   },
 
   // Debug

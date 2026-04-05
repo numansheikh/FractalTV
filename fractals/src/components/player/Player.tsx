@@ -360,6 +360,25 @@ export function Player({ content, onClose }: Props) {
       const art = artRef.current
       if (!art) return
 
+      if (e.key === ' ') {
+        e.preventDefault()
+        art.playing ? art.pause() : art.play()
+        return
+      }
+
+      if (e.key === 'f' || e.key === 'F') {
+        e.preventDefault()
+        art.fullscreen = !art.fullscreen
+        return
+      }
+
+      if (e.key === 'm' || e.key === 'M') {
+        e.preventDefault()
+        art.muted = !art.muted
+        showOsd(art.muted ? 'Muted' : `${Math.round(art.volume * 100)}%`, 'vol-up')
+        return
+      }
+
       if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
         e.preventDefault()
         const dir = e.key === 'ArrowRight' ? 1 : -1
@@ -409,7 +428,7 @@ export function Player({ content, onClose }: Props) {
   }
 
   return (
-    <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 50, background: '#000', isolation: 'isolate' }}>
+    <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 60, background: '#000', isolation: 'isolate' }}>
 
       {/* Close button — always visible */}
       <button

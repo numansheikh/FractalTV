@@ -1,7 +1,9 @@
+import { useState } from 'react'
 import { useSourcesStore } from '@/stores/sources.store'
 import { useUserStore } from '@/stores/user.store'
 import { buildColorMap } from '@/lib/sourceColors'
 import { ContentItem } from './ContentCard'
+import { api } from '@/lib/api'
 
 // Deterministic gradient palettes for missing posters
 const GRADIENTS = [
@@ -34,20 +36,37 @@ export function PosterCard({ item, onClick }: Props) {
   const { sources } = useSourcesStore()
   const colorMap = buildColorMap(sources.map((s) => s.id))
   const userData = useUserStore((s) => s.data[item.id])
+  const setFav = useUserStore((s) => s.setFavorite)
+  const setWl = useUserStore((s) => s.setWatchlist)
+  const [hovered, setHovered] = useState(false)
 
   const poster = item.posterUrl ?? item.poster_url
   const rating = item.ratingTmdb ?? item.rating_tmdb ?? item.ratingImdb ?? item.rating_imdb
   const primarySourceId = item.primarySourceId ?? item.primary_source_id
   const sourceColor = primarySourceId ? colorMap[primarySourceId] : undefined
   const isFavorite = userData?.favorite === 1
+  const isWatchlist = userData?.watchlist === 1
   const isCompleted = userData?.completed === 1
   const progressPct = userData?.last_position && item.runtime && !isCompleted
     ? Math.min(100, (userData.last_position / (item.runtime * 60)) * 100)
     : 0
 
+  const toggleFav = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setFav(item.id, !isFavorite)
+    api.user.toggleFavorite(item.id)
+  }
+  const toggleWatchlist = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setWl(item.id, !isWatchlist)
+    api.user.toggleWatchlist(item.id)
+  }
+
   return (
     <div
       onClick={() => onClick(item)}
+      onMouseEnter={(e) => { setHovered(true); e.currentTarget.style.transform = 'translateY(-3px) scale(1.02)'; e.currentTarget.style.boxShadow = '0 10px 28px rgba(0,0,0,0.5)' }}
+      onMouseLeave={(e) => { setHovered(false); e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3)' }}
       style={{
         borderRadius: '10px',
         overflow: 'hidden',
@@ -57,8 +76,6 @@ export function PosterCard({ item, onClick }: Props) {
         position: 'relative',
         transition: 'transform 0.15s, box-shadow 0.15s',
       }}
-      onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-3px) scale(1.02)'; e.currentTarget.style.boxShadow = '0 10px 28px rgba(0,0,0,0.5)' }}
-      onMouseLeave={(e) => { e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3)' }}
     >
       {/* Poster art — 2:3 ratio */}
       <div style={{ aspectRatio: '2/3', position: 'relative', overflow: 'hidden' }}>
@@ -97,13 +114,47 @@ export function PosterCard({ item, onClick }: Props) {
           </div>
         )}
 
-        {/* Favorite heart — top right area */}
-        {isFavorite && (
+        {/* Quick action buttons — on hover */}
+        {hovered && (
           <div style={{
-            position: 'absolute', top: 7, right: sourceColor ? 22 : 7,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            position: 'absolute', top: 6, left: 6, display: 'flex', gap: 4, zIndex: 2,
           }}>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="#ef4444" stroke="none">
+            <button onClick={toggleFav} title={isFavorite ? 'Remove favorite' : 'Add to favorites'}
+              style={{
+                width: 26, height: 26, borderRadius: 6,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: isFavorite ? 'rgba(239,68,68,0.25)' : 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)',
+                border: `1px solid ${isFavorite ? 'rgba(239,68,68,0.4)' : 'rgba(255,255,255,0.15)'}`,
+                cursor: 'pointer', padding: 0,
+              }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill={isFavorite ? '#ef4444' : 'none'} stroke={isFavorite ? '#ef4444' : 'rgba(255,255,255,0.8)'} strokeWidth="2">
+                <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+              </svg>
+            </button>
+            <button onClick={toggleWatchlist} title={isWatchlist ? 'Remove from watchlist' : 'Add to watchlist'}
+              style={{
+                width: 26, height: 26, borderRadius: 6,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: isWatchlist ? 'rgba(124,77,255,0.25)' : 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)',
+                border: `1px solid ${isWatchlist ? 'rgba(124,77,255,0.4)' : 'rgba(255,255,255,0.15)'}`,
+                cursor: 'pointer', padding: 0,
+              }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill={isWatchlist ? '#7c4dff' : 'none'} stroke={isWatchlist ? '#7c4dff' : 'rgba(255,255,255,0.8)'} strokeWidth="2">
+                <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+              </svg>
+            </button>
+          </div>
+        )}
+
+        {/* Favorite heart — persistent indicator (when not hovered) */}
+        {isFavorite && !hovered && (
+          <div style={{
+            position: 'absolute', top: 6, right: sourceColor ? 22 : 6,
+            width: 20, height: 20, borderRadius: 5,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)',
+          }}>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="#ef4444" stroke="none">
               <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
             </svg>
           </div>

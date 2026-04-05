@@ -1,0 +1,842 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fractals — Search UX Mockup</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #1a1a2e; color: #e8e3ff;
+  }
+
+  .mockup-label {
+    text-align: center; padding: 18px; font-size: 11px; font-weight: 700;
+    letter-spacing: 0.1em; text-transform: uppercase; color: #7c4dff;
+    background: #0a0a14; border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+
+  /* ── Shared ──────────────────────────────────────── */
+  .nav-bar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 14px 9px 80px;
+    background: #12121a; border-bottom: 1px solid rgba(255,255,255,0.06);
+    min-height: 48px;
+  }
+  .logo { display: flex; align-items: center; gap: 7px; flex-shrink: 0; }
+  .logo-icon { width: 20px; height: 20px; background: conic-gradient(#f44336, #ff9800, #4caf50, #2196f3, #9c27b0, #f44336); border-radius: 50%; }
+  .logo span { font-size: 13px; font-weight: 600; color: #e8e3ff; letter-spacing: -0.01em; }
+
+  .search-box {
+    flex: 1; display: flex; align-items: center; gap: 8px;
+    background: rgba(0,0,0,0.28); border: 1px solid rgba(255,255,255,0.22);
+    border-radius: 9px; padding: 7px 12px; transition: border-color 0.15s;
+    min-height: 36px;
+  }
+  .search-box:focus-within { border-color: rgba(255,255,255,0.5); }
+  .search-box .icon { color: rgba(255,255,255,0.5); flex-shrink: 0; font-size: 14px; }
+  .search-box input {
+    flex: 1; background: transparent; border: none; outline: none;
+    font-size: 13px; color: #fff; font-family: inherit;
+  }
+  .search-box input::placeholder { color: rgba(255,255,255,0.35); }
+
+  .scope-tag {
+    display: inline-flex; align-items: center; gap: 5px;
+    background: rgba(124,77,255,0.2); border: 1px solid rgba(124,77,255,0.35);
+    border-radius: 5px; padding: 2px 6px 2px 8px;
+    font-size: 11px; font-weight: 600; color: #b388ff;
+    white-space: nowrap; flex-shrink: 0;
+    animation: fadeIn 0.15s ease;
+  }
+  .scope-tag .x {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 14px; height: 14px; border-radius: 3px;
+    background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.5);
+    font-size: 9px; cursor: pointer; line-height: 1;
+  }
+  .scope-tag .x:hover { background: rgba(255,255,255,0.15); color: #fff; }
+
+  .kbd {
+    padding: 2px 6px; border-radius: 4px; font-size: 10px; font-family: monospace;
+    background: rgba(0,0,0,0.2); color: rgba(255,255,255,0.5);
+    border: 1px solid rgba(255,255,255,0.12); line-height: 1.4;
+  }
+  .clear-btn {
+    background: none; border: none; color: rgba(255,255,255,0.4);
+    cursor: pointer; font-size: 12px; padding: 2px;
+  }
+  .clear-btn:hover { color: #fff; }
+
+  .icon-btn {
+    width: 32px; height: 32px; border-radius: 8px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.15); border: 1px solid rgba(255,255,255,0.12);
+    cursor: pointer; color: rgba(255,255,255,0.6); font-size: 15px;
+  }
+
+  /* ── Type tabs ──────────────────────────────────── */
+  .type-tabs {
+    display: flex; align-items: center; gap: 5px; padding: 0 8px;
+    background: #12121a; border-bottom: 1px solid rgba(255,255,255,0.06);
+    min-height: 44px;
+  }
+  .type-tab {
+    padding: 0 14px; font-size: 12px; font-weight: 600; height: 30px;
+    border: none; cursor: pointer; white-space: nowrap; transition: all 0.12s;
+    display: flex; align-items: center;
+  }
+  .type-tab.active { border-radius: 7px; color: #fff; }
+  .type-tab:not(.active) {
+    background: transparent; border-radius: 0;
+    border-bottom: 2.5px solid; opacity: 0.65;
+  }
+  .tab-all.active    { background: #fbbf24; }
+  .tab-all:not(.active)    { color: #fbbf24; border-bottom-color: #fbbf24; }
+  .tab-live.active   { background: #ef5350; }
+  .tab-live:not(.active)   { color: #ef5350; border-bottom-color: #ef5350; }
+  .tab-movie.active  { background: #42a5f5; }
+  .tab-movie:not(.active)  { color: #42a5f5; border-bottom-color: #42a5f5; }
+  .tab-series.active { background: #66bb6a; }
+  .tab-series:not(.active) { color: #66bb6a; border-bottom-color: #66bb6a; }
+
+  .source-tabs {
+    display: flex; align-items: center; gap: 4px; margin-left: auto;
+  }
+  .source-tab {
+    padding: 3px 10px; border-radius: 5px; font-size: 10px; font-weight: 600;
+    border: 1px solid rgba(255,255,255,0.1); background: transparent;
+    color: rgba(255,255,255,0.5); cursor: pointer;
+  }
+  .source-tab.active { border-color: #f97316; color: #f97316; background: rgba(249,115,22,0.1); }
+
+  /* ── Filter chips row (future) ─────────────────── */
+  .filter-chips {
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 12px; flex-wrap: wrap;
+  }
+  .filter-chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 3px 8px 3px 10px; border-radius: 14px;
+    font-size: 11px; font-weight: 500;
+    background: rgba(124,77,255,0.12); border: 1px solid rgba(124,77,255,0.25);
+    color: #b388ff; cursor: pointer;
+  }
+  .filter-chip .x { font-size: 9px; opacity: 0.6; }
+  .filter-chip:hover .x { opacity: 1; }
+  .filter-chip.disabled {
+    background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.08);
+    color: rgba(255,255,255,0.25); cursor: default;
+  }
+
+  /* ── Category sidebar (horizontal layout) ──────── */
+  .sidebar {
+    width: 220px; flex-shrink: 0; display: flex; flex-direction: column;
+    background: #12121a; overflow: hidden;
+  }
+  .sidebar-filter {
+    padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+  .sidebar-filter input {
+    width: 100%; background: #0a0a14;
+    border: 1px solid rgba(255,255,255,0.1); border-radius: 6px;
+    padding: 5px 8px 5px 26px; font-size: 11px; color: #e8e3ff;
+    outline: none; font-family: inherit;
+  }
+  .sidebar-filter .search-icon {
+    position: absolute; left: 18px; top: 50%; transform: translateY(-50%);
+    color: rgba(255,255,255,0.25); font-size: 11px;
+  }
+
+  .cat-row {
+    display: flex; align-items: center; gap: 6px; width: 100%;
+    padding: 7px 12px; border: none; border-left: 3px solid transparent;
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+    background: transparent; color: rgba(255,255,255,0.55);
+    cursor: pointer; text-align: left; font-size: 12px; font-family: inherit;
+    transition: all 0.12s;
+  }
+  .cat-row:hover { background: rgba(239,83,80,0.22); color: #ef5350; }
+  .cat-row.active-live {
+    background: rgba(239,83,80,0.35); color: #ef5350;
+    border-left-color: #ef5350; font-weight: 600;
+  }
+  .cat-row.tint-live { background: rgba(239,83,80,0.1); border-left-color: rgba(239,83,80,0.3); }
+  .cat-row.tint-movie { background: rgba(66,165,245,0.1); border-left-color: rgba(66,165,245,0.3); }
+  .cat-row.tint-series { background: rgba(102,187,106,0.1); border-left-color: rgba(102,187,106,0.3); }
+  .cat-row.tint-all { background: rgba(251,191,36,0.1); border-left-color: rgba(251,191,36,0.3); }
+  .cat-row .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cat-row .count { font-size: 10px; color: rgba(255,255,255,0.3); font-family: monospace; }
+  .cat-row .dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
+
+  /* ── Content area ──────────────────────────────── */
+  .content-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+  .toolbar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 5px 12px; border-bottom: 1px solid rgba(255,255,255,0.06);
+    background: #12121a; min-height: 36px; font-size: 11px;
+  }
+  .toolbar .count { color: rgba(255,255,255,0.35); font-family: monospace; }
+  .toolbar .scope { color: rgba(255,255,255,0.55); }
+
+  .content-grid {
+    flex: 1; display: grid; gap: 8px; padding: 12px;
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    align-content: start; overflow-y: auto;
+  }
+  .card {
+    background: #1a1a26; border-radius: 8px; overflow: hidden;
+    border: 1px solid rgba(255,255,255,0.04); transition: all 0.12s;
+  }
+  .card:hover { border-color: rgba(255,255,255,0.12); transform: translateY(-1px); }
+  .card .poster { width: 100%; aspect-ratio: 2/3; background: #222233; display: flex; align-items: center; justify-content: center; color: rgba(255,255,255,0.15); font-size: 28px; }
+  .card .info { padding: 6px 8px; }
+  .card .title { font-size: 11px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .card .meta { font-size: 10px; color: rgba(255,255,255,0.3); margin-top: 2px; }
+
+  /* ── Category pills (vertical layout) ──────────── */
+  .cat-pills-area {
+    display: flex; flex-wrap: wrap; gap: 5px; padding: 7px 12px;
+    background: #0a0a14; max-height: 90px; overflow-y: auto;
+  }
+  .cat-pill {
+    display: flex; align-items: center; gap: 4px;
+    padding: 4px 9px; border-radius: 20px; font-size: 11px; font-weight: 500;
+    white-space: nowrap; cursor: pointer; border: 1px solid transparent;
+    background: transparent; color: rgba(255,255,255,0.5); transition: all 0.12s;
+  }
+  .cat-pill:hover { background: #1a1a26; color: #e8e3ff; }
+  .cat-pill.active { background: rgba(124,77,255,0.15); border-color: rgba(124,77,255,0.3); color: #b388ff; }
+  .cat-pill .type-dot { width: 7px; height: 7px; border-radius: 2px; flex-shrink: 0; }
+  .cat-pill .pill-count { font-size: 10px; color: rgba(255,255,255,0.25); font-family: monospace; }
+
+  /* ── Layout containers ─────────────────────────── */
+  .app-frame {
+    border: 1px solid rgba(255,255,255,0.08); border-radius: 10px;
+    overflow: hidden; margin: 20px; box-shadow: 0 12px 48px rgba(0,0,0,0.5);
+  }
+  .h-split { display: flex; flex-direction: row; height: 520px; }
+  .v-layout { display: flex; flex-direction: column; height: 520px; }
+  .divider-v { width: 1px; background: rgba(255,255,255,0.06); }
+
+  /* ── Annotations ───────────────────────────────── */
+  .annotation {
+    position: absolute; font-size: 10px; font-weight: 600;
+    color: #7c4dff; background: rgba(124,77,255,0.1);
+    border: 1px solid rgba(124,77,255,0.3); border-radius: 4px;
+    padding: 2px 6px; white-space: nowrap; pointer-events: none;
+  }
+  .annotation::before {
+    content: ''; position: absolute;
+    border: 5px solid transparent;
+  }
+
+  .section-title {
+    padding: 24px 20px 8px; font-size: 18px; font-weight: 700;
+    color: #e8e3ff; display: flex; align-items: center; gap: 12px;
+  }
+  .section-title .badge {
+    font-size: 10px; font-weight: 600; letter-spacing: 0.08em;
+    text-transform: uppercase; padding: 3px 8px; border-radius: 4px;
+    background: rgba(124,77,255,0.15); color: #b388ff;
+  }
+  .section-desc {
+    padding: 0 20px 16px; font-size: 12px; color: rgba(255,255,255,0.4);
+    line-height: 1.6; max-width: 700px;
+  }
+
+  @keyframes fadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+</style>
+</head>
+<body>
+
+<!-- ════════════════════════════════════════════════════════════════ -->
+<!-- HORIZONTAL LAYOUT — STATE 1: No category, no search (browse)  -->
+<!-- ════════════════════════════════════════════════════════════════ -->
+
+<div class="section-title">Horizontal Layout <span class="badge">Sidebar Categories</span></div>
+<div class="section-desc">Default view — no search, no category selected. Search bar shows global placeholder.</div>
+
+<div class="app-frame">
+  <!-- Nav -->
+  <div class="nav-bar">
+    <div class="logo"><div class="logo-icon"></div><span>Fractals</span></div>
+    <div class="search-box">
+      <span class="icon">&#x1F50D;</span>
+      <input placeholder="Search channels, movies, actors, directors…" readonly>
+      <span class="kbd">/</span>
+    </div>
+    <div class="icon-btn">&#x2630;</div>
+    <div class="icon-btn">&#x2699;</div>
+  </div>
+  <!-- Type tabs -->
+  <div class="type-tabs">
+    <button class="type-tab tab-all active">All</button>
+    <button class="type-tab tab-live">Live TV</button>
+    <button class="type-tab tab-movie">Movies</button>
+    <button class="type-tab tab-series">Series</button>
+    <div class="source-tabs">
+      <button class="source-tab active">Opplex</button>
+      <button class="source-tab">4K Strong</button>
+    </div>
+  </div>
+  <!-- Split -->
+  <div class="h-split">
+    <div class="sidebar">
+      <div class="sidebar-filter" style="position:relative;">
+        <span class="search-icon">&#x1F50D;</span>
+        <input placeholder="Filter categories…" readonly>
+      </div>
+      <div style="flex:1; overflow-y:auto;">
+        <button class="cat-row tint-all" style="border-left-color:#fbbf24; font-weight:600; color:#fbbf24;">
+          <span class="name">All</span><span class="count">296.1k</span>
+        </button>
+        <button class="cat-row tint-live"><span class="dot" style="background:#f97316;"></span><span class="name">DE - FILME ALT & 2023</span><span class="count">8.1k</span></button>
+        <button class="cat-row tint-live"><span class="dot" style="background:#a78bfa;"></span><span class="name">IR - PERSIAN SUB/DUB</span><span class="count">5.8k</span></button>
+        <button class="cat-row tint-movie"><span class="dot" style="background:#f97316;"></span><span class="name">EN - NEW RELEASE</span><span class="count">5.6k</span></button>
+        <button class="cat-row tint-movie"><span class="dot" style="background:#a78bfa;"></span><span class="name">GERMANY MOVIES</span><span class="count">4.5k</span></button>
+        <button class="cat-row tint-series"><span class="dot" style="background:#f97316;"></span><span class="name">AL - ARKIVA 1980/2023</span><span class="count">4.1k</span></button>
+        <button class="cat-row tint-movie"><span class="dot" style="background:#f97316;"></span><span class="name">NETFLIX MOVIES</span><span class="count">3.5k</span></button>
+        <button class="cat-row tint-series"><span class="dot" style="background:#a78bfa;"></span><span class="name">SVENSKA 2020 & GAMM…</span><span class="count">3.6k</span></button>
+      </div>
+    </div>
+    <div class="divider-v"></div>
+    <div class="content-area">
+      <div class="toolbar">
+        <span class="count">296,100 items</span>
+        <span style="flex:1"></span>
+        <span class="filter-chip disabled">Genre ▾</span>
+        <span class="filter-chip disabled">Year ▾</span>
+        <span style="font-size:11px; color:rgba(255,255,255,0.4); border:1px solid rgba(255,255,255,0.1); padding:3px 9px; border-radius:6px;">↕ Latest</span>
+      </div>
+      <div class="content-grid">
+        <div class="card"><div class="poster">🎬</div><div class="info"><div class="title">The Dark Knight</div><div class="meta">2008 · 9.0</div></div></div>
+        <div class="card"><div class="poster">🎬</div><div class="info"><div class="title">Inception</div><div class="meta">2010 · 8.8</div></div></div>
+        <div class="card"><div class="poster">🎬</div><div class="info"><div class="title">Interstellar</div><div class="meta">2014 · 8.7</div></div></div>
+        <div class="card"><div class="poster">🎬</div><div class="info"><div class="title">Pulp Fiction</div><div class="meta">1994 · 8.9</div></div></div>
+        <div class="card"><div class="poster">🎬</div><div class="info"><div class="title">The Matrix</div><div class="meta">1999 · 8.7</div></div></div>
+        <div class="card"><div class="poster">📺</div><div class="info"><div class="title">CNN International</div><div class="meta">Live</div></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════ -->
+<!-- HORIZONTAL — STATE 2: Category selected, no search             -->
+<!-- ════════════════════════════════════════════════════════════════ -->
+
+<div class="section-title">Horizontal — Category Selected</div>
+<div class="section-desc">
+  User clicked "NETFLIX MOVIES". The search bar gains a <strong>scope tag</strong> showing the active category.
+  Placeholder updates to reflect scope. Content shows items from that category.
+</div>
+
+<div class="app-frame">
+  <div class="nav-bar">
+    <div class="logo"><div class="logo-icon"></div><span>Fractals</span></div>
+    <div class="search-box" style="border-color: rgba(124,77,255,0.35);">
+      <span class="icon">&#x1F50D;</span>
+      <span class="scope-tag">NETFLIX MOVIES <span class="x">&times;</span></span>
+      <input placeholder="Search in NETFLIX MOVIES…" readonly>
+      <span class="kbd">/</span>
+    </div>
+    <div class="icon-btn">&#x2630;</div>
+    <div class="icon-btn">&#x2699;</div>
+  </div>
+  <div class="type-tabs">
+    <button class="type-tab tab-all active">All</button>
+    <button class="type-tab tab-live">Live TV</button>
+    <button class="type-tab tab-movie">Movies</button>
+    <button class="type-tab tab-series">Series</button>
+    <div class="source-tabs">
+      <button class="source-tab active">Opplex</button>
+      <button class="source-tab">4K Strong</button>
+    </div>
+  </div>
+  <div class="h-split">
+    <div class="sidebar">
+      <div class="sidebar-filter" style="position:relative;">
+        <span class="search-icon">&#x1F50D;</span>
+        <input placeholder="Filter categories…" readonly>
+      </div>
+      <div style="flex:1; overflow-y:auto;">
+        <button class="cat-row tint-all"><span class="name">All</span><span class="count">296.1k</span></button>
+        <button class="cat-row tint-live"><span class="dot" style="background:#f97316;"></span><span class="name">DE - FILME ALT & 2023</span><span class="count">8.1k</span></button>
+        <button class="cat-row tint-live"><span class="dot" style="background:#a78bfa;"></span><span class="name">IR - PERSIAN SUB/DUB</span><span class="count">5.8k</span></button>
+        <button class="cat-row tint-movie"><span class="dot" style="background:#f97316;"></span><span class="name">EN - NEW RELEASE</span><span class="count">5.6k</span></button>
+        <button class="cat-row tint-movie"><span class="dot" style="background:#a78bfa;"></span><span class="name">GERMANY MOVIES</span><span class="count">4.5k</span></button>
+        <button class="cat-row tint-series"><span class="dot" style="background:#f97316;"></span><span class="name">AL - ARKIVA 1980/2023</span><span class="count">4.1k</span></button>
+        <button class="cat-row active-live" style="background:rgba(66,165,245,0.35); color:#42a5f5; border-left-color:#42a5f5;">
+          <span class="dot" style="background:#f97316;"></span><span class="name">NETFLIX MOVIES</span><span class="count">3.5k</span>
+        </button>
+        <button class="cat-row tint-series"><span class="dot" style="background:#a78bfa;"></span><span class="name">SVENSKA 2020 & GAMM…</span><span class="count">3.6k</span></button>
+      </div>
+    </div>
+    <div class="divider-v"></div>
+    <div class="content-area">
+      <div class="toolbar">
+        <span class="count">3,500 items</span>
+        <span class="scope">in <strong>NETFLIX MOVIES</strong></span>
+        <span style="flex:1"></span>
+        <span class="filter-chip disabled">Genre ▾</span>
+        <span class="filter-chip disabled">Year ▾</span>
+        <span style="font-size:11px; color:rgba(255,255,255,0.4); border:1px solid rgba(255,255,255,0.1); padding:3px 9px; border-radius:6px;">↕ Latest</span>
+      </div>
+      <div class="content-grid">
+        <div class="card"><div class="poster">🎬</div><div class="info"><div class="title">Glass Onion</div><div class="meta">2022 · 7.2</div></div></div>
+        <div class="card"><div class="poster">🎬</div><div class="info"><div class="title">All Quiet on Western</div><div class="meta">2022 · 7.8</div></div></div>
+        <div class="card"><div class="poster">🎬</div><div class="info"><div class="title">The Adam Project</div><div class="meta">2022 · 6.7</div></div></div>
+        <div class="card"><div class="poster">🎬</div><div class="info"><div class="title">Don't Look Up</div><div class="meta">2021 · 7.2</div></div></div>
+        <div class="card"><div class="poster">🎬</div><div class="info"><div class="title">Red Notice</div><div class="meta">2021 · 6.3</div></div></div>
+        <div class="card"><div class="poster">🎬</div><div class="info"><div class="title">The Power of the Dog</div><div class="meta">2021 · 6.9</div></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════ -->
+<!-- HORIZONTAL — STATE 3: Category selected + search active        -->
+<!-- ════════════════════════════════════════════════════════════════ -->
+
+<div class="section-title">Horizontal — Scoped Search Active</div>
+<div class="section-desc">
+  User typed "batman" while NETFLIX MOVIES is selected. Searches <em>within</em> that category.
+  The scope tag stays visible. Clear search (✕) clears text only. Click × on tag to go global.
+</div>
+
+<div class="app-frame">
+  <div class="nav-bar">
+    <div class="logo"><div class="logo-icon"></div><span>Fractals</span></div>
+    <div class="search-box" style="border-color: rgba(255,255,255,0.5);">
+      <span class="icon">&#x1F50D;</span>
+      <span class="scope-tag">NETFLIX MOVIES <span class="x">&times;</span></span>
+      <input value="batman" readonly style="color:#fff;">
+      <button class="clear-btn">&times;</button>
+    </div>
+    <div class="icon-btn">&#x2630;</div>
+    <div class="icon-btn">&#x2699;</div>
+  </div>
+  <div class="type-tabs">
+    <button class="type-tab tab-all active">All</button>
+    <button class="type-tab tab-live">Live TV</button>
+    <button class="type-tab tab-movie">Movies</button>
+    <button class="type-tab tab-series">Series</button>
+    <div class="source-tabs">
+      <button class="source-tab active">Opplex</button>
+      <button class="source-tab">4K Strong</button>
+    </div>
+  </div>
+  <div class="h-split" style="height:400px;">
+    <div class="sidebar">
+      <div class="sidebar-filter" style="position:relative;">
+        <span class="search-icon">&#x1F50D;</span>
+        <input placeholder="Filter categories…" readonly>
+      </div>
+      <div style="flex:1; overflow-y:auto;">
+        <button class="cat-row tint-all"><span class="name">All</span><span class="count">296.1k</span></button>
+        <button class="cat-row active-live" style="background:rgba(66,165,245,0.35); color:#42a5f5; border-left-color:#42a5f5;">
+          <span class="dot" style="background:#f97316;"></span><span class="name">NETFLIX MOVIES</span><span class="count">3.5k</span>
+        </button>
+      </div>
+    </div>
+    <div class="divider-v"></div>
+    <div class="content-area">
+      <div class="toolbar">
+        <span class="count"><strong style="color:rgba(255,255,255,0.7)">2</strong> results for "<strong style="color:#fff">batman</strong>"</span>
+        <span class="scope">in <strong>NETFLIX MOVIES</strong></span>
+      </div>
+      <div class="content-grid">
+        <div class="card"><div class="poster">🦇</div><div class="info"><div class="title">The Batman</div><div class="meta">2022 · 7.8</div></div></div>
+        <div class="card"><div class="poster">🦇</div><div class="info"><div class="title">Batman Begins</div><div class="meta">2005 · 8.2</div></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════ -->
+<!-- HORIZONTAL — STATE 4: Global search (no category)              -->
+<!-- ════════════════════════════════════════════════════════════════ -->
+
+<div class="section-title">Horizontal — Global Search</div>
+<div class="section-desc">
+  No category selected. User types "cnn". Results span across all categories and types.
+  No scope tag in search bar. Categories sidebar still visible for narrowing.
+</div>
+
+<div class="app-frame">
+  <div class="nav-bar">
+    <div class="logo"><div class="logo-icon"></div><span>Fractals</span></div>
+    <div class="search-box" style="border-color: rgba(255,255,255,0.5);">
+      <span class="icon">&#x1F50D;</span>
+      <input value="cnn" readonly style="color:#fff;">
+      <button class="clear-btn">&times;</button>
+    </div>
+    <div class="icon-btn">&#x2630;</div>
+    <div class="icon-btn">&#x2699;</div>
+  </div>
+  <div class="type-tabs">
+    <button class="type-tab tab-all active">All</button>
+    <button class="type-tab tab-live">Live TV</button>
+    <button class="type-tab tab-movie">Movies</button>
+    <button class="type-tab tab-series">Series</button>
+    <div class="source-tabs">
+      <button class="source-tab active">Opplex</button>
+      <button class="source-tab">4K Strong</button>
+    </div>
+  </div>
+  <div class="h-split" style="height:420px;">
+    <div class="sidebar">
+      <div class="sidebar-filter" style="position:relative;">
+        <span class="search-icon">&#x1F50D;</span>
+        <input placeholder="Filter categories…" readonly>
+      </div>
+      <div style="flex:1; overflow-y:auto;">
+        <button class="cat-row tint-all" style="border-left-color:#fbbf24; color:rgba(255,255,255,0.5);"><span class="name">All</span><span class="count">296.1k</span></button>
+        <button class="cat-row tint-live"><span class="name">US - NEWS</span><span class="count">120</span></button>
+        <button class="cat-row tint-live"><span class="name">UK - NEWS</span><span class="count">85</span></button>
+      </div>
+    </div>
+    <div class="divider-v"></div>
+    <div class="content-area">
+      <div class="toolbar">
+        <span class="count"><strong style="color:rgba(255,255,255,0.7)">8</strong> results for "<strong style="color:#fff">cnn</strong>"</span>
+      </div>
+      <div style="padding:12px;">
+        <!-- Live TV section -->
+        <div style="font-size:11px; font-weight:600; color:#ef5350; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
+          <span style="width:8px;height:8px;border-radius:2px;background:#ef5350;display:inline-block;"></span>
+          Live TV — 5 results
+        </div>
+        <div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:6px; margin-bottom:16px;">
+          <div style="display:flex; align-items:center; gap:8px; padding:8px; background:#1a1a26; border-radius:6px; border:1px solid rgba(255,255,255,0.04);">
+            <div style="width:36px;height:36px;border-radius:6px;background:#222233;display:flex;align-items:center;justify-content:center;font-size:12px;">📺</div>
+            <div><div style="font-size:11px;font-weight:500;">CNN International</div><div style="font-size:10px;color:rgba(255,255,255,0.3);">US - NEWS</div></div>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px; padding:8px; background:#1a1a26; border-radius:6px; border:1px solid rgba(255,255,255,0.04);">
+            <div style="width:36px;height:36px;border-radius:6px;background:#222233;display:flex;align-items:center;justify-content:center;font-size:12px;">📺</div>
+            <div><div style="font-size:11px;font-weight:500;">CNN USA</div><div style="font-size:10px;color:rgba(255,255,255,0.3);">US - NEWS</div></div>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px; padding:8px; background:#1a1a26; border-radius:6px; border:1px solid rgba(255,255,255,0.04);">
+            <div style="width:36px;height:36px;border-radius:6px;background:#222233;display:flex;align-items:center;justify-content:center;font-size:12px;">📺</div>
+            <div><div style="font-size:11px;font-weight:500;">CNN Turk</div><div style="font-size:10px;color:rgba(255,255,255,0.3);">TR - HABER</div></div>
+          </div>
+        </div>
+        <!-- Movies section -->
+        <div style="font-size:11px; font-weight:600; color:#42a5f5; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
+          <span style="width:8px;height:8px;border-radius:2px;background:#42a5f5;display:inline-block;"></span>
+          Movies — 2 results
+        </div>
+        <div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(130px,1fr)); gap:8px; margin-bottom:16px;">
+          <div class="card"><div class="poster" style="aspect-ratio:2/3;">🎬</div><div class="info"><div class="title">CNN Special Report</div><div class="meta">2020</div></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════════ -->
+<!-- HORIZONTAL — STATE 5: Future — with comprehensive filters      -->
+<!-- ════════════════════════════════════════════════════════════════ -->
+
+<div class="section-title">Horizontal — Future: Comprehensive Filters</div>
+<div class="section-desc">
+  Global search + filter chips for genre, year, rating. Each chip is removable.
+  These layer on top of category scope if one is active.
+</div>
+
+<div class="app-frame">
+  <div class="nav-bar">
+    <div class="logo"><div class="logo-icon"></div><span>Fractals</span></div>
+    <div class="search-box" style="border-color: rgba(255,255,255,0.5);">
+      <span class="icon">&#x1F50D;</span>
+      <input value="brad pitt" readonly style="color:#fff;">
+      <button class="clear-btn">&times;</button>
+    </div>
+    <div class="icon-btn">&#x2630;</div>
+    <div class="icon-btn">&#x2699;</div>
+  </div>
+  <div class="type-tabs">
+    <button class="type-tab tab-all">All</button>
+    <button class="type-tab tab-live">Live TV</button>
+    <button class="type-tab tab-movie active">Movies</button>
+    <button class="type-tab tab-series">Series</button>
+    <div class="source-tabs">
+      <button class="source-tab active">Opplex</button>
+      <button class="source-tab">4K Strong</button>
+    </div>
+  </div>
+  <!-- Filter chips row -->
+  <div class="filter-chips" style="border-bottom:1px solid rgba(255,255,255,0.06); background:#0e0e18;">
+    <span class="filter-chip">Action <span class="x">&times;</span></span>
+    <span class="filter-chip">2000–2025 <span class="x">&times;</span></span>
+    <span class="filter-chip">Rating 7+ <span class="x">&times;</span></span>
+    <span style="font-size:10px; color:rgba(255,255,255,0.25); margin-left:4px;">3 filters active</span>
+  </div>
+  <div class="h-split" style="height:380px;">
+    <div class="sidebar">
+      <div class="sidebar-filter" style="position:relative;">
+        <span class="search-icon">&#x1F50D;</span>
+        <input placeholder="Filter categories…" readonly>
+      </div>
+      <div style="flex:1; overflow-y:auto;">
+        <button class="cat-row tint-all" style="border-left-color:#fbbf24; color:rgba(255,255,255,0.5);"><span class="name">All</span><span class="count">296.1k</span></button>
+        <button class="cat-row tint-movie"><span class="name">EN - NEW RELEASE</span><span class="count">5.6k</span></button>
+        <button class="cat-row tint-movie"><span class="name">NETFLIX MOVIES</span><span class="count">3.5k</span></button>
+      </div>
+    </div>
+    <div class="divider-v"></div>
+    <div class="content-area">
+      <div class="toolbar">
+        <span class="count"><strong style="color:rgba(255,255,255,0.7)">6</strong> results for "<strong style="color:#fff">brad pitt</strong>"</span>
+        <span class="scope">· Movies · Action · 2000–2025 · 7+</span>
+      </div>
+      <div class="content-grid">
+        <div class="card"><div class="poster">🎬</div><div class="info"><div class="title">Troy</div><div class="meta">2004 · 7.3</div></div></div>
+        <div class="card"><div class="poster">🎬</div><div class="info"><div class="title">Mr. & Mrs. Smith</div><div class="meta">2005 · 6.5</div></div></div>
+        <div class="card"><div class="poster">🎬</div><div class="info"><div class="title">Bullet Train</div><div class="meta">2022 · 7.3</div></div></div>
+        <div class="card"><div class="poster">🎬</div><div class="info"><div class="title">Fight Club</div><div class="meta">1999 · 8.8</div></div></div>
+        <div class="card"><div class="poster">🎬</div><div class="info"><div class="title">Once Upon a Time…</div><div class="meta">2019 · 7.6</div></div></div>
+        <div class="card"><div class="poster">🎬</div><div class="info"><div class="title">Fury</div><div class="meta">2014 · 7.6</div></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════════ -->
+<!-- ════════════════════════════════════════════════════════════════ -->
+<!-- VERTICAL LAYOUT                                                 -->
+<!-- ════════════════════════════════════════════════════════════════ -->
+<!-- ════════════════════════════════════════════════════════════════ -->
+
+<div style="height:40px;"></div>
+<div style="text-align:center; padding:20px; font-size:11px; font-weight:700; letter-spacing:0.15em; text-transform:uppercase; color:#7c4dff; border-top:2px solid rgba(124,77,255,0.2);">
+  Vertical Layout — Categories as Horizontal Pills
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════ -->
+<!-- VERTICAL — STATE 1: No search, no category                      -->
+<!-- ════════════════════════════════════════════════════════════════ -->
+
+<div class="section-title">Vertical — Browse Mode</div>
+<div class="section-desc">Default state. Categories shown as horizontal pills. Search bar is global.</div>
+
+<div class="app-frame">
+  <div class="nav-bar">
+    <div class="logo"><div class="logo-icon"></div><span>Fractals</span></div>
+    <div class="search-box">
+      <span class="icon">&#x1F50D;</span>
+      <input placeholder="Search channels, movies, actors, directors…" readonly>
+      <span class="kbd">/</span>
+    </div>
+    <div class="icon-btn">&#x2630;</div>
+    <div class="icon-btn">&#x2699;</div>
+  </div>
+  <div class="type-tabs">
+    <button class="type-tab tab-all active">All</button>
+    <button class="type-tab tab-live">Live TV</button>
+    <button class="type-tab tab-movie">Movies</button>
+    <button class="type-tab tab-series">Series</button>
+    <div class="source-tabs">
+      <button class="source-tab active">Opplex</button>
+      <button class="source-tab">4K Strong</button>
+    </div>
+  </div>
+  <div class="v-layout" style="height:480px;">
+    <!-- Category pills -->
+    <div class="cat-pills-area">
+      <button class="cat-pill"><span class="type-dot" style="background:#ef5350;"></span>DE - FILME ALT<span class="pill-count">8.1k</span></button>
+      <button class="cat-pill"><span class="type-dot" style="background:#ef5350;"></span>IR - PERSIAN<span class="pill-count">5.8k</span></button>
+      <button class="cat-pill"><span class="type-dot" style="background:#42a5f5;"></span>EN - NEW RELEASE<span class="pill-count">5.6k</span></button>
+      <button class="cat-pill"><span class="type-dot" style="background:#42a5f5;"></span>GERMANY MOVIES<span class="pill-count">4.5k</span></button>
+      <button class="cat-pill"><span class="type-dot" style="background:#66bb6a;"></span>AL - ARKIVA<span class="pill-count">4.1k</span></button>
+      <button class="cat-pill"><span class="type-dot" style="background:#42a5f5;"></span>NETFLIX MOVIES<span class="pill-count">3.5k</span></button>
+      <button class="cat-pill"><span class="type-dot" style="background:#66bb6a;"></span>SVENSKA 2020<span class="pill-count">3.6k</span></button>
+    </div>
+    <div style="border-bottom:1px solid rgba(255,255,255,0.06);"></div>
+    <!-- Toolbar + content -->
+    <div class="content-area">
+      <div class="toolbar">
+        <span class="count">296,100 items</span>
+        <span style="flex:1"></span>
+        <span class="filter-chip disabled">Genre ▾</span>
+        <span class="filter-chip disabled">Year ▾</span>
+        <span style="font-size:11px; color:rgba(255,255,255,0.4); border:1px solid rgba(255,255,255,0.1); padding:3px 9px; border-radius:6px;">↕ Latest</span>
+      </div>
+      <div class="content-grid">
+        <div class="card"><div class="poster">🎬</div><div class="info"><div class="title">The Dark Knight</div><div class="meta">2008 · 9.0</div></div></div>
+        <div class="card"><div class="poster">🎬</div><div class="info"><div class="title">Inception</div><div class="meta">2010 · 8.8</div></div></div>
+        <div class="card"><div class="poster">🎬</div><div class="info"><div class="title">Interstellar</div><div class="meta">2014 · 8.7</div></div></div>
+        <div class="card"><div class="poster">🎬</div><div class="info"><div class="title">Pulp Fiction</div><div class="meta">1994 · 8.9</div></div></div>
+        <div class="card"><div class="poster">📺</div><div class="info"><div class="title">CNN International</div><div class="meta">Live</div></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════ -->
+<!-- VERTICAL — STATE 2: Category selected                           -->
+<!-- ════════════════════════════════════════════════════════════════ -->
+
+<div class="section-title">Vertical — Category Selected</div>
+<div class="section-desc">
+  User clicked "NETFLIX MOVIES" pill. Same behavior: scope tag appears in search bar.
+  Active pill is highlighted. Identical to horizontal layout behavior.
+</div>
+
+<div class="app-frame">
+  <div class="nav-bar">
+    <div class="logo"><div class="logo-icon"></div><span>Fractals</span></div>
+    <div class="search-box" style="border-color: rgba(124,77,255,0.35);">
+      <span class="icon">&#x1F50D;</span>
+      <span class="scope-tag">NETFLIX MOVIES <span class="x">&times;</span></span>
+      <input placeholder="Search in NETFLIX MOVIES…" readonly>
+      <span class="kbd">/</span>
+    </div>
+    <div class="icon-btn">&#x2630;</div>
+    <div class="icon-btn">&#x2699;</div>
+  </div>
+  <div class="type-tabs">
+    <button class="type-tab tab-all active">All</button>
+    <button class="type-tab tab-live">Live TV</button>
+    <button class="type-tab tab-movie">Movies</button>
+    <button class="type-tab tab-series">Series</button>
+    <div class="source-tabs">
+      <button class="source-tab active">Opplex</button>
+      <button class="source-tab">4K Strong</button>
+    </div>
+  </div>
+  <div class="v-layout" style="height:480px;">
+    <div class="cat-pills-area">
+      <button class="cat-pill"><span class="type-dot" style="background:#ef5350;"></span>DE - FILME ALT<span class="pill-count">8.1k</span></button>
+      <button class="cat-pill"><span class="type-dot" style="background:#ef5350;"></span>IR - PERSIAN<span class="pill-count">5.8k</span></button>
+      <button class="cat-pill"><span class="type-dot" style="background:#42a5f5;"></span>EN - NEW RELEASE<span class="pill-count">5.6k</span></button>
+      <button class="cat-pill"><span class="type-dot" style="background:#42a5f5;"></span>GERMANY MOVIES<span class="pill-count">4.5k</span></button>
+      <button class="cat-pill"><span class="type-dot" style="background:#66bb6a;"></span>AL - ARKIVA<span class="pill-count">4.1k</span></button>
+      <button class="cat-pill active"><span class="type-dot" style="background:#42a5f5;"></span>NETFLIX MOVIES<span class="pill-count">3.5k</span></button>
+      <button class="cat-pill"><span class="type-dot" style="background:#66bb6a;"></span>SVENSKA 2020<span class="pill-count">3.6k</span></button>
+    </div>
+    <div style="border-bottom:1px solid rgba(255,255,255,0.06);"></div>
+    <div class="content-area">
+      <div class="toolbar">
+        <span class="count">3,500 items</span>
+        <span class="scope">in <strong>NETFLIX MOVIES</strong></span>
+        <span style="flex:1"></span>
+        <span class="filter-chip disabled">Genre ▾</span>
+        <span class="filter-chip disabled">Year ▾</span>
+        <span style="font-size:11px; color:rgba(255,255,255,0.4); border:1px solid rgba(255,255,255,0.1); padding:3px 9px; border-radius:6px;">↕ Latest</span>
+      </div>
+      <div class="content-grid">
+        <div class="card"><div class="poster">🎬</div><div class="info"><div class="title">Glass Onion</div><div class="meta">2022 · 7.2</div></div></div>
+        <div class="card"><div class="poster">🎬</div><div class="info"><div class="title">All Quiet on Western</div><div class="meta">2022 · 7.8</div></div></div>
+        <div class="card"><div class="poster">🎬</div><div class="info"><div class="title">The Adam Project</div><div class="meta">2022 · 6.7</div></div></div>
+        <div class="card"><div class="poster">🎬</div><div class="info"><div class="title">Don't Look Up</div><div class="meta">2021 · 7.2</div></div></div>
+        <div class="card"><div class="poster">🎬</div><div class="info"><div class="title">Red Notice</div><div class="meta">2021 · 6.3</div></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════ -->
+<!-- VERTICAL — STATE 3: Category + Search                           -->
+<!-- ════════════════════════════════════════════════════════════════ -->
+
+<div class="section-title">Vertical — Scoped Search</div>
+<div class="section-desc">Typing "batman" while NETFLIX MOVIES is selected. Identical behavior to horizontal layout.</div>
+
+<div class="app-frame">
+  <div class="nav-bar">
+    <div class="logo"><div class="logo-icon"></div><span>Fractals</span></div>
+    <div class="search-box" style="border-color: rgba(255,255,255,0.5);">
+      <span class="icon">&#x1F50D;</span>
+      <span class="scope-tag">NETFLIX MOVIES <span class="x">&times;</span></span>
+      <input value="batman" readonly style="color:#fff;">
+      <button class="clear-btn">&times;</button>
+    </div>
+    <div class="icon-btn">&#x2630;</div>
+    <div class="icon-btn">&#x2699;</div>
+  </div>
+  <div class="type-tabs">
+    <button class="type-tab tab-all active">All</button>
+    <button class="type-tab tab-live">Live TV</button>
+    <button class="type-tab tab-movie">Movies</button>
+    <button class="type-tab tab-series">Series</button>
+    <div class="source-tabs">
+      <button class="source-tab active">Opplex</button>
+      <button class="source-tab">4K Strong</button>
+    </div>
+  </div>
+  <div class="v-layout" style="height:380px;">
+    <div class="cat-pills-area">
+      <button class="cat-pill"><span class="type-dot" style="background:#ef5350;"></span>DE - FILME ALT<span class="pill-count">8.1k</span></button>
+      <button class="cat-pill active"><span class="type-dot" style="background:#42a5f5;"></span>NETFLIX MOVIES<span class="pill-count">3.5k</span></button>
+      <button class="cat-pill"><span class="type-dot" style="background:#66bb6a;"></span>SVENSKA 2020<span class="pill-count">3.6k</span></button>
+    </div>
+    <div style="border-bottom:1px solid rgba(255,255,255,0.06);"></div>
+    <div class="content-area">
+      <div class="toolbar">
+        <span class="count"><strong style="color:rgba(255,255,255,0.7)">2</strong> results for "<strong style="color:#fff">batman</strong>"</span>
+        <span class="scope">in <strong>NETFLIX MOVIES</strong></span>
+      </div>
+      <div class="content-grid">
+        <div class="card"><div class="poster">🦇</div><div class="info"><div class="title">The Batman</div><div class="meta">2022 · 7.8</div></div></div>
+        <div class="card"><div class="poster">🦇</div><div class="info"><div class="title">Batman Begins</div><div class="meta">2005 · 8.2</div></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════════ -->
+<!-- INTERACTION REFERENCE                                           -->
+<!-- ════════════════════════════════════════════════════════════════ -->
+
+<div style="max-width:700px; margin:40px auto; padding:20px 24px; background:#0e0e18; border-radius:12px; border:1px solid rgba(124,77,255,0.2);">
+  <h3 style="font-size:14px; font-weight:700; color:#b388ff; margin-bottom:16px;">Interaction Reference</h3>
+  <table style="width:100%; font-size:12px; line-height:2; border-collapse:collapse;">
+    <tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
+      <td style="color:rgba(255,255,255,0.4); padding-right:16px; white-space:nowrap;">Click category</td>
+      <td style="color:#e8e3ff;">Scope tag appears in search bar. Search text <strong>preserved</strong>.</td>
+    </tr>
+    <tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
+      <td style="color:rgba(255,255,255,0.4); padding-right:16px; white-space:nowrap;">Click <span style="color:#b388ff;">&times;</span> on scope tag</td>
+      <td style="color:#e8e3ff;">Category deselected. Search text <strong>preserved</strong>. Results widen to global.</td>
+    </tr>
+    <tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
+      <td style="color:rgba(255,255,255,0.4); padding-right:16px; white-space:nowrap;">Click <span style="color:rgba(255,255,255,0.5);">&times;</span> clear button</td>
+      <td style="color:#e8e3ff;">Search text cleared. Category scope <strong>preserved</strong>. Back to browse within category.</td>
+    </tr>
+    <tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
+      <td style="color:rgba(255,255,255,0.4); padding-right:16px; white-space:nowrap;">Escape (1st press)</td>
+      <td style="color:#e8e3ff;">Clear search text (if any). Category stays.</td>
+    </tr>
+    <tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
+      <td style="color:rgba(255,255,255,0.4); padding-right:16px; white-space:nowrap;">Escape (2nd press)</td>
+      <td style="color:#e8e3ff;">Clear category scope. Fully reset to browse.</td>
+    </tr>
+    <tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
+      <td style="color:rgba(255,255,255,0.4); padding-right:16px; white-space:nowrap;">Backspace (empty input)</td>
+      <td style="color:#e8e3ff;">Remove category scope tag (like clicking its &times;).</td>
+    </tr>
+    <tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
+      <td style="color:rgba(255,255,255,0.4); padding-right:16px; white-space:nowrap;">Click type tab</td>
+      <td style="color:#e8e3ff;">Clears <strong>both</strong> search text and category. Fresh start.</td>
+    </tr>
+    <tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
+      <td style="color:rgba(255,255,255,0.4); padding-right:16px; white-space:nowrap;"><kbd style="font-size:10px;background:rgba(255,255,255,0.08);padding:1px 5px;border-radius:3px;">/</kbd> or <kbd style="font-size:10px;background:rgba(255,255,255,0.08);padding:1px 5px;border-radius:3px;">&#8984;K</kbd></td>
+      <td style="color:#e8e3ff;">Focus search bar. Scope tag stays if present.</td>
+    </tr>
+    <tr>
+      <td style="color:rgba(255,255,255,0.4); padding-right:16px; white-space:nowrap;">Sidebar "Filter categories"</td>
+      <td style="color:#e8e3ff;">Filters category <em>list names</em> only. Not a content search. Unchanged.</td>
+    </tr>
+  </table>
+</div>
+
+<div style="height:60px;"></div>
+
+</body>
+</html>

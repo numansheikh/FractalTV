@@ -341,10 +341,10 @@ Error:          #ef5350
 - Not a social app — no sharing, no public profiles, no cloud sync (for now)
 - Not a content provider — ships with zero content, user brings their own sources
 
-## Implementation status (as of 2026-04-04)
+## Implementation status (as of 2026-04-05)
 
-**Complete:** Phases 1–6 (scaffold, DB + Xtream sync, TMDB enrichment, FTS5 search, browse/search UI, video player).
-**Partial:** Phase 10 settings (appearance, player, enrichment done; profiles + EPG config pending). Phase 12 user data (IPC handlers complete, Phase 12A done).
+**Complete:** Phases 1–6 (scaffold, DB + Xtream sync, TMDB enrichment, FTS5 search, browse/search UI, video player). Phase 12A (user data IPC handlers).
+**Partial:** Phase 10 settings (appearance, player, enrichment done; profiles + EPG config pending). Phase 12 user data (12A done; 12B–E pending).
 **Not started:** Phase 7 (EPG/catchup), Phase 8 (semantic search), Phase 9 (M3U), Phase 11 (Capacitor/mobile).
 
 ## Key architecture decisions (implemented)
@@ -355,7 +355,13 @@ Error:          #ef5350
 
 - **Source-scoped content IDs** — Format `{sourceId}:{type}:{streamId}` ensures correct credentials used for playback. Same stream_id on same server returns HTTP 405 with wrong account credentials.
 
-- **On-demand TMDB enrichment** — ContentDetail panel auto-triggers enrichment when opened for unenriched movie/series. Multi-candidate title cleaning: strips language prefixes ("EN - "), extracts embedded years ("(2015)"), tries with/without subtitles after ":" or " - ". Manual search fallback with editable title/year when auto fails.
+- **On-demand TMDB enrichment** — ContentDetail panel auto-triggers enrichment when opened for unenriched movie/series. Multi-candidate title cleaning: strips language prefixes ("EN - "), extracts embedded years ("(2015)"), tries with/without subtitles after ":" or " - ". Manual search fallback with choosable results list when auto fails. "Wrong match?" link for re-matching already-enriched content.
+
+- **Unified ContentDetail panel** — Movies and series both use the same side panel. Series gets double-width (720px vs 380px) with a left column for season coin selector + episode list, right column for identical metadata layout. Panel stays mounted behind player so users can pick episodes without re-navigating. SeriesView.tsx is deprecated (unused).
+
+- **Special character search** — Queries containing `[`, `]`, `(`, `)`, `-`, `_` flip search priority to LIKE-first (preserves special chars) with FTS5 filling remaining slots. Normal queries use FTS5-first.
+
+- **Layered Escape handling** — All overlay Escape handlers use `addEventListener('keydown', handler, true)` (capture phase) + `e.stopImmediatePropagation()`. Player defers ContentDetail Escape via `isPlaying` prop. Prevents Escape from leaking to lower layers (e.g., clearing SearchBar query).
 
 - **Source identity colors** — Each source gets a distinct hue from a palette ordered for maximum visual distance. Dots show source color (not generic green/red status). Red only for error/expired.
 

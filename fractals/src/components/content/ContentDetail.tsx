@@ -6,10 +6,18 @@ import { ContentItem } from '@/components/browse/ContentCard'
 import { useSourcesStore } from '@/stores/sources.store'
 import { buildColorMap } from '@/lib/sourceColors'
 
+export interface BreadcrumbNav {
+  type?: 'live' | 'movie' | 'series'
+  sourceId?: string
+  category?: string
+}
+
 interface Props {
   item: ContentItem
   onPlay: (item: ContentItem) => void
   onClose: () => void
+  onNavigate?: (nav: BreadcrumbNav) => void
+  isPlaying?: boolean
 }
 
 const TYPE_META: Record<string, { label: string; color: string; dimColor: string }> = {
@@ -18,10 +26,13 @@ const TYPE_META: Record<string, { label: string; color: string; dimColor: string
   series: { label: 'Series',  color: 'var(--color-series)', dimColor: 'color-mix(in srgb, var(--color-series) 12%, transparent)' },
 }
 
-export function ContentDetail({ item, onPlay, onClose }: Props) {
+export function ContentDetail({ item, onPlay, onClose, onNavigate, isPlaying }: Props) {
+  const isSeries = item.type === 'series'
+  const panelWidth = isSeries ? 720 : 380
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        if (isPlaying) return // Let Player handle Escape when it's on top
         e.stopImmediatePropagation()
         onClose()
       }
@@ -29,7 +40,7 @@ export function ContentDetail({ item, onPlay, onClose }: Props) {
     // Use capture phase so we intercept before SearchBar's handler
     window.addEventListener('keydown', handler, true)
     return () => window.removeEventListener('keydown', handler, true)
-  }, [onClose])
+  }, [onClose, isPlaying])
 
   const qc = useQueryClient()
   const { sources } = useSourcesStore()
@@ -74,7 +85,15 @@ export function ContentDetail({ item, onPlay, onClose }: Props) {
   // ── On-demand TMDB enrichment ───────────────────────────────────────
   const [enriching, setEnriching] = useState(false)
   const [enrichFailed, setEnrichFailed] = useState(false)
+  const [showManualSearch, setShowManualSearch] = useState(false)
   const enrichAttemptedRef = useRef(false)
+
+  // Reset enrichment state when item changes
+  useEffect(() => {
+    enrichAttemptedRef.current = false
+    setEnrichFailed(false)
+    setShowManualSearch(false)
+  }, [item.id])
 
   useEffect(() => {
     if (hasEnrichedData) return
@@ -132,11 +151,13 @@ export function ContentDetail({ item, onPlay, onClose }: Props) {
 
   return (
     <>
-      {/* Scrim */}
-      <div
-        style={{ position: 'fixed', inset: 0, zIndex: 40, background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)', WebkitAppRegion: 'no-drag' as any }}
-        onClick={onClose}
-      />
+      {/* Scrim — hidden when player is on top */}
+      {!isPlaying && (
+        <div
+          style={{ position: 'fixed', inset: 0, zIndex: 40, background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)', WebkitAppRegion: 'no-drag' as any }}
+          onClick={onClose}
+        />
+      )}
 
       {/* Panel */}
       <motion.div
@@ -147,13 +168,123 @@ export function ContentDetail({ item, onPlay, onClose }: Props) {
         style={{
           position: 'fixed', right: 0, top: 0, zIndex: 50,
           WebkitAppRegion: 'no-drag' as any,
-          width: 380, height: '100%',
-          display: 'flex', flexDirection: 'column', overflow: 'hidden',
+          width: panelWidth, height: '100%',
+          display: 'flex', flexDirection: 'row', overflow: 'hidden',
           background: 'var(--color-surface)',
           borderLeft: '1px solid var(--color-border-strong)',
           boxShadow: '-20px 0 48px rgba(0,0,0,0.3)',
         }}
       >
+        {/* ── Left column: Episodes (series only) ─────────────────── */}
+        {isSeries && (
+          <div style={{
+            width: 340, flexShrink: 0, display: 'flex', flexDirection: 'column',
+            borderRight: '1px solid var(--color-border)',
+            overflow: 'hidden',
+          }}>
+            {/* Season coins */}
+            <div style={{ padding: '16px 16px 0', flexShrink: 0 }}>
+              <p style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--color-text-muted)', marginBottom: 10 }}>
+                Seasons
+              </p>
+              {seasonKeys.length > 1 && (
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
+                  {seasonKeys.map((s) => {
+                    const isActive = currentSeason === s
+                    return (
+                      <button key={s} onClick={() => setActiveSeason(s)}
+                        style={{
+                          width: 34, height: 34, borderRadius: '50%',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: 12, fontWeight: isActive ? 700 : 500,
+                          background: isActive ? 'var(--color-primary)' : 'var(--color-card)',
+                          color: isActive ? '#fff' : 'var(--color-text-secondary)',
+                          border: `2px solid ${isActive ? 'var(--color-primary)' : 'var(--color-border)'}`,
+                          cursor: 'pointer', transition: 'all 0.15s',
+                        }}
+                        onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.borderColor = 'var(--color-primary)' }}
+                        onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.borderColor = 'var(--color-border)' }}
+                      >
+                        {s}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+              {currentSeason && (
+                <p style={{ fontSize: 10, color: 'var(--color-text-muted)', marginBottom: 4 }}>
+                  Season {currentSeason} · {episodes.length} episode{episodes.length !== 1 ? 's' : ''}
+                </p>
+              )}
+            </div>
+
+            {/* Episode list */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '8px 8px 20px' }}>
+              {seriesFetching && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '16px 8px', color: 'var(--color-text-muted)', fontSize: 12 }}>
+                  <div style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid rgba(124,77,255,0.25)', borderTopColor: '#7c4dff', animation: 'spin 0.8s linear infinite', flexShrink: 0 }} />
+                  Loading episodes…
+                </div>
+              )}
+
+              {!seriesFetching && seasonKeys.length === 0 && (
+                <div style={{ padding: '24px 8px', textAlign: 'center' }}>
+                  <p style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>No episodes found</p>
+                </div>
+              )}
+
+              {episodes.map((ep) => (
+                <button key={ep.id} onClick={() => {
+                  const epItem: any = {
+                    id: `episode:${ep.id}`,
+                    type: 'episode',
+                    title: `S${ep.season}E${ep.episode_num} · ${ep.title}`,
+                    _streamId: ep.id,
+                    _extension: ep.container_extension,
+                    _sourceId: (seriesInfo as any)?.sourceId,
+                    _serverUrl: (seriesInfo as any)?.serverUrl,
+                    _username: (seriesInfo as any)?.username,
+                    _password: (seriesInfo as any)?.password,
+                  }
+                  onPlay(epItem)
+                }}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', width: '100%',
+                    borderRadius: 7, background: 'transparent', border: 'none', cursor: 'pointer',
+                    textAlign: 'left', transition: 'background 0.1s',
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-card)' }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+                >
+                  {/* Episode thumbnail */}
+                  {ep.poster ? (
+                    <img src={ep.poster} alt="" style={{ width: 72, height: 40, borderRadius: 5, objectFit: 'cover', flexShrink: 0 }} />
+                  ) : (
+                    <div style={{
+                      width: 72, height: 40, borderRadius: 5, flexShrink: 0,
+                      background: 'var(--color-card)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    }}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="var(--color-text-muted)"><polygon points="5 3 19 12 5 21 5 3" /></svg>
+                    </div>
+                  )}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ fontSize: 12, fontWeight: 500, color: 'var(--color-text-primary)', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--color-text-muted)', marginRight: 6 }}>E{ep.episode_num}</span>
+                      {ep.title}
+                    </p>
+                    {ep.duration && <p style={{ fontSize: 10, color: 'var(--color-text-muted)', margin: '2px 0 0' }}>{ep.duration}</p>}
+                  </div>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="var(--color-text-muted)" style={{ flexShrink: 0 }}>
+                    <polygon points="5 3 19 12 5 21 5 3" />
+                  </svg>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ── Right column: Metadata (same for all types) ──────── */}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         {/* ── Hero: full-width image with title overlaid ─────────────── */}
         <div style={{ position: 'relative', flexShrink: 0, height: 200, overflow: 'hidden', background: 'var(--color-card)' }}>
           {heroImg ? (
@@ -230,19 +361,19 @@ export function ContentDetail({ item, onPlay, onClose }: Props) {
         {/* ── Scrollable body ────────────────────────────────────────── */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '14px 18px 28px' }}>
 
-          {/* Breadcrumb: Source > Type > Category */}
+          {/* Breadcrumb: Source > Type > Category · .ext */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 16, flexWrap: 'wrap' }}>
             {primarySource && sourceColor && (
               <>
-                <span style={{ fontSize: 11, fontWeight: 600, color: sourceColor.accent }}>{primarySource.name}</span>
+                <CrumbLink color={sourceColor.accent} onClick={() => onNavigate?.({ sourceId: primarySourceId })}>{primarySource.name}</CrumbLink>
                 <Chevron />
               </>
             )}
-            <span style={{ fontSize: 11, color: meta.color, fontWeight: 500 }}>{meta.label}</span>
+            <CrumbLink color={meta.color} onClick={() => onNavigate?.({ type: item.type as any })}>{meta.label}</CrumbLink>
             {categoryName && (
               <>
                 <Chevron />
-                <span style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>{categoryName}</span>
+                <CrumbLink color="var(--color-text-secondary)" onClick={() => onNavigate?.({ type: item.type as any, category: categoryName })}>{categoryName}</CrumbLink>
               </>
             )}
             {containerExt && (
@@ -343,85 +474,43 @@ export function ContentDetail({ item, onPlay, onClose }: Props) {
             </div>
           )}
 
-          {/* ── Episode browser (series only) ─────────────────────────── */}
-          {item.type === 'series' && (
-            <div style={{ marginBottom: 16 }}>
-              <SectionLabel>Episodes</SectionLabel>
+          {/* Star rating */}
+          {item.type !== 'live' && (
+            <StarRating
+              contentId={item.id}
+              currentRating={(userData as any)?.rating ?? null}
+              onRate={(r) => api.user.setRating(item.id, r)}
+            />
+          )}
 
-              {seriesFetching && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 0', color: 'var(--color-text-muted)', fontSize: 12 }}>
-                  <div style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid rgba(124,77,255,0.25)', borderTopColor: '#7c4dff', animation: 'spin 0.8s linear infinite', flexShrink: 0 }} />
-                  Loading episodes…
-                </div>
-              )}
-
-              {!seriesFetching && seasonKeys.length === 0 && (
-                <p style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>No episodes found</p>
-              )}
-
-              {seasonKeys.length > 0 && (
-                <>
-                  {/* Season tabs */}
-                  {seasonKeys.length > 1 && (
-                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 10 }}>
-                      {seasonKeys.map((s) => (
-                        <button key={s} onClick={() => setActiveSeason(s)}
-                          style={{
-                            padding: '3px 10px', borderRadius: 6, fontSize: 11, fontWeight: 500,
-                            background: currentSeason === s ? 'var(--color-primary-dim)' : 'var(--color-card)',
-                            color: currentSeason === s ? 'var(--color-primary)' : 'var(--color-text-secondary)',
-                            border: `1px solid ${currentSeason === s ? 'color-mix(in srgb, var(--color-primary) 30%, transparent)' : 'var(--color-border)'}`,
-                            cursor: 'pointer',
-                          }}>
-                          S{s}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Episode list */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    {episodes.map((ep) => (
-                      <button key={ep.id} onClick={() => {
-                        const epItem: any = {
-                          id: `episode:${ep.id}`,
-                          type: 'episode',
-                          title: `S${ep.season}E${ep.episode_num} · ${ep.title}`,
-                          _streamId: ep.id,
-                          _extension: ep.container_extension,
-                          _sourceId: (seriesInfo as any)?.sourceId,
-                          _serverUrl: (seriesInfo as any)?.serverUrl,
-                          _username: (seriesInfo as any)?.username,
-                          _password: (seriesInfo as any)?.password,
-                        }
-                        onPlay(epItem)
-                      }}
-                        style={{
-                          display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px',
-                          borderRadius: 7, background: 'transparent', border: 'none', cursor: 'pointer',
-                          textAlign: 'left', transition: 'background 0.1s',
-                        }}
-                        onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-card)' }}
-                        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
-                      >
-                        <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--color-text-muted)', flexShrink: 0, minWidth: 32 }}>
-                          E{ep.episode_num}
-                        </span>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <p style={{ fontSize: 12, color: 'var(--color-text-primary)', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {ep.title}
-                          </p>
-                          {ep.duration && <p style={{ fontSize: 10, color: 'var(--color-text-muted)', margin: 0 }}>{ep.duration}</p>}
-                        </div>
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="var(--color-text-muted)">
-                          <polygon points="5 3 19 12 5 21 5 3" />
-                        </svg>
-                      </button>
-                    ))}
-                  </div>
-                </>
-              )}
+          {/* Re-match on TMDB — available when content is enriched but might be wrong */}
+          {hasEnrichedData && item.type !== 'live' && !showManualSearch && (
+            <div style={{ marginBottom: 14 }}>
+              <span
+                onClick={() => setShowManualSearch(true)}
+                style={{ fontSize: 10, color: 'var(--color-text-muted)', cursor: 'pointer', transition: 'color 0.1s' }}
+                onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--color-primary)' }}
+                onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--color-text-muted)' }}
+              >
+                Wrong match? Search TMDB manually
+              </span>
             </div>
+          )}
+
+          {/* Manual TMDB search (re-match) */}
+          {showManualSearch && item.type !== 'live' && (
+            <ManualEnrichForm
+              contentId={item.id}
+              contentType={item.type as 'movie' | 'series'}
+              originalTitle={c.title}
+              onSuccess={() => {
+                setShowManualSearch(false)
+                setEnrichFailed(false)
+                qc.refetchQueries({ queryKey: ['content', item.id] })
+              }}
+              onCancel={() => setShowManualSearch(false)}
+              onSearching={(v) => setEnriching(v)}
+            />
           )}
 
           {/* Enrichment status */}
@@ -438,6 +527,7 @@ export function ContentDetail({ item, onPlay, onClose }: Props) {
             ) : enrichFailed ? (
               <ManualEnrichForm
                 contentId={item.id}
+                contentType={item.type as 'movie' | 'series'}
                 originalTitle={c.title}
                 onSuccess={() => {
                   setEnrichFailed(false)
@@ -448,6 +538,7 @@ export function ContentDetail({ item, onPlay, onClose }: Props) {
             ) : null
           )}
         </div>
+        </div>{/* end right column */}
       </motion.div>
     </>
   )
@@ -490,22 +581,19 @@ function HeroIcon({ type, color }: { type: string; color: string }) {
   )
 }
 
-function PosterIcon({ type, color }: { type: string; color: string }) {
-  if (type === 'live') return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" opacity={0.5}>
-      <rect x="2" y="7" width="20" height="15" rx="2" /><polyline points="17 2 12 7 7 2" />
-    </svg>
-  )
-  if (type === 'series') return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" opacity={0.5}>
-      <rect x="2" y="2" width="20" height="20" rx="2" /><path d="M7 2v20M17 2v20M2 12h20" />
-    </svg>
-  )
+function CrumbLink({ children, color, onClick }: { children: React.ReactNode; color: string; onClick: () => void }) {
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" opacity={0.5}>
-      <rect x="2" y="2" width="20" height="20" rx="2" />
-      <polygon points="10 8 16 12 10 16 10 8" fill={color} stroke="none" opacity={0.6} />
-    </svg>
+    <span
+      onClick={onClick}
+      style={{
+        fontSize: 11, fontWeight: 500, color,
+        cursor: 'pointer', transition: 'opacity 0.1s',
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.7'; e.currentTarget.style.textDecoration = 'underline' }}
+      onMouseLeave={(e) => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.textDecoration = 'none' }}
+    >
+      {children}
+    </span>
   )
 }
 
@@ -522,13 +610,75 @@ function tryParse(s: string): string[] {
   try { return JSON.parse(s) } catch { return [s] }
 }
 
-function ManualEnrichForm({ contentId, originalTitle, onSuccess, onSearching }: {
+interface TmdbResult {
+  tmdbId: number
+  title: string
+  originalTitle?: string
+  year?: string
+  overview?: string
+  posterUrl?: string
+  rating?: number
+}
+
+function StarRating({ contentId, currentRating, onRate }: {
   contentId: string
+  currentRating: number | null
+  onRate: (rating: number | null) => void
+}) {
+  const [hover, setHover] = useState<number | null>(null)
+  const [rating, setRating] = useState(currentRating)
+
+  const handleClick = (star: number) => {
+    const newRating = rating === star ? null : star
+    setRating(newRating)
+    onRate(newRating)
+  }
+
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <SectionLabel>Your Rating</SectionLabel>
+      <div style={{ display: 'flex', gap: 4 }}>
+        {[1, 2, 3, 4, 5].map((star) => {
+          const filled = (hover ?? rating ?? 0) >= star
+          return (
+            <button key={star}
+              onMouseEnter={() => setHover(star)}
+              onMouseLeave={() => setHover(null)}
+              onClick={() => handleClick(star)}
+              style={{
+                background: 'none', border: 'none', padding: 2, cursor: 'pointer',
+                transition: 'transform 0.1s',
+                transform: hover === star ? 'scale(1.2)' : 'scale(1)',
+              }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24"
+                fill={filled ? '#ffab40' : 'none'}
+                stroke={filled ? '#ffab40' : 'var(--color-text-muted)'}
+                strokeWidth="1.5"
+              >
+                <path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+              </svg>
+            </button>
+          )
+        })}
+        {rating && (
+          <span style={{ fontSize: 10, color: 'var(--color-text-muted)', alignSelf: 'center', marginLeft: 4 }}>
+            {rating}/5
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function ManualEnrichForm({ contentId, contentType, originalTitle, onSuccess, onCancel, onSearching }: {
+  contentId: string
+  contentType: 'movie' | 'series'
   originalTitle: string
   onSuccess: () => void
+  onCancel?: () => void
   onSearching: (v: boolean) => void
 }) {
-  // Pre-clean the title for the input: strip prefix + year suffix
   const cleaned = originalTitle
     .replace(/^[A-Z]{2,4}[\s]*[\-–:|][\s]*/i, '')
     .replace(/\s*(HD|FHD|4K|SD|UHD)\s*$/i, '')
@@ -540,25 +690,56 @@ function ManualEnrichForm({ contentId, originalTitle, onSuccess, onSearching }: 
 
   const [title, setTitle] = useState(defaultTitle)
   const [yearStr, setYearStr] = useState(defaultYear)
+  const [results, setResults] = useState<TmdbResult[] | null>(null)
+  const [searching, setSearching] = useState(false)
+  const [picking, setPicking] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const handleSearch = async () => {
     if (!title.trim()) return
     setError(null)
-    onSearching(true)
+    setResults(null)
+    setSearching(true)
     try {
       const year = yearStr ? parseInt(yearStr) : undefined
-      const result = await api.enrichment.enrichManual({ contentId, title: title.trim(), year })
+      const res = await api.enrichment.searchTmdb({ title: title.trim(), year, type: contentType })
+      setSearching(false)
+      if (res?.success && res.results?.length > 0) {
+        setResults(res.results)
+      } else if (res?.error) {
+        setError(res.error)
+      } else {
+        setError('No results found. Try a different title.')
+      }
+    } catch (err) {
+      setSearching(false)
+      setError(`Search failed: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
+  const handlePick = async (tmdbId: number) => {
+    setPicking(true)
+    onSearching(true)
+    try {
+      const res = await api.enrichment.enrichById({ contentId, tmdbId })
       onSearching(false)
-      if (result?.success && result?.enrichedWithData) {
+      setPicking(false)
+      if (res?.success && res?.enrichedWithData) {
         onSuccess()
       } else {
-        setError('No match found on TMDB. Try a different title.')
+        setError('Failed to enrich with selected result.')
       }
     } catch {
       onSearching(false)
-      setError('Search failed. Check your connection.')
+      setPicking(false)
+      setError('Enrichment failed.')
     }
+  }
+
+  const inputStyle: React.CSSProperties = {
+    padding: '5px 8px', borderRadius: 6, fontSize: 11,
+    background: 'var(--color-bg)', border: '1px solid var(--color-border-strong)',
+    color: 'var(--color-text-primary)', outline: 'none',
   }
 
   return (
@@ -567,55 +748,97 @@ function ManualEnrichForm({ contentId, originalTitle, onSuccess, onSearching }: 
       background: 'var(--color-card)', border: '1px solid var(--color-border)',
       display: 'flex', flexDirection: 'column', gap: 8,
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--color-text-muted)" strokeWidth="2">
-          <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
-        </svg>
-        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-secondary)' }}>Search TMDB manually</span>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--color-text-muted)" strokeWidth="2">
+            <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+          <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-secondary)' }}>Search TMDB</span>
+        </div>
+        {onCancel && (
+          <span
+            onClick={onCancel}
+            style={{ fontSize: 10, color: 'var(--color-text-muted)', cursor: 'pointer' }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--color-text-primary)' }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--color-text-muted)' }}
+          >Cancel</span>
+        )}
       </div>
 
+      {/* Search inputs */}
       <div style={{ display: 'flex', gap: 6 }}>
         <input
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
+          value={title} onChange={(e) => setTitle(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') handleSearch(); e.stopPropagation() }}
-          placeholder="Movie title…"
-          style={{
-            flex: 1, padding: '5px 8px', borderRadius: 6, fontSize: 11,
-            background: 'var(--color-bg)', border: '1px solid var(--color-border-strong)',
-            color: 'var(--color-text-primary)', outline: 'none',
-          }}
+          placeholder="Title…"
+          style={{ ...inputStyle, flex: 1 }}
           onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--color-primary)' }}
           onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--color-border-strong)' }}
           autoFocus
         />
         <input
-          value={yearStr}
-          onChange={(e) => setYearStr(e.target.value.replace(/\D/g, '').slice(0, 4))}
+          value={yearStr} onChange={(e) => setYearStr(e.target.value.replace(/\D/g, '').slice(0, 4))}
           onKeyDown={(e) => { if (e.key === 'Enter') handleSearch(); e.stopPropagation() }}
           placeholder="Year"
-          style={{
-            width: 48, padding: '5px 6px', borderRadius: 6, fontSize: 11,
-            background: 'var(--color-bg)', border: '1px solid var(--color-border-strong)',
-            color: 'var(--color-text-primary)', outline: 'none', textAlign: 'center',
-          }}
+          style={{ ...inputStyle, width: 48, textAlign: 'center' }}
           onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--color-primary)' }}
           onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--color-border-strong)' }}
         />
-        <button
-          onClick={handleSearch}
+        <button onClick={handleSearch} disabled={searching}
           style={{
             padding: '5px 12px', borderRadius: 6, border: 'none',
             background: 'var(--color-primary)', color: '#fff',
             fontSize: 11, fontWeight: 600, cursor: 'pointer',
-            transition: 'opacity 0.1s',
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.85' }}
-          onMouseLeave={(e) => { e.currentTarget.style.opacity = '1' }}
-        >
-          Search
+            opacity: searching ? 0.5 : 1, transition: 'opacity 0.1s',
+          }}>
+          {searching ? '…' : 'Search'}
         </button>
       </div>
+
+      {/* Results list */}
+      {results && !picking && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 220, overflowY: 'auto' }}>
+          {results.map((r) => (
+            <button key={r.tmdbId} onClick={() => handlePick(r.tmdbId)}
+              style={{
+                display: 'flex', gap: 8, padding: '6px 8px', borderRadius: 7,
+                background: 'transparent', border: 'none', cursor: 'pointer',
+                textAlign: 'left', transition: 'background 0.1s',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-bg)' }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+            >
+              {r.posterUrl ? (
+                <img src={r.posterUrl} alt="" style={{ width: 32, height: 48, borderRadius: 4, objectFit: 'cover', flexShrink: 0 }} />
+              ) : (
+                <div style={{ width: 32, height: 48, borderRadius: 4, background: 'var(--color-surface)', flexShrink: 0 }} />
+              )}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-primary)', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {r.title}
+                  {r.year && <span style={{ fontWeight: 400, color: 'var(--color-text-muted)', marginLeft: 4 }}>({r.year})</span>}
+                </p>
+                {r.rating && (
+                  <span style={{ fontSize: 10, color: 'var(--color-warning)' }}>{Number(r.rating).toFixed(1)}</span>
+                )}
+                {r.overview && (
+                  <p style={{ fontSize: 10, color: 'var(--color-text-muted)', margin: '2px 0 0', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+                    {r.overview}
+                  </p>
+                )}
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {picking && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0' }}>
+          <div style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid rgba(124,77,255,0.25)', borderTopColor: '#7c4dff', animation: 'spin 0.8s linear infinite', flexShrink: 0 }} />
+          <span style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>Applying metadata…</span>
+        </div>
+      )}
 
       {error && (
         <p style={{ fontSize: 10, color: 'var(--color-text-muted)', margin: 0 }}>{error}</p>

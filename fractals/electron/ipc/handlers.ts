@@ -309,59 +309,75 @@ export function registerHandlers() {
       console.log(`[Search] Tokens: ${tokens.map(t => `"${t.word}"${t.exact ? ' (exact)' : ' (prefix)'}`).join(', ')} → FTS: ${ftsQuery}`)
     }
 
+    // Query contains special chars that FTS5 strips → LIKE should run first
+    const hasSpecialChars = /[[\]()_\-]/.test(query)
+
     const runSearch = (typeFilter: string, typeLimit: number): any[] => {
-      // 1. FTS5 — prefix/exact matches (fast, ranked)
-      let ftsResults: any[] = []
-      try {
-        const ftsSql = `
-          SELECT DISTINCT c.*, fts.rank, c.primary_source_id as source_ids
-          FROM content_fts fts
-          JOIN content c ON c.id = fts.content_id
-          ${catJoin}
-          WHERE content_fts MATCH ?
-          ${typeFilter}
-          ${sourceFilter}
-          ORDER BY fts.rank
-          LIMIT ? OFFSET ?
-        `
-        ftsResults = sqlite.prepare(ftsSql).all(...catParams, ftsQuery, ...filterIds, typeLimit, offset) as any[]
-      } catch (err) {
-        console.warn(`[Search] FTS failed for "${query}":`, (err as Error).message)
-      }
-
-      // 2. LIKE — substring matches (catches "dar" inside "undark")
-      //    Only fill remaining slots to avoid redundant work
-      const remaining = typeLimit - ftsResults.length
-      if (remaining <= 0) return ftsResults
-
-      const ftsIds = new Set(ftsResults.map((r: any) => r.id))
-      // Split query into words — each word must appear somewhere in the title
-      // "dar kni" → title LIKE '%dar%' AND title LIKE '%kni%' → matches "Dark Knight"
+      // ── LIKE search (substring, preserves special characters) ──────────
       const words = query.split(/\s+/).filter(Boolean)
       const likeConditions = words.map(() => `c.title LIKE ?`).join(' AND ')
       const likeParams = words.map(w => `%${w}%`)
-      const likeSql = `
-        SELECT DISTINCT c.*, c.primary_source_id as source_ids
-        FROM content c
-        ${catJoin}
-        WHERE ${likeConditions}
-        ${typeFilter}
-        ${sourceFilter}
-        ORDER BY c.updated_at DESC
-        LIMIT ? OFFSET ?
-      `
-      const likeResults = sqlite.prepare(likeSql).all(...catParams, ...likeParams, ...filterIds, remaining + ftsIds.size, offset) as any[]
+      const runLike = (limit: number, excludeIds?: Set<string>): any[] => {
+        const likeSql = `
+          SELECT DISTINCT c.*, c.primary_source_id as source_ids
+          FROM content c
+          ${catJoin}
+          WHERE ${likeConditions}
+          ${typeFilter}
+          ${sourceFilter}
+          ORDER BY c.updated_at DESC
+          LIMIT ? OFFSET ?
+        `
+        const rows = sqlite.prepare(likeSql).all(...catParams, ...likeParams, ...filterIds, limit + (excludeIds?.size ?? 0), offset) as any[]
+        if (!excludeIds) return rows.slice(0, limit)
+        const filtered: any[] = []
+        for (const r of rows) {
+          if (!excludeIds.has(r.id)) {
+            filtered.push(r)
+            if (filtered.length >= limit) break
+          }
+        }
+        return filtered
+      }
 
-      // Merge: FTS first (ranked), then LIKE results not already in FTS
-      const merged = [...ftsResults]
-      for (const r of likeResults) {
-        if (!ftsIds.has(r.id)) {
-          merged.push(r)
-          if (merged.length >= typeLimit) break
+      // ── FTS5 search (ranked word matching) ─────────────────────────────
+      const runFts = (limit: number, excludeIds?: Set<string>): any[] => {
+        try {
+          const ftsSql = `
+            SELECT DISTINCT c.*, fts.rank, c.primary_source_id as source_ids
+            FROM content_fts fts
+            JOIN content c ON c.id = fts.content_id
+            ${catJoin}
+            WHERE content_fts MATCH ?
+            ${typeFilter}
+            ${sourceFilter}
+            ORDER BY fts.rank
+            LIMIT ? OFFSET ?
+          `
+          const rows = sqlite.prepare(ftsSql).all(...catParams, ftsQuery, ...filterIds, limit + (excludeIds?.size ?? 0), offset) as any[]
+          if (!excludeIds) return rows.slice(0, limit)
+          const filtered: any[] = []
+          for (const r of rows) {
+            if (!excludeIds.has(r.id)) {
+              filtered.push(r)
+              if (filtered.length >= limit) break
+            }
+          }
+          return filtered
+        } catch (err) {
+          console.warn(`[Search] FTS failed for "${query}":`, (err as Error).message)
+          return []
         }
       }
 
-      return merged
+      // ── Merge: primary fills first, secondary fills remaining ──────────
+      const primary = hasSpecialChars ? runLike(typeLimit) : runFts(typeLimit)
+      const remaining = typeLimit - primary.length
+      if (remaining <= 0) return primary
+
+      const primaryIds = new Set(primary.map((r: any) => r.id))
+      const secondary = hasSpecialChars ? runFts(remaining, primaryIds) : runLike(remaining, primaryIds)
+      return [...primary, ...secondary]
     }
 
     return runSearch(type ? `AND c.type = '${type}'` : '', limit)
@@ -826,6 +842,61 @@ export function registerHandlers() {
     `).get(args.contentId) as any
     const enrichedWithData = !!(updated?.plot || updated?.director || updated?.cast || updated?.genres)
     console.log(`[Enrich] Manual done for ${args.contentId}, gotData=${enrichedWithData}`)
+    return { success: true, content: updated, enrichedWithData }
+  })
+
+  // Search TMDB and return multiple results for user to choose from
+  ipcMain.handle('enrichment:search-tmdb', async (_event, args: { title: string; year?: number; type: 'movie' | 'series' }) => {
+    if (!tmdbService.hasKey()) return { success: false, error: 'No TMDB API key configured' }
+    try {
+      const results = args.type === 'movie'
+        ? await tmdbService.searchMovieMulti(args.title, args.year)
+        : await tmdbService.searchTvMulti(args.title, args.year)
+
+      const imageBase = 'https://image.tmdb.org/t/p'
+      return {
+        success: true,
+        results: results.map((r: any) => ({
+          tmdbId: r.id,
+          title: r.title ?? r.name,
+          originalTitle: r.original_title ?? r.original_name,
+          year: (r.release_date ?? r.first_air_date)?.substring(0, 4) ?? null,
+          overview: r.overview?.substring(0, 150) ?? null,
+          posterUrl: r.poster_path ? `${imageBase}/w185${r.poster_path}` : null,
+          rating: r.vote_average > 0 ? r.vote_average : null,
+        })),
+      }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
+
+  // Enrich a content item with a specific TMDB ID chosen by the user
+  ipcMain.handle('enrichment:enrich-by-id', async (_event, args: { contentId: string; tmdbId: number }) => {
+    if (!tmdbService.hasKey()) return { success: false, error: 'No TMDB API key configured' }
+
+    const sqlite = getSqlite()
+    const item = sqlite.prepare('SELECT * FROM content WHERE id = ?').get(args.contentId) as any
+    if (!item) return { success: false, error: 'Content not found' }
+
+    console.log(`[Enrich] User chose TMDB ID ${args.tmdbId} for "${item.title}"`)
+    try {
+      await tmdbService.enrichById(args.contentId, args.tmdbId, item.type)
+    } catch (err) {
+      console.error(`[Enrich] enrichById failed:`, err)
+      return { success: false, error: String(err) }
+    }
+
+    const updated = sqlite.prepare(`
+      SELECT c.*, c.primary_source_id as source_ids,
+             GROUP_CONCAT(DISTINCT cat.name) as category_name
+      FROM content c
+      LEFT JOIN content_categories cc ON cc.content_id = c.id
+      LEFT JOIN categories cat ON cat.id = cc.category_id
+      WHERE c.id = ?
+      GROUP BY c.id
+    `).get(args.contentId) as any
+    const enrichedWithData = !!(updated?.plot || updated?.director || updated?.cast || updated?.genres)
     return { success: true, content: updated, enrichedWithData }
   })
 

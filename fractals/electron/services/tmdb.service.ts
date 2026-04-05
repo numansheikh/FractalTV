@@ -128,17 +128,27 @@ export class TmdbService {
   }
 
   async searchMovie(title: string, year?: number): Promise<TmdbMovie | null> {
+    const results = await this.searchMovieMulti(title, year)
+    return results[0] ?? null
+  }
+
+  async searchMovieMulti(title: string, year?: number, limit = 8): Promise<TmdbMovie[]> {
     const params: Record<string, string> = { query: title }
     if (year) params.year = String(year)
     const data = await this.fetch<{ results: TmdbMovie[] }>('/search/movie', params)
-    return data?.results?.[0] ?? null
+    return (data?.results ?? []).slice(0, limit)
   }
 
   async searchTv(title: string, year?: number): Promise<TmdbTv | null> {
+    const results = await this.searchTvMulti(title, year)
+    return results[0] ?? null
+  }
+
+  async searchTvMulti(title: string, year?: number, limit = 8): Promise<TmdbTv[]> {
     const params: Record<string, string> = { query: title }
     if (year) params.first_air_date_year = String(year)
     const data = await this.fetch<{ results: TmdbTv[] }>('/search/tv', params)
-    return data?.results?.[0] ?? null
+    return (data?.results ?? []).slice(0, limit)
   }
 
   async getMovieDetails(tmdbId: number): Promise<TmdbMovieDetails | null> {
@@ -220,6 +230,96 @@ export class TmdbService {
       await this.enrichMovie(sqlite, item, [searchTitle], year)
     } else if (type === 'series') {
       await this.enrichSeries(sqlite, item, [searchTitle], year)
+    }
+  }
+
+  /**
+   * Enrich a content item with a specific TMDB ID chosen by the user.
+   */
+  async enrichById(contentId: string, tmdbId: number, type: string): Promise<void> {
+    const sqlite = getSqlite()
+    const item = sqlite.prepare('SELECT * FROM content WHERE id = ?').get(contentId) as any
+    if (!item) return
+
+    // Reset enriched flag so the enrichment writes
+    sqlite.prepare('UPDATE content SET enriched = 0 WHERE id = ?').run(contentId)
+
+    if (type === 'movie') {
+      const details = await this.getMovieDetails(tmdbId)
+      if (!details) { this.markEnriched(sqlite, contentId); return }
+
+      const cast = details.credits?.cast?.sort((a, b) => a.order - b.order).slice(0, 12).map(c => c.name) ?? []
+      const director = details.credits?.crew.find(c => c.job === 'Director')?.name ?? null
+      const genres = details.genres.map(g => g.name)
+      const keywords = details.keywords?.keywords.slice(0, 20).map(k => k.name) ?? []
+
+      sqlite.prepare(`
+        UPDATE content SET
+          tmdb_id = ?, original_title = ?, year = ?, plot = ?,
+          poster_url = ?, backdrop_url = ?,
+          rating_tmdb = ?, genres = ?, languages = ?,
+          director = ?, cast = ?, keywords = ?,
+          runtime = ?, enriched = 1, enriched_at = unixepoch()
+        WHERE id = ?
+      `).run(
+        details.id,
+        details.original_title !== details.title ? details.original_title : null,
+        details.release_date ? parseInt(details.release_date.substring(0, 4)) : item.year,
+        details.overview || null,
+        this.posterUrl(details.poster_path),
+        this.backdropUrl(details.backdrop_path),
+        details.vote_average > 0 ? details.vote_average : null,
+        genres.length ? JSON.stringify(genres) : null,
+        details.original_language ?? null,
+        director,
+        cast.length ? JSON.stringify(cast) : null,
+        keywords.length ? JSON.stringify(keywords) : null,
+        details.runtime || null,
+        contentId,
+      )
+
+      this.updateFts(sqlite, contentId, {
+        title: details.title, originalTitle: details.original_title,
+        plot: details.overview, cast: cast.join(' '), director,
+        genres: genres.join(' '), keywords: keywords.join(' '),
+      })
+    } else if (type === 'series') {
+      const details = await this.getTvDetails(tmdbId)
+      if (!details) { this.markEnriched(sqlite, contentId); return }
+
+      const cast = details.credits?.cast?.sort((a, b) => a.order - b.order).slice(0, 12).map(c => c.name) ?? []
+      const genres = details.genres.map(g => g.name)
+      const keywords = details.keywords?.results.slice(0, 20).map(k => k.name) ?? []
+
+      sqlite.prepare(`
+        UPDATE content SET
+          tmdb_id = ?, original_title = ?, year = ?, plot = ?,
+          poster_url = ?, backdrop_url = ?,
+          rating_tmdb = ?, genres = ?, languages = ?,
+          cast = ?, keywords = ?, runtime = ?,
+          enriched = 1, enriched_at = unixepoch()
+        WHERE id = ?
+      `).run(
+        details.id,
+        details.original_name !== details.name ? details.original_name : null,
+        details.first_air_date ? parseInt(details.first_air_date.substring(0, 4)) : item.year,
+        details.overview || null,
+        this.posterUrl(details.poster_path),
+        this.backdropUrl(details.backdrop_path),
+        details.vote_average > 0 ? details.vote_average : null,
+        genres.length ? JSON.stringify(genres) : null,
+        details.original_language ?? null,
+        cast.length ? JSON.stringify(cast) : null,
+        keywords.length ? JSON.stringify(keywords) : null,
+        details.episode_run_time?.[0] ?? null,
+        contentId,
+      )
+
+      this.updateFts(sqlite, contentId, {
+        title: details.name, originalTitle: details.original_name,
+        plot: details.overview, cast: cast.join(' '), director: null,
+        genres: genres.join(' '), keywords: keywords.join(' '),
+      })
     }
   }
 

@@ -43,11 +43,16 @@ export function SettingsDialog({ onClose }: Props) {
   const [enrichMsg, setEnrichMsg] = useState<string | null>(null)
   const [enrichProgress, setEnrichProgress] = useState<{ done: number; total: number } | null>(null)
 
-  // Close on Escape
+  // Close on Escape — capture phase so it doesn't also clear search
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopImmediatePropagation()
+        onClose()
+      }
+    }
+    window.addEventListener('keydown', handler, true)
+    return () => window.removeEventListener('keydown', handler, true)
   }, [onClose])
 
   const { data: enrichStatus } = useQuery({

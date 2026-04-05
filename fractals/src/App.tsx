@@ -3,13 +3,13 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AnimatePresence } from 'framer-motion'
 import { api } from '@/lib/api'
 import { useSourcesStore, Source, SyncProgress } from '@/stores/sources.store'
+import { useSearchStore } from '@/stores/search.store'
 import { SearchBar } from '@/components/search/SearchBar'
 import { BrowseView } from '@/components/browse/BrowseView'
 import { BrowseViewH } from '@/components/browse/BrowseViewH'
 import { AddSourceDialog } from '@/components/settings/AddSourceDialog'
 import { Player } from '@/components/player/Player'
 import { ContentDetail } from '@/components/content/ContentDetail'
-import { SeriesView } from '@/components/content/SeriesView'
 import { SettingsDialog } from '@/components/settings/SettingsDialog'
 import { ContentItem } from '@/components/browse/ContentCard'
 import { ErrorBoundary } from '@/components/shared/ErrorBoundary'
@@ -29,16 +29,38 @@ export function App() {
 }
 
 function AppShell() {
-  const { sources, setSources, updateSource, setSyncProgress } = useSourcesStore()
+  const { sources, setSources, updateSource, setSyncProgress, toggleSourceFilter, clearSourceFilter, selectedSourceIds } = useSourcesStore()
+  const searchStore = useSearchStore()
   const [showAddSource, setShowAddSource] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [selectedContent, setSelectedContent] = useState<ContentItem | null>(null)
-  const [selectedSeries, setSelectedSeries] = useState<ContentItem | null>(null)
   const [playingContent, setPlayingContent] = useState<ContentItem | null>(null)
   const [layoutH, setLayoutH] = useState(() => {
     const saved = localStorage.getItem('fractals-layout-h')
     return saved !== null ? saved === 'true' : true
   })
+
+  // Breadcrumb navigation: close overlay and set browse filters
+  const handleBreadcrumbNav = (nav: { type?: 'live' | 'movie' | 'series'; sourceId?: string; category?: string }) => {
+    setSelectedContent(null)
+    // Set type filter
+    if (nav.type) {
+      searchStore.setType(nav.type)
+    } else {
+      searchStore.setType('all')
+    }
+    // Set category filter
+    if (nav.category) {
+      searchStore.setActiveCategory(nav.category)
+    }
+    // Set source filter
+    if (nav.sourceId) {
+      clearSourceFilter()
+      toggleSourceFilter(nav.sourceId)
+    }
+    // Clear search query
+    searchStore.setQuery('')
+  }
 
   useEffect(() => {
     api.sources.list().then((list) => {
@@ -148,7 +170,6 @@ function AppShell() {
           onRemoveSource={handleRemove}
           onSelectContent={(item) => {
             if (item.type === 'live') setPlayingContent(item)
-            else if (item.type === 'series') setSelectedSeries(item)
             else setSelectedContent(item)
           }}
         />
@@ -160,7 +181,6 @@ function AppShell() {
           onRemoveSource={handleRemove}
           onSelectContent={(item) => {
             if (item.type === 'live') setPlayingContent(item)
-            else if (item.type === 'series') setSelectedSeries(item)
             else setSelectedContent(item)
           }}
         />
@@ -179,24 +199,15 @@ function AppShell() {
         )}
       </AnimatePresence>
 
-      {/* Series view — full page */}
+      {/* Content detail panel (movies + series) — stays mounted behind player */}
       <AnimatePresence>
-        {selectedSeries && !playingContent && (
-          <SeriesView
-            item={selectedSeries}
-            onPlay={(item) => { setPlayingContent(item); setSelectedSeries(null) }}
-            onBack={() => setSelectedSeries(null)}
-          />
-        )}
-      </AnimatePresence>
-
-      {/* Content detail panel */}
-      <AnimatePresence>
-        {selectedContent && !playingContent && (
+        {selectedContent && (
           <ContentDetail
             item={selectedContent}
-            onPlay={(item) => { setPlayingContent(item); setSelectedContent(null) }}
+            onPlay={(item) => setPlayingContent(item)}
             onClose={() => setSelectedContent(null)}
+            onNavigate={handleBreadcrumbNav}
+            isPlaying={!!playingContent}
           />
         )}
       </AnimatePresence>

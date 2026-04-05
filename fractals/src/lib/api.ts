@@ -110,6 +110,10 @@ export const api = {
       isElectron ? (window.api as any).enrichment.enrichSingle(contentId) : Promise.resolve({ success: false }),
     enrichManual: (args: { contentId: string; title: string; year?: number }) =>
       isElectron ? (window.api as any).enrichment.enrichManual(args) : Promise.resolve({ success: false }),
+    searchTmdb: (args: { title: string; year?: number; type: 'movie' | 'series' }) =>
+      isElectron ? (window.api as any).enrichment.searchTmdb(args) : Promise.resolve({ success: false }),
+    enrichById: (args: { contentId: string; tmdbId: number }) =>
+      isElectron ? (window.api as any).enrichment.enrichById(args) : Promise.resolve({ success: false }),
   },
 
   series: {
