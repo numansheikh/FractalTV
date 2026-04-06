@@ -338,15 +338,13 @@ These are defined in `:root` as dark defaults, then **bridged** via `[data-theme
 - Not a social app — no sharing, no public profiles, no cloud sync (for now)
 - Not a content provider — ships with zero content, user brings their own sources
 
-## Implementation status (as of 2026-04-06)
+## Implementation status (as of 2026-04-06) — v0.2.0
 
-**Complete:** Phases 1–6 (scaffold, DB + Xtream sync, TMDB enrichment, FTS5 search, browse/search UI, video player). Phase 12A (user data IPC handlers).
-**Partial:** Phase 10 settings (appearance, player, enrichment done; profiles + EPG config pending). Phase 12 user data (12A done; 12B–E pending).
+**Complete:** Phases 1–6 (scaffold, DB + Xtream sync, TMDB enrichment, FTS5 search, browse/search UI, video player). Phase 12 user data (favorites, watchlist, ratings, history, continue watching — fully wired).
+**Partial:** Phase 10 settings (appearance, player, enrichment done; profiles + EPG config pending).
 **Not started:** Phase 7 (EPG/catchup), Phase 8 (semantic search), Phase 9 (M3U), Phase 11 (Capacitor/mobile).
 
-### UI Redesign — completed features (as of 2026-04-06)
-
-The full UI was redesigned on branch `rewrite/new-architecture`. Key implemented features beyond the original phases:
+### v0.2.0 — completed features
 
 **Layout**
 - Three-zone layout: NavRail (48px, left) + content area + right-side slide panels
@@ -356,19 +354,17 @@ The full UI was redesigned on branch `rewrite/new-architecture`. Key implemented
 
 **Home screen — two modes**
 - `HomeView.tsx` — search bar pinned to the bottom, source dots at bottom-right (flex-wrap, 2 per row)
-- **Discover mode** — "Favorite Channels" horizontal row + "Continue Watching" rows (movies/series in progress, hidden when empty)
-- **My Channels mode** — drag-to-reorder grid of favorite channels only (no Continue Watching)
+- **Discover mode** — "Favorite Channels" + "Continue Watching" (movies, series) + "Watch Later" (watchlist) horizontal rows; hidden when empty
+- **My Channels mode** — drag-to-reorder grid of favorite channels only
 - Mode persisted in `app.store` (`homeMode`). Toggled via Settings → Appearance
 - First-favorite prompt: shown once when user adds their first channel favorite while in Discover mode
 - Empty channels mode: dedicated empty state with "Browse channels" + "Switch to Discover" actions
 
-**Favorites system**
-- `__favorites__` sentinel value for `categoryFilter` — used as default when entering any browse view
-- Default category is Favorites (not All) across live/films/series
+**Favorites / watchlist system**
+- `__favorites__` sentinel value for `categoryFilter` — default when entering any browse view
 - Favorites chip never shown in FilterBar (it's the default state, not a filter)
-- Removing any non-favorites category chip returns to `__favorites__`, not null/All
 - `BrowseSidebar` pinned section: "Favorites" (heart icon, default) + "All" above scrolling category list
-- ContentArea: favorites query with client-side source filtering (API doesn't support sourceIds)
+- ContentArea empty state is context-aware: no sources / no favorites / empty category / no search results
 - Search query guards against sending `__favorites__` as categoryName to the DB
 
 **Drag-to-reorder My Channels**
@@ -376,17 +372,31 @@ The full UI was redesigned on branch `rewrite/new-architecture`. Key implemented
 - `fav_sort_order INTEGER` column in `user_data` (SQLite migration, safe try/catch)
 - `user:favorites` IPC orders by `COALESCE(fav_sort_order, 999999) ASC, last_watched_at DESC`
 - `user:reorder-favorites` IPC persists new order in a transaction
-- Local `orderedIds` state for optimistic UI; synced to server async
+- Local `orderedIds` state for optimistic UI; rollback on API error
 
-**User data features (Phase 12)**
-- Heart toggle in list-view rows (VirtualGrid `ChannelListRow`) with optimistic update
-- Favorites, watchlist, continue watching, history — all IPC-wired
+**User data (Phase 12 — complete)**
+- Favorites, watchlist, ratings, history, positions, continue watching — all IPC-wired
+- Optimistic updates with rollback on all mutations
+- Library view: Favorites / Watchlist / History / Continue Watching tabs
+- Settings → Data tab: clear history / favorites / all data / reset preferences
 - `user_data.fav_sort_order` for manual channel ordering
+- Heart toggle in VirtualGrid list-view rows
 
-**Theming — simplified**
-- Two themes only: `dark` (default) and `fractals-day` (light)
+**Episode persistence (critical fix)**
+- Episodes were never written to `content` table → `user_data` FK constraint caused silent position-save failure
+- `series:get-info` handler now upserts all episodes into `content` + `content_sources` on series open
+- Episode IDs use `{sourceId}:episode:{streamId}` format matching DB rows
+- `loadBulk` called for visible episodes so progress bars render immediately
+
+**Player**
+- Position saved on pause, on 10s interval, and on close (unmount)
+- Fixed race condition: position IPC now resolves before query cache is invalidated
+- Both `['home-continue']` and `['library','continue-watching']` invalidated on player close
+- `minWatchSeconds` threshold (default 5s) prevents accidental history entries
+
+**Theming**
+- Two themes: `dark` (default) and `fractals-day` (light)
 - V2 token system (`--bg-0..4`, `--text-0..3`, `--border-*`, `--accent-*`) used everywhere
-- Source color border guard: only shown when 2+ active sources (`showSourceBadge` / `showSourceBar`)
 - Sidebar uses `--bg-1` (panel level), cards use `--bg-2` — maintains visual separation
 
 ## Key architecture decisions (implemented)
@@ -409,31 +419,29 @@ The full UI was redesigned on branch `rewrite/new-architecture`. Key implemented
 
 ## Known limitations & open work
 
-- **International character search (partial)** — European diacritics (accented Latin: é, ü, ñ, etc.) are handled via `any-ascii` transliteration at index time, so searching "Borgen" finds "Börgen". Arabic, Hebrew, Cyrillic, and CJK scripts are not yet transliterated.
+- **International character search (partial)** — European diacritics handled via `any-ascii`. Arabic, Hebrew, Cyrillic, CJK not yet transliterated.
 
-- **M3U/M3U8 playlist support not yet implemented** — Only Xtream Codes accounts can be added as sources. M3U URL + local file import is Phase 9.
+- **M3U/M3U8 playlist support not yet implemented** — Only Xtream Codes accounts. Phase 9.
 
-- **Semantic / embedding search not yet wired** — `embeddings` table and `sqlite-vec` extension are in the schema. The embedding generation worker has not been built. All search is currently keyword-only via FTS5. Phase 8.
+- **Semantic / embedding search not yet wired** — Schema and extension in place; worker not built. Phase 8.
 
-- **EPG / program guide not yet implemented** — `epg` table exists in schema. No XMLTV parser, no program overlay in player, no catch-up/timeshift playback. Phase 7.
+- **EPG / program guide not yet implemented** — Schema exists; no XMLTV parser, no catchup. Phase 7.
 
-- **Watchlist has no dedicated view** — The bookmark toggle in ContentDetail writes to `user_data` but there is no "Watchlist" browse section yet.
+- **Episodes not indexed in FTS5** — `series:get-info` upserts episodes into `content` but not `content_fts`. Episode titles not searchable by keyword. Low priority (users search series not episodes).
 
-- **Continue Watching has no dedicated browse section** — Works on the Home screen (Discover mode) and in Library, but not as a browsable category in live/films/series views.
+- **Continue Watching not browsable in live/films/series views** — Works on Home and Library only.
 
-- **Capacitor / mobile not yet implemented** — The codebase is Electron-only. `CapacitorService` abstraction has not been built. Android, iOS, and Tizen targets are Phase 11.
+- **Capacitor / mobile not yet implemented** — Phase 11.
 
 ## Known UI bugs (open — not yet fixed)
 
-- **Home search bar coexists with CommandBar** — Home has its own bottom search bar. CommandBar is hidden when `activeView === 'home' && !query`. When the user types, CommandBar appears at the top alongside the bottom bar. The two inputs share `useSearchStore.query` and don't conflict functionally, but visually it's redundant. Tracked for future polish.
+- **Home search bar coexists with CommandBar** — Home has its own bottom search bar; CommandBar appears at top when typing. Two inputs share `useSearchStore.query`, no functional conflict but visually redundant.
 
-- **Sort not persisted** — Sort order (`useState('updated:desc')` in AppShell) resets to default on every app launch. Should be persisted in `app.store`.
+- **Left source bar on PosterCard may conflict with hover border** — `borderLeft: 3px` + `border: 1px` shorthand resets border-left width. Relies on V8 insertion order. Consider a pseudo-element stripe instead.
 
-- **Left source bar on PosterCard may conflict with hover border** — `borderLeft: 3px solid {accent}` + `border: 1px solid {hover}`: the 1px `border` shorthand resets border-left width to 1px, then `borderLeft` re-applies 3px. Relies on V8 insertion order — fragile. Consider a pseudo-element stripe instead.
+- **`--color-nav-bg` / `--color-nav-text` defined in themes but never consumed** — NavRail uses `--bg-1`. Dead CSS.
 
-- **`--color-nav-bg` / `--color-nav-text` defined in themes but never consumed** — NavRail uses `--bg-1` instead. Dead CSS; remove or wire up.
-
-- **`addRecentSearch` / `removeRecentSearch` actions defined but never called** — The recent searches UI was removed from HomeView. The store actions and persisted `recentSearches` array remain but are unused dead code.
+- **`addRecentSearch` / `removeRecentSearch` actions dead** — Recent searches UI was removed. Store actions and persisted array remain unused.
 
 ## Data quirks to be aware of
 
