@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useSourcesStore } from '@/stores/sources.store'
 import { useUserStore } from '@/stores/user.store'
 import { buildColorMap } from '@/lib/sourceColors'
@@ -16,15 +17,24 @@ export function ChannelCard({ item, onClick }: Props) {
   const userData = useUserStore((s) => s.data[item.id])
   const setFav = useUserStore((s) => s.setFavorite)
   const [hovered, setHovered] = useState(false)
+  const qc = useQueryClient()
   const primarySourceId = item.primarySourceId ?? item.primary_source_id
   const sourceColor = primarySourceId ? colorMap[primarySourceId] : undefined
   const poster = item.posterUrl ?? item.poster_url
   const isFavorite = userData?.favorite === 1
 
-  const toggleFav = (e: React.MouseEvent) => {
+  const toggleFav = async (e: React.MouseEvent) => {
     e.stopPropagation()
+    const removing = isFavorite
     setFav(item.id, !isFavorite)
-    api.user.toggleFavorite(item.id)
+    if (removing) {
+      const strip = (old: ContentItem[] | undefined) => old?.filter((i) => i.id !== item.id)
+      qc.setQueriesData<ContentItem[]>({ queryKey: ['browse-favorites'] }, strip)
+      qc.setQueriesData<ContentItem[]>({ queryKey: ['library', 'favorites'] }, strip)
+    }
+    await api.user.toggleFavorite(item.id)
+    qc.invalidateQueries({ queryKey: ['browse-favorites'] })
+    qc.invalidateQueries({ queryKey: ['library', 'favorites'] })
   }
 
   return (
@@ -85,7 +95,7 @@ export function ChannelCard({ item, onClick }: Props) {
         )}
         {/* Hover favorite toggle */}
         {hovered && (
-          <button onClick={toggleFav} title={isFavorite ? 'Remove favorite' : 'Add to favorites'}
+          <button onClick={toggleFav} title={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
             style={{
               position: 'absolute', top: 5, right: 5, zIndex: 2,
               width: 24, height: 24, borderRadius: 6,

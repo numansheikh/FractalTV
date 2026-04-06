@@ -3,7 +3,9 @@ import { useAppStore } from '@/stores/app.store'
 export function FilterBar({ itemCount }: { itemCount?: number }) {
   const { typeFilter, categoryFilter, selectedSourceIds, setTypeFilter, setCategoryFilter, clearSourceFilter } = useAppStore()
 
-  const hasFilters = typeFilter !== 'all' || !!categoryFilter || selectedSourceIds.length > 0
+  // '__favorites__' is the default state — not a user-applied filter, never shown as a chip
+  const activeCategory = categoryFilter && categoryFilter !== '__favorites__' ? categoryFilter : null
+  const hasFilters = typeFilter !== 'all' || !!activeCategory || selectedSourceIds.length > 0
   if (!hasFilters) return null
 
   const TYPE_COLOR: Record<string, string> = {
@@ -29,11 +31,11 @@ export function FilterBar({ itemCount }: { itemCount?: number }) {
           onRemove={() => setTypeFilter('all')}
         />
       )}
-      {categoryFilter && (
+      {activeCategory && (
         <FilterPill
-          label={categoryFilter}
+          label={activeCategory}
           color="var(--text-1)"
-          onRemove={() => setCategoryFilter(null)}
+          onRemove={() => setCategoryFilter('__favorites__')}
         />
       )}
       {selectedSourceIds.length > 0 && (

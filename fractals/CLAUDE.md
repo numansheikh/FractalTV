@@ -284,22 +284,19 @@ pnpm lint             # ESLint + Prettier check
 
 ## Design language
 
-### Colors (dark theme — the only theme for now)
+### V2 token system (current — replaces the legacy --color-* system)
+Components consume `--bg-0..4`, `--text-0..3`, `--border-subtle/default/strong`, and `--accent-*` tokens.
+These are defined in `:root` as dark defaults, then **bridged** via `[data-theme]` selector to the `--color-*` system in `globals.css`. Light themes also need the light-specific V2 adjustment block (inverts bg hierarchy).
+
+**Dark theme defaults:**
 ```
-Background:     #0a0a0f
-Surface:        #12121a
-Card:           #1a1a26
-Card hover:     #222233
-Border:         rgba(255,255,255,0.06)
-Primary:        #7c4dff (purple)
-Primary hover:  #9c6fff
-Accent:         #b388ff (light purple)
-Text primary:   #e8e3ff
-Text secondary: #7a748a
-Text muted:     #4a4660
-Success:        #4caf50
-Warning:        #ffab40
-Error:          #ef5350
+--bg-0..4:   #08080c → #282834  (deepest to lightest)
+--text-0:    #f2f0ff  (near-white)
+--text-1:    #9894bc  (secondary)
+--text-2:    #54526e  (tertiary)
+--text-3:    #555566  (disabled)
+--accent-interactive: #7c4dff (violet)
+--accent-live: #e05555 · --accent-film: #4a9eff · --accent-series: #2dba85
 ```
 
 ### Typography
@@ -341,11 +338,56 @@ Error:          #ef5350
 - Not a social app — no sharing, no public profiles, no cloud sync (for now)
 - Not a content provider — ships with zero content, user brings their own sources
 
-## Implementation status (as of 2026-04-05)
+## Implementation status (as of 2026-04-06)
 
 **Complete:** Phases 1–6 (scaffold, DB + Xtream sync, TMDB enrichment, FTS5 search, browse/search UI, video player). Phase 12A (user data IPC handlers).
 **Partial:** Phase 10 settings (appearance, player, enrichment done; profiles + EPG config pending). Phase 12 user data (12A done; 12B–E pending).
 **Not started:** Phase 7 (EPG/catchup), Phase 8 (semantic search), Phase 9 (M3U), Phase 11 (Capacitor/mobile).
+
+### UI Redesign — completed features (as of 2026-04-06)
+
+The full UI was redesigned on branch `rewrite/new-architecture`. Key implemented features beyond the original phases:
+
+**Layout**
+- Three-zone layout: NavRail (48px, left) + content area + right-side slide panels
+- `AppShell.tsx` orchestrates the shell; `NavRail.tsx` for icon-only navigation
+- CommandBar (44px, top) with search + sort + source dots — hidden on Home when no query
+- `BrowseSidebar.tsx` (168px, left of grid) shown on live/films/series views; bg-1 to contrast with bg-2 cards
+
+**Home screen — two modes**
+- `HomeView.tsx` — search bar pinned to the bottom, source dots at bottom-right (flex-wrap, 2 per row)
+- **Discover mode** — "Favorite Channels" horizontal row + "Continue Watching" rows (movies/series in progress, hidden when empty)
+- **My Channels mode** — drag-to-reorder grid of favorite channels only (no Continue Watching)
+- Mode persisted in `app.store` (`homeMode`). Toggled via Settings → Appearance
+- First-favorite prompt: shown once when user adds their first channel favorite while in Discover mode
+- Empty channels mode: dedicated empty state with "Browse channels" + "Switch to Discover" actions
+
+**Favorites system**
+- `__favorites__` sentinel value for `categoryFilter` — used as default when entering any browse view
+- Default category is Favorites (not All) across live/films/series
+- Favorites chip never shown in FilterBar (it's the default state, not a filter)
+- Removing any non-favorites category chip returns to `__favorites__`, not null/All
+- `BrowseSidebar` pinned section: "Favorites" (heart icon, default) + "All" above scrolling category list
+- ContentArea: favorites query with client-side source filtering (API doesn't support sourceIds)
+- Search query guards against sending `__favorites__` as categoryName to the DB
+
+**Drag-to-reorder My Channels**
+- `@dnd-kit/core` + `@dnd-kit/sortable` — PointerSensor (6px activation), KeyboardSensor
+- `fav_sort_order INTEGER` column in `user_data` (SQLite migration, safe try/catch)
+- `user:favorites` IPC orders by `COALESCE(fav_sort_order, 999999) ASC, last_watched_at DESC`
+- `user:reorder-favorites` IPC persists new order in a transaction
+- Local `orderedIds` state for optimistic UI; synced to server async
+
+**User data features (Phase 12)**
+- Heart toggle in list-view rows (VirtualGrid `ChannelListRow`) with optimistic update
+- Favorites, watchlist, continue watching, history — all IPC-wired
+- `user_data.fav_sort_order` for manual channel ordering
+
+**Theming — simplified**
+- Two themes only: `dark` (default) and `fractals-day` (light)
+- V2 token system (`--bg-0..4`, `--text-0..3`, `--border-*`, `--accent-*`) used everywhere
+- Source color border guard: only shown when 2+ active sources (`showSourceBadge` / `showSourceBar`)
+- Sidebar uses `--bg-1` (panel level), cards use `--bg-2` — maintains visual separation
 
 ## Key architecture decisions (implemented)
 
@@ -375,8 +417,26 @@ Error:          #ef5350
 
 - **EPG / program guide not yet implemented** — `epg` table exists in schema. No XMLTV parser, no program overlay in player, no catch-up/timeshift playback. Phase 7.
 
-- **Favorites and watchlist have no dedicated view** — The heart/bookmark toggles in ContentDetail write to `user_data` table and persist, but there is no "My Favorites" or "Watchlist" browse section yet.
+- **Watchlist has no dedicated view** — The bookmark toggle in ContentDetail writes to `user_data` but there is no "Watchlist" browse section yet.
 
-- **Watch history / resume position has no browse section** — `last_position` and `last_watched_at` are saved to `user_data` when watching, but there is no "Continue Watching" row in the browse view yet.
+- **Continue Watching has no dedicated browse section** — Works on the Home screen (Discover mode) and in Library, but not as a browsable category in live/films/series views.
 
 - **Capacitor / mobile not yet implemented** — The codebase is Electron-only. `CapacitorService` abstraction has not been built. Android, iOS, and Tizen targets are Phase 11.
+
+## Known UI bugs (open — not yet fixed)
+
+- **Home search bar coexists with CommandBar** — Home has its own bottom search bar. CommandBar is hidden when `activeView === 'home' && !query`. When the user types, CommandBar appears at the top alongside the bottom bar. The two inputs share `useSearchStore.query` and don't conflict functionally, but visually it's redundant. Tracked for future polish.
+
+- **Sort not persisted** — Sort order (`useState('updated:desc')` in AppShell) resets to default on every app launch. Should be persisted in `app.store`.
+
+- **Left source bar on PosterCard may conflict with hover border** — `borderLeft: 3px solid {accent}` + `border: 1px solid {hover}`: the 1px `border` shorthand resets border-left width to 1px, then `borderLeft` re-applies 3px. Relies on V8 insertion order — fragile. Consider a pseudo-element stripe instead.
+
+- **`--color-nav-bg` / `--color-nav-text` defined in themes but never consumed** — NavRail uses `--bg-1` instead. Dead CSS; remove or wire up.
+
+- **`addRecentSearch` / `removeRecentSearch` actions defined but never called** — The recent searches UI was removed from HomeView. The store actions and persisted `recentSearches` array remain but are unused dead code.
+
+## Data quirks to be aware of
+
+- **Same series from two sources appears twice in Favorites** — Content rows are source-scoped (`{sourceId}:{type}:{streamId}`). Until two sources' series are merged via TMDB ID match during enrichment, they are separate items. Both get favorited separately and appear as two rows. Expected behavior; will self-resolve once enrichment runs.
+
+- **Series appearing under Films Favorites** — Some IPTV providers store limited series / mini-series with `type = 'movie'` in their Xtream API. The app stores whatever type the provider returns. A series like "The Queen's Gambit" may appear under Films not Series.

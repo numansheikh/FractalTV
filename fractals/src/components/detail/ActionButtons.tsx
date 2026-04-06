@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ContentItem } from '@/lib/types'
 import { api } from '@/lib/api'
 import { useUserStore } from '@/stores/user.store'
@@ -8,6 +8,7 @@ interface Props {
   item: ContentItem
   onPlay: (item: ContentItem) => void
   episodeToPlay?: any
+  overridePlayLabel?: string
 }
 
 function formatPosition(seconds: number): string {
@@ -18,9 +19,10 @@ function formatPosition(seconds: number): string {
   return `${m}:${String(s).padStart(2, '0')}`
 }
 
-export function ActionButtons({ item, onPlay, episodeToPlay }: Props) {
+export function ActionButtons({ item, onPlay, episodeToPlay, overridePlayLabel }: Props) {
   const userStore = useUserStore()
   const userData = userStore.data[item.id]
+  const qc = useQueryClient()
 
   const [extError, setExtError] = useState<string | null>(null)
   const [hoverStar, setHoverStar] = useState<number | null>(null)
@@ -31,12 +33,13 @@ export function ActionButtons({ item, onPlay, episodeToPlay }: Props) {
     queryFn: async () => {
       const d = await api.user.getData(item.id)
       if (d) {
-        // Use getState() to avoid stale closure over userStore reference
         const store = useUserStore.getState()
         store.setFavorite(item.id, !!(d as any).favorite)
         store.setWatchlist(item.id, !!(d as any).watchlist)
         if ((d as any).rating != null) store.setRating(item.id, (d as any).rating)
-        if ((d as any).last_position) store.setPosition(item.id, (d as any).last_position)
+        // Always sync position and completed (even when 0/false)
+        store.setPosition(item.id, (d as any).last_position ?? 0)
+        if ((d as any).completed === 0) store.clearItemHistory(item.id)
       }
       return d
     },
@@ -48,16 +51,27 @@ export function ActionButtons({ item, onPlay, episodeToPlay }: Props) {
   const userRating = userData?.rating ?? null
   const lastPosition = userData?.last_position ?? 0
 
-  const playLabel = lastPosition > 0
-    ? `▶ Resume from ${formatPosition(lastPosition)}`
-    : '▶ Play'
+  const playLabel = overridePlayLabel
+    ?? (lastPosition > 0 ? `▶ Resume from ${formatPosition(lastPosition)}` : '▶ Play')
 
   const handleFavorite = async () => {
+    const removing = isFavorite
     userStore.setFavorite(item.id, !isFavorite)
+    // Instant removal from all favorites caches — no waiting for refetch
+    if (removing) {
+      const strip = (old: ContentItem[] | undefined) => old?.filter((i) => i.id !== item.id)
+      qc.setQueriesData<ContentItem[]>({ queryKey: ['browse-favorites'] }, strip)
+      qc.setQueriesData<ContentItem[]>({ queryKey: ['library', 'favorites'] }, strip)
+    }
     try {
       await api.user.toggleFavorite(item.id)
+      qc.invalidateQueries({ queryKey: ['browse-favorites'] })
+      qc.invalidateQueries({ queryKey: ['library', 'favorites'] })
     } catch {
       userStore.setFavorite(item.id, isFavorite)
+      // Rollback optimistic removal
+      qc.invalidateQueries({ queryKey: ['browse-favorites'] })
+      qc.invalidateQueries({ queryKey: ['library', 'favorites'] })
     }
   }
 
@@ -77,6 +91,18 @@ export function ActionButtons({ item, onPlay, episodeToPlay }: Props) {
       await api.user.setRating(item.id, newRating)
     } catch {
       userStore.setRating(item.id, userRating)
+    }
+  }
+
+  const handleClearHistory = async () => {
+    useUserStore.getState().clearItemHistory(item.id)
+    try {
+      await api.user.clearItemHistory(item.id)
+      // Force refetch so store is authoritative from DB
+      qc.invalidateQueries({ queryKey: ['userdata', item.id] })
+      qc.invalidateQueries({ queryKey: ['library', 'history'] })
+    } catch {
+      // noop — store already updated optimistically
     }
   }
 
@@ -168,10 +194,10 @@ export function ActionButtons({ item, onPlay, episodeToPlay }: Props) {
           </svg>
         </button>
 
-        {/* Bookmark — watchlist */}
-        <button
+        {/* Bookmark — watchlist (movies + series only; live TV has no "watch later" concept) */}
+        {item.type !== 'live' && <button
           onClick={handleWatchlist}
-          title={isWatchlist ? 'Remove from watchlist' : 'Add to watchlist'}
+          title={isWatchlist ? 'Remove from watchlist' : 'Save to watchlist'}
           style={{
             ...iconBtnStyle,
             borderColor: isWatchlist ? 'rgba(139,92,246,0.35)' : 'var(--border-subtle)',
@@ -193,10 +219,10 @@ export function ActionButtons({ item, onPlay, episodeToPlay }: Props) {
           >
             <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
           </svg>
-        </button>
+        </button>}
 
-        {/* Star rating — 5 stars inline */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 2, flex: 1 }}>
+        {/* Star rating — movies/series only; live channels aren't rateable */}
+        {item.type !== 'live' && <div style={{ display: 'flex', alignItems: 'center', gap: 2, flex: 1 }}>
           {[1, 2, 3, 4, 5].map((star) => {
             const filled = (hoverStar ?? userRating ?? 0) >= star
             return (
@@ -226,7 +252,30 @@ export function ActionButtons({ item, onPlay, episodeToPlay }: Props) {
               </button>
             )
           })}
-        </div>
+        </div>}
+
+        {/* Remove from history — only shown when there's history */}
+        {(lastPosition > 0 || userData?.completed === 1) && (
+          <button
+            onClick={handleClearHistory}
+            title="Remove from history"
+            style={iconBtnStyle}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'rgba(239,68,68,0.1)'
+              e.currentTarget.style.borderColor = 'rgba(239,68,68,0.3)'
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'var(--bg-3)'
+              e.currentTarget.style.borderColor = 'var(--border-subtle)'
+            }}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--text-2)" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10"/>
+              <polyline points="12 6 12 12 16 14"/>
+              <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>
+            </svg>
+          </button>
+        )}
 
         {/* External player button */}
         <button
@@ -236,7 +285,6 @@ export function ActionButtons({ item, onPlay, episodeToPlay }: Props) {
           onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-4)' }}
           onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--bg-3)' }}
         >
-          {/* MPV-style play arrow with external bracket icon */}
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-2)" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="15 3 21 3 21 9" />
             <path d="M10 14L21 3" />

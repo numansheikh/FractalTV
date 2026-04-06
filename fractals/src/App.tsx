@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, lazy, Suspense } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { useSourcesStore, Source, SyncProgress } from '@/stores/sources.store'
 import { useAppStore } from '@/stores/app.store'
+import { useSearchStore } from '@/stores/search.store'
 import { NavRail } from '@/components/layout/NavRail'
 import { CommandBar } from '@/components/layout/CommandBar'
 import { ContentArea } from '@/components/layout/ContentArea'
@@ -15,8 +16,6 @@ const SeriesDetail = lazy(() => import('@/components/detail/SeriesDetail').then(
 const PlayerOverlay = lazy(() => import('@/components/player/PlayerOverlay').then((m) => ({ default: m.PlayerOverlay })))
 const SettingsPanel = lazy(() => import('@/components/settings/SettingsPanel').then((m) => ({ default: m.SettingsPanel })))
 const SourcesPanel = lazy(() => import('@/components/sources/SourcesPanel').then((m) => ({ default: m.SourcesPanel })))
-
-import { lazy, Suspense } from 'react'
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, retry: 1 } },
@@ -34,13 +33,13 @@ export function App() {
 
 function AppShell() {
   const { sources, setSources, updateSource, setSyncProgress } = useSourcesStore()
+  const { query } = useSearchStore()
   const {
-    selectedContent, playingContent, showSettings, showSources,
+    activeView, selectedContent, playingContent, showSettings, showSources,
     setSelectedContent, setPlayingContent, setShowSettings, setShowSources,
     setView, setTypeFilter, setCategoryFilter, clearSourceFilter, toggleSourceFilter,
+    sort, setSort,
   } = useAppStore()
-
-  const [sort, setSort] = useState('updated:desc')
 
   // Load sources + auto-sync new ones
   useEffect(() => {
@@ -53,10 +52,15 @@ function AppShell() {
       if (loaded.length > 0) api.sources.startupCheck()
     })
 
-    // Global keyboard shortcuts
+    // Global keyboard shortcuts — skip when user is typing in an input/textarea
+    const isTyping = () => {
+      const el = document.activeElement
+      return el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement
+    }
     const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === ',') { e.preventDefault(); setShowSettings(true) }
-      if ((e.metaKey || e.ctrlKey) && e.key === 'r') { e.preventDefault(); window.location.reload() }
+      if ((e.metaKey || e.ctrlKey) && e.key === ',') { e.preventDefault(); setShowSettings(true); return }
+      if ((e.metaKey || e.ctrlKey) && e.key === 'r') { e.preventDefault(); window.location.reload(); return }
+      if (isTyping()) return
       if ((e.metaKey || e.ctrlKey) && e.key === '1') { e.preventDefault(); setView('home') }
       if ((e.metaKey || e.ctrlKey) && e.key === '2') { e.preventDefault(); setView('live') }
       if ((e.metaKey || e.ctrlKey) && e.key === '3') { e.preventDefault(); setView('films') }
@@ -164,7 +168,7 @@ function AppShell() {
 
       {/* Main column */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
-        <CommandBar sort={sort} onSortChange={setSort} />
+        {(activeView !== 'home' || !!query) && <CommandBar sort={sort} onSortChange={setSort} />}
         <ContentArea
           sort={sort}
           onSelectContent={handleSelectContent}
@@ -179,7 +183,7 @@ function AppShell() {
           <MovieDetail
             item={selectedContent}
             onPlay={setPlayingContent}
-            onClose={() => setSelectedContent(null)}
+            onClose={() => { setSelectedContent(null); setPlayingContent(null) }}
             onNavigate={handleBreadcrumbNav}
             isPlaying={!!playingContent}
           />
@@ -189,7 +193,7 @@ function AppShell() {
           <SeriesDetail
             item={selectedContent}
             onPlay={setPlayingContent}
-            onClose={() => setSelectedContent(null)}
+            onClose={() => { setSelectedContent(null); setPlayingContent(null) }}
             onNavigate={handleBreadcrumbNav}
             isPlaying={!!playingContent}
           />

@@ -24,6 +24,8 @@ export function PosterCard({ item, onClick }: Props) {
   const rating = item.ratingTmdb ?? item.rating_tmdb ?? item.ratingImdb ?? item.rating_imdb
   const primarySourceId = item.primarySourceId ?? item.primary_source_id
   const sourceColor = primarySourceId ? colorMap[primarySourceId] : undefined
+  const sourceName = primarySourceId ? sources.find((s) => s.id === primarySourceId)?.name : undefined
+  const showSourceBadge = sources.length > 1 && sourceName
 
   const isFavorite = userData?.favorite === 1
   const isCompleted = userData?.completed === 1
@@ -41,6 +43,7 @@ export function PosterCard({ item, onClick }: Props) {
         background: 'var(--bg-2)',
         borderRadius: 6,
         border: `1px solid ${hovered ? 'var(--border-default)' : 'var(--border-subtle)'}`,
+        borderLeft: showSourceBadge && sourceColor ? `3px solid ${sourceColor.accent}` : undefined,
         overflow: 'hidden',
         cursor: 'pointer',
         position: 'relative',
@@ -96,8 +99,24 @@ export function PosterCard({ item, onClick }: Props) {
           </div>
         )}
 
-        {/* Completed checkmark — top right (replaces source dot) */}
-        {isCompleted ? (
+        {/* Source name badge — top left, only when multiple sources */}
+        {showSourceBadge && (
+          <div style={{
+            position: 'absolute', top: 6, left: 6,
+            padding: '2px 5px', borderRadius: 3,
+            background: 'rgba(0,0,0,0.72)',
+            color: sourceColor ? sourceColor.accent : 'var(--text-1)',
+            fontSize: 9, fontWeight: 700, letterSpacing: '0.04em',
+            textTransform: 'uppercase',
+            zIndex: 1,
+            maxWidth: 80, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>
+            {sourceName}
+          </div>
+        )}
+
+        {/* Completed checkmark — top right */}
+        {isCompleted && (
           <div style={{
             position: 'absolute', top: 6, right: 6,
             width: 16, height: 16, borderRadius: '50%',
@@ -110,16 +129,6 @@ export function PosterCard({ item, onClick }: Props) {
               <polyline points="20 6 9 17 4 12" />
             </svg>
           </div>
-        ) : sourceColor && (
-          /* Source color dot — top right */
-          <div style={{
-            position: 'absolute', top: 8, right: 8,
-            width: 6, height: 6, borderRadius: '50%',
-            background: sourceColor.accent,
-            border: '1.5px solid rgba(0,0,0,0.5)',
-            boxShadow: `0 0 5px ${sourceColor.glow}`,
-            zIndex: 1,
-          }} />
         )}
 
         {/* Progress bar — bottom edge of poster */}

@@ -76,8 +76,8 @@ export const api = {
     watchlist: (args?: { type?: 'live' | 'movie' | 'series' }) =>
       isElectron ? (window.api as any).user.watchlist(args) : Promise.resolve([]),
 
-    continueWatching: () =>
-      isElectron ? (window.api as any).user.continueWatching() : Promise.resolve([]),
+    continueWatching: (args?: { type?: 'movie' | 'series' }) =>
+      isElectron ? (window.api as any).user.continueWatching(args) : Promise.resolve([]),
 
     history: (args?: { limit?: number }) =>
       isElectron ? (window.api as any).user.history(args) : Promise.resolve([]),
@@ -90,6 +90,17 @@ export const api = {
 
     setRating: (contentId: string, rating: number | null) =>
       isElectron ? (window.api as any).user.setRating(contentId, rating) : Promise.resolve({ success: true }),
+    clearItemHistory: (contentId: string) =>
+      isElectron ? (window.api as any).user.clearItemHistory(contentId) : Promise.resolve({ success: true }),
+    clearHistory: () =>
+      isElectron ? (window.api as any).user.clearHistory() : Promise.resolve({ success: true }),
+    clearFavorites: () =>
+      isElectron ? (window.api as any).user.clearFavorites() : Promise.resolve({ success: true }),
+    clearAllData: () =>
+      isElectron ? (window.api as any).user.clearAllData() : Promise.resolve({ success: true }),
+
+    reorderFavorites: (order: { contentId: string; sortOrder: number }[]) =>
+      isElectron ? (window.api as any).user.reorderFavorites(order) : Promise.resolve({ ok: true }),
   },
 
   player: {

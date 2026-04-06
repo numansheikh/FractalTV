@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react'
+import { useAppStore } from '@/stores/app.store'
+import { useUserStore } from '@/stores/user.store'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { SlidePanel } from '@/components/layout/SlidePanel'
 import { api } from '@/lib/api'
 import {
   useTheme,
-  DARK_THEMES, LIGHT_THEMES,
   THEME_LABELS, THEME_SWATCHES,
   FONT_LABELS, FONT_NOTES,
   type ThemeId, type FontId,
@@ -16,7 +17,7 @@ interface Props {
 }
 
 type PlayerPref = 'artplayer' | 'mpv' | 'vlc'
-type Tab = 'appearance' | 'player' | 'enrichment' | 'about'
+type Tab = 'appearance' | 'player' | 'enrichment' | 'data' | 'about'
 
 const ALL_FONTS: FontId[] = ['DM Sans', 'Inter', 'Rubik', 'IBM Plex Sans', 'Plus Jakarta Sans', 'Outfit', 'Nunito']
 
@@ -24,6 +25,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'appearance', label: 'Appearance' },
   { id: 'player',     label: 'Player' },
   { id: 'enrichment', label: 'Enrichment' },
+  { id: 'data',       label: 'Data' },
   { id: 'about',      label: 'About' },
 ]
 
@@ -136,6 +138,11 @@ export function SettingsPanel({ onClose }: Props) {
               />
             </TabPane>
           )}
+          {activeTab === 'data' && (
+            <TabPane key="data">
+              <DataTab />
+            </TabPane>
+          )}
           {activeTab === 'about' && (
             <TabPane key="about">
               <AboutTab />
@@ -221,12 +228,12 @@ function AppearanceTab({ theme, font, setTheme, setFont }: {
   theme: ThemeId; font: FontId
   setTheme: (t: ThemeId) => void; setFont: (f: FontId) => void
 }) {
-  const [browsePageSize, setBrowsePageSize] = useState(() => Number(localStorage.getItem('fractals-browse-page-size')) || 60)
+  const { pageSize, setPageSize, homeMode, setHomeMode } = useAppStore()
   const [searchLive, setSearchLive] = useState(() => Number(localStorage.getItem('fractals-search-live-limit')) || 20)
   const [searchMovies, setSearchMovies] = useState(() => Number(localStorage.getItem('fractals-search-movie-limit')) || 45)
   const [searchSeries, setSearchSeries] = useState(() => Number(localStorage.getItem('fractals-search-series-limit')) || 35)
 
-  const savePaging = (key: string, val: number, setter: (v: number) => void) => {
+  const saveSearchLimit = (key: string, val: number, setter: (v: number) => void) => {
     const clamped = Math.max(10, Math.min(200, val))
     setter(clamped)
     localStorage.setItem(key, String(clamped))
@@ -234,21 +241,12 @@ function AppearanceTab({ theme, font, setTheme, setFont }: {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <section>
-        <SectionLabel>Dark themes</SectionLabel>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
-          {DARK_THEMES.map(t => (
-            <ThemeSwatch key={t} id={t} active={theme === t} onSelect={setTheme} />
-          ))}
-        </div>
-      </section>
 
       <section>
-        <SectionLabel>Light themes</SectionLabel>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
-          {LIGHT_THEMES.filter(t => t !== 'light').map(t => (
-            <ThemeSwatch key={t} id={t} active={theme === t} onSelect={setTheme} />
-          ))}
+        <SectionLabel>Theme</SectionLabel>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <ThemeSwatch id="dark" active={theme === 'dark'} onSelect={setTheme} />
+          <ThemeSwatch id="fractals-day" active={theme === 'fractals-day'} onSelect={setTheme} />
         </div>
       </section>
 
@@ -289,29 +287,68 @@ function AppearanceTab({ theme, font, setTheme, setFont }: {
       <section>
         <SectionLabel>Browse &amp; Search</SectionLabel>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <PagingInput label="Browse page size" value={browsePageSize}
-            onChange={(v) => savePaging('fractals-browse-page-size', v, setBrowsePageSize)} />
-          <PagingInput label="Search: live channels" value={searchLive}
-            onChange={(v) => savePaging('fractals-search-live-limit', v, setSearchLive)} />
-          <PagingInput label="Search: movies" value={searchMovies}
-            onChange={(v) => savePaging('fractals-search-movie-limit', v, setSearchMovies)} />
-          <PagingInput label="Search: series" value={searchSeries}
-            onChange={(v) => savePaging('fractals-search-series-limit', v, setSearchSeries)} />
+          <PagingInput label="Items per page" value={pageSize} min={100} max={5000} step={100}
+            onChange={(v) => setPageSize(Math.max(100, Math.min(5000, v)))} />
+          <PagingInput label="Search: live channels" value={searchLive} min={10} max={200} step={5}
+            onChange={(v) => saveSearchLimit('fractals-search-live-limit', v, setSearchLive)} />
+          <PagingInput label="Search: movies" value={searchMovies} min={10} max={200} step={5}
+            onChange={(v) => saveSearchLimit('fractals-search-movie-limit', v, setSearchMovies)} />
+          <PagingInput label="Search: series" value={searchSeries} min={10} max={200} step={5}
+            onChange={(v) => saveSearchLimit('fractals-search-series-limit', v, setSearchSeries)} />
           <p style={{ fontSize: 10, color: 'var(--text-2)', lineHeight: 1.5, marginTop: 2 }}>
-            Items per page (browse) or per section (search). Range: 10–200.
+            Items per page: 100–5,000 (default 500). Pagination shown when total exceeds 1,000.
           </p>
         </div>
+      </section>
+
+      <section>
+        <SectionLabel>Home Screen</SectionLabel>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {(['discover', 'channels'] as const).map((mode) => {
+            const active = homeMode === mode
+            const label = mode === 'discover' ? 'Discover' : 'My Channels'
+            const desc = mode === 'discover'
+              ? 'Channels, movies & series strips'
+              : 'Your favourite channels grid'
+            return (
+              <button
+                key={mode}
+                onClick={() => setHomeMode(mode)}
+                style={{
+                  flex: 1, padding: '10px 12px', borderRadius: 8, cursor: 'pointer',
+                  border: `1px solid ${active ? 'var(--accent-interactive)' : 'var(--border-default)'}`,
+                  background: active ? 'var(--accent-interactive-dim)' : 'var(--bg-2)',
+                  textAlign: 'left', transition: 'all 0.1s',
+                  display: 'flex', flexDirection: 'column', gap: 3,
+                }}
+              >
+                <span style={{ fontSize: 12, fontWeight: 600, color: active ? 'var(--accent-interactive)' : 'var(--text-0)', fontFamily: 'var(--font-ui)' }}>
+                  {label}
+                </span>
+                <span style={{ fontSize: 10, color: 'var(--text-2)', fontFamily: 'var(--font-ui)' }}>
+                  {desc}
+                </span>
+              </button>
+            )
+          })}
+        </div>
+        <p style={{ fontSize: 10, color: 'var(--text-2)', lineHeight: 1.5, marginTop: 6 }}>
+          My Channels shows your favourited channels. If the list is empty, you'll be prompted to switch back.
+        </p>
       </section>
     </div>
   )
 }
 
-function PagingInput({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
+function PagingInput({ label, value, onChange, min = 10, max = 200, step = 5 }: {
+  label: string; value: number; onChange: (v: number) => void
+  min?: number; max?: number; step?: number
+}) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
       <span style={{ fontSize: 11, color: 'var(--text-1)' }}>{label}</span>
       <input
-        type="number" min={10} max={200} step={5}
+        type="number" min={min} max={max} step={step}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
         style={{
@@ -333,6 +370,8 @@ function PlayerTab({ playerPref, setPlayerPref, mpvPath, setMpvPath, vlcPath, se
   mpvPath: string; setMpvPath: (v: string) => void
   vlcPath: string; setVlcPath: (v: string) => void
 }) {
+  const { minWatchSeconds, setMinWatchSeconds } = useAppStore()
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <section>
@@ -370,6 +409,33 @@ function PlayerTab({ playerPref, setPlayerPref, mpvPath, setMpvPath, vlcPath, se
         <PathInput label="VLC path (optional)" placeholder="auto-detected"
           value={vlcPath} onChange={(v) => { setVlcPath(v); localStorage.setItem('fractals-player-vlc-path', v) }} />
       )}
+
+      <section>
+        <SectionLabel>Watch tracking</SectionLabel>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <p style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.5, margin: 0 }}>
+            Minimum seconds watched before progress is saved to Continue Watching.
+          </p>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            {[5, 10, 30, 60].map((n) => (
+              <button
+                key={n}
+                onClick={() => setMinWatchSeconds(n)}
+                style={{
+                  flex: 1, padding: '7px 0', borderRadius: 7, fontSize: 11, fontWeight: 500,
+                  fontFamily: 'var(--font-ui)',
+                  border: `1px solid ${minWatchSeconds === n ? 'var(--accent-interactive)' : 'var(--border-default)'}`,
+                  background: minWatchSeconds === n ? 'var(--accent-interactive-dim)' : 'transparent',
+                  color: minWatchSeconds === n ? 'var(--accent-interactive)' : 'var(--text-1)',
+                  cursor: 'pointer', transition: 'all 0.1s',
+                }}
+              >
+                {n < 60 ? `${n}s` : '1m'}
+              </button>
+            ))}
+          </div>
+        </div>
+      </section>
 
       <section>
         <SectionLabel>About the options</SectionLabel>
@@ -477,6 +543,151 @@ function EnrichmentTab({ tmdbKey, setTmdbKey, enrichStatus, enrichProgress, enri
   )
 }
 
+/* ── Data tab ──────────────────────────────────────────────────── */
+function DataTab() {
+  const qc = useQueryClient()
+  const [confirm, setConfirm] = useState<'history' | 'favorites' | 'all' | 'prefs' | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<string | null>(null)
+
+  const run = async (action: 'history' | 'favorites' | 'all' | 'prefs') => {
+    setBusy(true)
+    setMsg(null)
+    try {
+      if (action === 'history')   await api.user.clearHistory()
+      if (action === 'favorites') await api.user.clearFavorites()
+      if (action === 'all')       await api.user.clearAllData()
+      if (action === 'prefs') {
+        // Reset persisted UI preferences to defaults
+        useAppStore.setState({
+          sort: 'updated:desc',
+          viewMode: 'grid',
+          pageSize: 500,
+          homeMode: 'discover',
+          hasSeenChannelsModePrompt: false,
+          minWatchSeconds: 5,
+          recentSearches: [],
+        })
+        setMsg('Preferences reset to defaults.')
+        setBusy(false)
+        setConfirm(null)
+        return
+      }
+
+      // Wipe the in-memory user store so stale data doesn't linger
+      useUserStore.setState({ data: {} })
+
+      // Invalidate all user-data query caches
+      qc.invalidateQueries({ queryKey: ['userdata'] })
+      qc.invalidateQueries({ queryKey: ['browse-favorites'] })
+      qc.invalidateQueries({ queryKey: ['library'] })
+      qc.invalidateQueries({ queryKey: ['home-continue'] })
+      qc.invalidateQueries({ queryKey: ['home-watchlist'] })
+
+      const labels = { history: 'Watch history cleared.', favorites: 'Favorites & watchlist cleared.', all: 'All user data cleared.', prefs: '' }
+      setMsg(labels[action])
+    } catch (e) {
+      setMsg(`Error: ${String(e)}`)
+    }
+    setBusy(false)
+    setConfirm(null)
+  }
+
+  const ACTIONS = [
+    {
+      id: 'history' as const,
+      label: 'Clear watch history',
+      description: 'Removes all resume positions, progress, and completion marks. Keeps favorites and watchlist.',
+      danger: false,
+    },
+    {
+      id: 'favorites' as const,
+      label: 'Clear favorites & watchlist',
+      description: 'Removes all favorited and watchlisted items. Keeps watch history.',
+      danger: false,
+    },
+    {
+      id: 'all' as const,
+      label: 'Clear all user data',
+      description: 'Removes all watch history, favorites, watchlist, and ratings. Cannot be undone.',
+      danger: true,
+    },
+    {
+      id: 'prefs' as const,
+      label: 'Reset preferences',
+      description: 'Resets sort order, home mode, view settings, and min-watch threshold back to defaults.',
+      danger: false,
+    },
+  ]
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <section>
+        <SectionLabel>User data</SectionLabel>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {ACTIONS.map((a) => (
+            <div key={a.id} style={{
+              padding: '12px 14px',
+              borderRadius: 8,
+              background: 'var(--bg-2)',
+              border: `1px solid ${confirm === a.id ? (a.danger ? 'rgba(239,68,68,0.35)' : 'var(--border-default)') : 'var(--border-subtle)'}`,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: a.danger ? 'var(--accent-danger)' : 'var(--text-0)', marginBottom: 3 }}>
+                    {a.label}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.45 }}>{a.description}</div>
+                </div>
+                {confirm === a.id ? (
+                  <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                    <button
+                      onClick={() => run(a.id)}
+                      disabled={busy}
+                      style={{
+                        padding: '5px 12px', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                        background: a.danger ? 'var(--accent-danger)' : 'var(--accent-interactive)',
+                        color: '#fff', border: 'none', opacity: busy ? 0.6 : 1,
+                      }}
+                    >
+                      {busy ? '…' : 'Confirm'}
+                    </button>
+                    <button
+                      onClick={() => setConfirm(null)}
+                      style={{
+                        padding: '5px 10px', borderRadius: 6, fontSize: 11, cursor: 'pointer',
+                        background: 'var(--bg-3)', color: 'var(--text-1)', border: '1px solid var(--border-default)',
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setConfirm(a.id)}
+                    style={{
+                      padding: '5px 12px', borderRadius: 6, fontSize: 11, cursor: 'pointer', flexShrink: 0,
+                      background: 'var(--bg-3)', color: a.danger ? 'var(--accent-danger)' : 'var(--text-1)',
+                      border: `1px solid ${a.danger ? 'rgba(239,68,68,0.25)' : 'var(--border-default)'}`,
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-4)' }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--bg-3)' }}
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+        {msg && (
+          <p style={{ fontSize: 11, color: 'var(--accent-success)', marginTop: 8 }}>{msg}</p>
+        )}
+      </section>
+    </div>
+  )
+}
+
 /* ── About tab ─────────────────────────────────────────────────── */
 function AboutTab() {
   return (
@@ -549,26 +760,26 @@ function ThemeSwatch({ id, active, onSelect }: { id: ThemeId; active: boolean; o
       onClick={() => onSelect(id)}
       title={THEME_LABELS[id]}
       style={{
-        position: 'relative', height: 44, borderRadius: 8, overflow: 'hidden',
+        flex: 1, position: 'relative', height: 56, borderRadius: 8, overflow: 'hidden',
         border: `2px solid ${active ? 'var(--accent-interactive)' : 'var(--border-default)'}`,
         cursor: 'pointer', transition: 'border-color 0.12s',
         background: `linear-gradient(135deg, ${bg} 50%, ${accent} 150%)`,
       }}
     >
       {active && (
-        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <svg width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round">
+        <div style={{ position: 'absolute', top: 6, right: 8 }}>
+          <svg width="13" height="13" viewBox="0 0 12 12" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round">
             <path d="M2 6l3 3 5-5" />
           </svg>
         </div>
       )}
       <div style={{
-        position: 'absolute', bottom: 3, left: 0, right: 0,
-        fontSize: 7.5, fontWeight: 700, textAlign: 'center',
-        color: 'rgba(255,255,255,0.9)', textShadow: '0 1px 3px rgba(0,0,0,0.7)',
-        letterSpacing: '0.02em',
+        position: 'absolute', bottom: 5, left: 10,
+        fontSize: 9, fontWeight: 700, textAlign: 'left',
+        color: 'rgba(255,255,255,0.92)', textShadow: '0 1px 4px rgba(0,0,0,0.6)',
+        letterSpacing: '0.03em',
       }}>
-        {THEME_LABELS[id].replace(' Dark', '').replace(' Light', '')}
+        {THEME_LABELS[id]}
       </div>
     </button>
   )

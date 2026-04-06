@@ -1,50 +1,20 @@
 import { useState } from 'react'
 
-export type ThemeId =
-  | 'dark' | 'vapor' | 'cyborg' | 'superhero' | 'darkly' | 'solar' | 'cerulean-dark'
-  | 'fractals-light' | 'light' | 'cerulean' | 'flatly' | 'cosmo' | 'minty' | 'united' | 'lux'
-
+export type ThemeId = 'dark' | 'fractals-day'
 export type FontId =
   | 'DM Sans' | 'Inter' | 'Rubik' | 'IBM Plex Sans' | 'Plus Jakarta Sans' | 'Outfit' | 'Nunito'
 
-export const DARK_THEMES: ThemeId[] = ['dark', 'vapor', 'cyborg', 'superhero', 'darkly', 'solar', 'cerulean-dark']
-export const LIGHT_THEMES: ThemeId[] = ['fractals-light', 'light', 'cerulean', 'flatly', 'cosmo', 'minty', 'united', 'lux']
+export const DARK_THEMES: ThemeId[] = ['dark']
+export const LIGHT_THEMES: ThemeId[] = ['fractals-day']
 
 export const THEME_LABELS: Record<ThemeId, string> = {
-  dark:           'Fractals Dark',
-  vapor:          'Vapor',
-  cyborg:         'Cyborg',
-  superhero:      'Superhero',
-  darkly:         'Darkly',
-  solar:          'Solar',
-  'cerulean-dark':'Cerulean Dark',
-  'fractals-light':'Fractals Light',
-  light:          'Light',
-  cerulean:       'Cerulean',
-  flatly:         'Flatly',
-  cosmo:          'Cosmo',
-  minty:          'Minty',
-  united:         'United',
-  lux:            'Lux',
+  dark:          'Fractals Dark',
+  'fractals-day':'Fractals Day',
 }
 
-// Gradient swatches: [bg-color, accent-color]
 export const THEME_SWATCHES: Record<ThemeId, [string, string]> = {
-  dark:           ['#0a0a14', '#7c4dff'],
-  vapor:          ['#1a0933', '#6f42c1'],
-  cyborg:         ['#060606', '#2a9fd6'],
-  superhero:      ['#0f2537', '#df6919'],
-  darkly:         ['#222222', '#375a7f'],
-  solar:          ['#002b36', '#b58900'],
-  'cerulean-dark':['#0c1a26', '#2fa4e7'],
-  'fractals-light':['#f4f2fa', '#6c3ce0'],
-  light:          ['#deeef9', '#2fa4e7'],
-  cerulean:       ['#deeef9', '#2fa4e7'],
-  flatly:         ['#ecf0f1', '#2c3e50'],
-  cosmo:          ['#eaeaea', '#2780e3'],
-  minty:          ['#e8f8f4', '#78c2ad'],
-  united:         ['#eeeeee', '#e95420'],
-  lux:            ['#eeeeee', '#1a1a1a'],
+  dark:          ['#0c0c18', '#7c4dff'],
+  'fractals-day':['#fafaff', '#4f46e5'],
 }
 
 export const FONT_LABELS: Record<FontId, string> = {
@@ -75,15 +45,15 @@ export function applyTheme(theme: ThemeId) {
 }
 
 export function applyFont(font: FontId) {
-  document.documentElement.style.setProperty(
-    '--font-sans',
-    `"${font}", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`
-  )
+  const stack = `"${font}", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`
+  document.documentElement.style.setProperty('--font-ui', stack)
+  document.documentElement.style.setProperty('--font-sans', stack)
 }
 
 export function useTheme() {
   const [theme, setThemeState] = useState<ThemeId>(() => {
-    return (localStorage.getItem(THEME_KEY) as ThemeId) ?? 'dark'
+    const stored = localStorage.getItem(THEME_KEY) as ThemeId
+    return stored === 'dark' || stored === 'fractals-day' ? stored : 'dark'
   })
 
   const [font, setFontState] = useState<FontId>(() => {
@@ -102,7 +72,7 @@ export function useTheme() {
     applyFont(f)
   }
 
-  const isDark = DARK_THEMES.includes(theme)
+  const isDark = theme === 'dark'
 
   return { theme, font, setTheme, setFont, isDark }
 }

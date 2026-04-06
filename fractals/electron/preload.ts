@@ -58,12 +58,19 @@ export const api = {
       ipcRenderer.invoke('user:favorites', args),
     watchlist: (args?: { type?: 'live' | 'movie' | 'series' }) =>
       ipcRenderer.invoke('user:watchlist', args),
-    continueWatching: () => ipcRenderer.invoke('user:continue-watching'),
+    continueWatching: (args?: { type?: 'movie' | 'series' }) => ipcRenderer.invoke('user:continue-watching', args),
     history: (args?: { limit?: number }) => ipcRenderer.invoke('user:history', args),
     bulkGetData: (contentIds: string[]) => ipcRenderer.invoke('user:bulk-get-data', contentIds),
     setCompleted: (contentId: string) => ipcRenderer.invoke('user:set-completed', contentId),
     setRating: (contentId: string, rating: number | null) =>
       ipcRenderer.invoke('user:set-rating', { contentId, rating }),
+    clearItemHistory: (contentId: string) =>
+      ipcRenderer.invoke('user:clear-item-history', contentId),
+    clearHistory: () => ipcRenderer.invoke('user:clear-history'),
+    clearFavorites: () => ipcRenderer.invoke('user:clear-favorites'),
+    clearAllData: () => ipcRenderer.invoke('user:clear-all-data'),
+    reorderFavorites: (order: { contentId: string; sortOrder: number }[]) =>
+      ipcRenderer.invoke('user:reorder-favorites', order),
   },
 
   // External player

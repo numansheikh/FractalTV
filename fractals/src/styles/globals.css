@@ -11,26 +11,26 @@
   --bg-3: #1e1e28;
   --bg-4: #282834;
 
-  /* Borders */
-  --border-subtle: rgba(255,255,255,0.04);
-  --border-default: rgba(255,255,255,0.08);
-  --border-strong: rgba(255,255,255,0.14);
+  /* Borders — visible by default, not invisible hints */
+  --border-subtle: rgba(255,255,255,0.08);
+  --border-default: rgba(255,255,255,0.14);
+  --border-strong: rgba(255,255,255,0.24);
 
-  /* Text */
-  --text-0: #f0eef6;
-  --text-1: #a8a4b8;
-  --text-2: #5e5a70;
-  --text-3: #3a3848;
+  /* Text — high contrast, never washed out */
+  --text-0: #f5f3ff;
+  --text-1: #c4bfe8;
+  --text-2: #7a7590;
+  --text-3: #4a4760;
 
-  /* Semantic accents */
+  /* Semantic accents — vivid, saturated */
   --accent-live: #f43f5e;
-  --accent-film: #3b82f6;
-  --accent-series: #10b981;
+  --accent-film: #60a5fa;
+  --accent-series: #34d399;
   --accent-interactive: #8b5cf6;
-  --accent-interactive-dim: rgba(139,92,246,0.12);
-  --accent-warning: #f59e0b;
-  --accent-danger: #ef4444;
-  --accent-success: #22c55e;
+  --accent-interactive-dim: rgba(139,92,246,0.18);
+  --accent-warning: #fbbf24;
+  --accent-danger: #f87171;
+  --accent-success: #4ade80;
 
   /* Typography */
   --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", sans-serif;
@@ -38,500 +38,151 @@
 }
 
 /* ════════════════════════════════════════════════════════════════
-   BASE THEME — dark purple (default)
-   All other themes override only what differs from this.
-════════════════════════════════════════════════════════════════ */
-/* ════════════════════════════════════════════════════════════════
    SOURCE COLOR PALETTE — hue zones that never overlap type colors
-   Type colors own: red (live), blue (movies), teal/cyan (series).
-   Sources get: amber, orange, yellow, violet, fuchsia, pink, lime.
-   Dark defaults — light themes override below.
+   Type colors own: red/rose (live), blue (movies), teal/emerald (series).
+   Sources get: violet, gold, orange, fuchsia, pink, amber, purple, yellow.
+   Ordered so first two sources = vivid violet + vivid gold (most common 2-source case).
+   Dark defaults — light theme overrides below.
 ════════════════════════════════════════════════════════════════ */
 :root {
-  --color-src-1: #fbbf24;   /* amber        ~43° */
-  --color-src-2: #f97316;   /* orange        ~24° */
-  --color-src-3: #a78bfa;   /* soft violet  ~259° */
-  --color-src-4: #e879f9;   /* fuchsia      ~294° */
-  --color-src-5: #f472b6;   /* hot pink     ~328° */
-  --color-src-6: #4ade80;   /* lime-green   ~142° */
-  --color-src-7: #c084fc;   /* light purple ~278° */
-  --color-src-8: #fde047;   /* yellow        ~53° */
+  --color-src-1: #a855f7;   /* vivid violet  ~280° */
+  --color-src-2: #eab308;   /* vivid gold     ~48° */
+  --color-src-3: #f97316;   /* vivid orange   ~24° */
+  --color-src-4: #e879f9;   /* vivid fuchsia ~294° */
+  --color-src-5: #f472b6;   /* hot pink      ~328° */
+  --color-src-6: #fb923c;   /* warm amber     ~32° */
+  --color-src-7: #c084fc;   /* soft lavender ~278° */
+  --color-src-8: #fde047;   /* bright lemon   ~53° */
 }
 
+/* ════════════════════════════════════════════════════════════════
+   BASE THEME — dark purple (default)
+════════════════════════════════════════════════════════════════ */
 :root,
 [data-theme="dark"] {
-  --color-bg:            #0a0a14;
-  --color-surface:       #12121a;
-  --color-card:          #1a1a26;
-  --color-card-hover:    #222233;
-  --color-border:        rgba(255,255,255,0.06);
-  --color-border-strong: rgba(255,255,255,0.12);
+  --color-bg:            #0c0c18;
+  --color-surface:       #13131f;
+  --color-card:          #1c1c2c;
+  --color-card-hover:    #252540;
+  --color-border:        rgba(255,255,255,0.12);
+  --color-border-strong: rgba(255,255,255,0.22);
 
-  --color-primary:       #7c4dff;
-  --color-primary-hover: #9c6fff;
-  --color-primary-dim:   rgba(124,77,255,0.14);
-  --color-accent:        #b388ff;
-  --color-secondary:     #4a4660;
-  --color-info:          #42a5f5;
+  --color-primary:       #8b5cf6;
+  --color-primary-hover: #a78bfa;
+  --color-primary-dim:   rgba(139,92,246,0.18);
+  --color-accent:        #c4b5fd;
+  --color-secondary:     #6b62a0;
+  --color-info:          #60a5fa;
 
-  --color-text-primary:  #e8e3ff;
-  --color-text-secondary:#8880b0;
-  --color-text-muted:    #4e486a;
+  --color-text-primary:  #f5f3ff;
+  --color-text-secondary:#c4bfe8;
+  --color-text-muted:    #7a7590;
 
-  --color-success:       #66bb6a;
-  --color-warning:       #ffab40;
-  --color-error:         #ef5350;
-  --color-danger:        #ef5350;
-  --color-live:          #ef5350;
-  --color-movie:         #42a5f5;
-  --color-series:        #66bb6a;
+  --color-success:       #4ade80;
+  --color-warning:       #fbbf24;
+  --color-error:         #f87171;
+  --color-danger:        #f87171;
+  --color-live:          #f43f5e;
+  --color-movie:         #60a5fa;
+  --color-series:        #34d399;
 
-  --color-nav-bg:        #0a0a14;
-  --color-nav-text:      #e8e3ff;
+  --color-nav-bg:        #0c0c18;
+  --color-nav-text:      #f5f3ff;
 
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
 }
 
-/* ── Fractals Light — lavender/cream with purple primary ────── */
-[data-theme="fractals-light"] {
-  --color-bg:            #f4f2fa;
-  --color-surface:       #eae6f4;
-  --color-card:          #ddd8ee;
-  --color-card-hover:    #d0cae6;
-  --color-border:        rgba(80,50,140,0.10);
-  --color-border-strong: rgba(80,50,140,0.20);
-
-  --color-primary:       #6c3ce0;
-  --color-primary-hover: #5a2bc8;
-  --color-primary-dim:   rgba(108,60,224,0.12);
-  --color-accent:        #8b5cf6;
-  --color-secondary:     #7a6ea0;
-  --color-info:          #1976d2;
-
-  --color-text-primary:  #1a1528;
-  --color-text-secondary:#4a4068;
-  --color-text-muted:    #8a82a8;
-
-  --color-success:       #2e7d32;
-  --color-warning:       #e65100;
-  --color-error:         #c62828;
-  --color-danger:        #c62828;
-  --color-live:          #c62828;
-  --color-movie:         #1565c0;
-  --color-series:        #2e7d32;
-
-  --color-nav-bg:        #6c3ce0;
-  --color-nav-text:      #ffffff;
-}
-
-/* ── Vapor — synthwave purple/teal neon ──────────────────────── */
-[data-theme="vapor"] {
-  --color-bg:            #1a0933;
-  --color-surface:       #220d42;
-  --color-card:          #2b1255;
-  --color-card-hover:    #321465;
-  --color-border:        rgba(111,66,193,0.22);
-  --color-border-strong: rgba(111,66,193,0.42);
-
-  --color-primary:       #6f42c1;
-  --color-primary-hover: #8b5cf6;
-  --color-primary-dim:   rgba(111,66,193,0.18);
-  --color-accent:        #32fbe2;
-  --color-secondary:     #ea39b8;
-  --color-info:          #1ba2f6;
-
-  --color-text-primary:  #e8d8ff;
-  --color-text-secondary:#a07cc8;
-  --color-text-muted:    #5a3a78;
-
-  --color-success:       #3cf281;
-  --color-warning:       #ffc107;
-  --color-error:         #e44c55;
-  --color-danger:        #e44c55;
-  --color-live:          #ea39b8;
-  --color-movie:         #1ba2f6;
-  --color-series:        #3cf281;
-
-  --color-nav-bg:        #0f0520;
-  --color-nav-text:      #c8a8ff;
-}
-
-/* ── Cyborg — electric blue on jet black ─────────────────────── */
-[data-theme="cyborg"] {
-  --color-bg:            #060606;
-  --color-surface:       #101010;
-  --color-card:          #1a1a1a;
-  --color-card-hover:    #222222;
-  --color-border:        rgba(42,159,214,0.16);
-  --color-border-strong: rgba(42,159,214,0.32);
-
-  --color-primary:       #2a9fd6;
-  --color-primary-hover: #40b8f0;
-  --color-primary-dim:   rgba(42,159,214,0.14);
-  --color-accent:        #77b300;
-  --color-secondary:     #555555;
-  --color-info:          #2a9fd6;
-
-  --color-text-primary:  #f0f0f0;
-  --color-text-secondary:#adafae;
-  --color-text-muted:    #555555;
-
-  --color-success:       #77b300;
-  --color-warning:       #ff8800;
-  --color-error:         #cc0000;
-  --color-danger:        #cc0000;
-  --color-live:          #cc0000;
-  --color-movie:         #2a9fd6;
-  --color-series:        #77b300;
-
-  --color-nav-bg:        #000000;
-  --color-nav-text:      #adafae;
-}
-
-/* ── Superhero — orange on dark navy ─────────────────────────── */
-[data-theme="superhero"] {
-  --color-bg:            #0f2537;
-  --color-surface:       #162e43;
-  --color-card:          #1e3a54;
-  --color-card-hover:    #254660;
-  --color-border:        rgba(78,93,108,0.35);
-  --color-border-strong: rgba(78,93,108,0.55);
-
-  --color-primary:       #df6919;
-  --color-primary-hover: #f07a2a;
-  --color-primary-dim:   rgba(223,105,25,0.15);
-  --color-accent:        #ffc107;
-  --color-secondary:     #4e5d6c;
-  --color-info:          #5bc0de;
-
-  --color-text-primary:  #ebebeb;
-  --color-text-secondary:#9ab0c2;
-  --color-text-muted:    #4e5d6c;
-
-  --color-success:       #5cb85c;
-  --color-warning:       #ffc107;
-  --color-error:         #d9534f;
-  --color-danger:        #d9534f;
-  --color-live:          #d9534f;
-  --color-movie:         #5bc0de;
-  --color-series:        #5cb85c;
-
-  --color-nav-bg:        #092032;
-  --color-nav-text:      #ebebeb;
-}
-
-/* ── Darkly — flat dark, teal success ────────────────────────── */
-[data-theme="darkly"] {
-  --color-bg:            #222222;
-  --color-surface:       #2a2a2a;
-  --color-card:          #303030;
-  --color-card-hover:    #383838;
-  --color-border:        rgba(255,255,255,0.08);
-  --color-border-strong: rgba(255,255,255,0.15);
-
-  --color-primary:       #375a7f;
-  --color-primary-hover: #4a7aaa;
-  --color-primary-dim:   rgba(55,90,127,0.18);
-  --color-accent:        #00bc8c;
-  --color-secondary:     #444444;
-  --color-info:          #3498db;
-
-  --color-text-primary:  #ffffff;
-  --color-text-secondary:#ababab;
-  --color-text-muted:    #666666;
-
-  --color-success:       #00bc8c;
-  --color-warning:       #f39c12;
-  --color-error:         #e74c3c;
-  --color-danger:        #e74c3c;
-  --color-live:          #e74c3c;
-  --color-movie:         #3498db;
-  --color-series:        #2ecc71;
-
-  --color-nav-bg:        #1a1a1a;
-  --color-nav-text:      #ffffff;
-}
-
-/* ── Solar — solarized, earthy gold / teal ───────────────────── */
-[data-theme="solar"] {
-  --color-bg:            #002b36;
-  --color-surface:       #073642;
-  --color-card:          #0d4554;
-  --color-card-hover:    #145268;
-  --color-border:        rgba(131,148,150,0.18);
-  --color-border-strong: rgba(131,148,150,0.32);
-
-  --color-primary:       #b58900;
-  --color-primary-hover: #d4a200;
-  --color-primary-dim:   rgba(181,137,0,0.18);
-  --color-accent:        #2aa198;
-  --color-secondary:     #839496;
-  --color-info:          #268bd2;
-
-  --color-text-primary:  #fdf6e3;
-  --color-text-secondary:#839496;
-  --color-text-muted:    #3a6070;
-
-  --color-success:       #2aa198;
-  --color-warning:       #cb4b16;
-  --color-error:         #d33682;
-  --color-danger:        #d33682;
-  --color-live:          #dc322f;
-  --color-movie:         #268bd2;
-  --color-series:        #859900;
-
-  --color-nav-bg:        #001e27;
-  --color-nav-text:      #fdf6e3;
-}
-
-/* ── Cerulean Dark — sky blue on navy ────────────────────────── */
-[data-theme="cerulean-dark"] {
-  --color-bg:            #0c1a26;
-  --color-surface:       #132333;
-  --color-card:          #1a3044;
-  --color-card-hover:    #1f3a52;
-  --color-border:        rgba(47,164,231,0.12);
-  --color-border-strong: rgba(47,164,231,0.25);
-
-  --color-primary:       #2fa4e7;
-  --color-primary-hover: #4db8f5;
-  --color-primary-dim:   rgba(47,164,231,0.14);
-  --color-accent:        #7dd3f8;
-  --color-secondary:     #4a7090;
-  --color-info:          #2fa4e7;
-
-  --color-text-primary:  #e8f4fd;
-  --color-text-secondary:#7aadcc;
-  --color-text-muted:    #3f6e8a;
-
-  --color-success:       #5aaa28;
-  --color-warning:       #e06820;
-  --color-error:         #e03030;
-  --color-danger:        #e03030;
-  --color-live:          #e03030;
-  --color-movie:         #2fa4e7;
-  --color-series:        #5aaa28;
-
-  --color-nav-bg:        #081420;
-  --color-nav-text:      #e8f4fd;
-}
-
-/* ═══════════════════════════════════════════════════════════════
-   LIGHT THEMES
-═══════════════════════════════════════════════════════════════ */
-
-/* ── Cerulean Light — sky blue on pale blue ──────────────────── */
-[data-theme="cerulean"],
-[data-theme="light"] {
-  --color-bg:            #edf6fd;
-  --color-surface:       #deeef9;
-  --color-card:          #cce3f5;
-  --color-card-hover:    #bcd9f0;
-  --color-border:        rgba(20,100,160,0.14);
-  --color-border-strong: rgba(20,100,160,0.28);
-
-  --color-primary:       #2fa4e7;
-  --color-primary-hover: #1a85c8;
-  --color-primary-dim:   rgba(47,164,231,0.13);
-  --color-accent:        #0d5c94;
-  --color-secondary:     #4a88b0;
-  --color-info:          #033c73;
-
-  --color-text-primary:  #0a1e2e;
-  --color-text-secondary:#1a5070;
-  --color-text-muted:    #5080a0;
-
-  --color-success:       #3a7a18;
-  --color-warning:       #b84200;
-  --color-error:         #b01818;
-  --color-danger:        #b01818;
-  --color-live:          #b01818;
-  --color-movie:         #1a85c8;
-  --color-series:        #2e7d32;
-
-  --color-nav-bg:        #2fa4e7;
-  --color-nav-text:      #ffffff;
-}
-
-/* ── Flatly — dark navy header, clean white body ─────────────── */
-[data-theme="flatly"] {
+/* ── Fractals Day — crisp white, vivid violet/indigo, strong contrast ── */
+[data-theme="fractals-day"] {
   --color-bg:            #ffffff;
-  --color-surface:       #f8f9fa;
-  --color-card:          #ecf0f1;
-  --color-card-hover:    #dde4e6;
-  --color-border:        rgba(44,62,80,0.12);
-  --color-border-strong: rgba(44,62,80,0.22);
+  --color-surface:       #f4f2ff;
+  --color-card:          #ebe8ff;
+  --color-card-hover:    #ddd9ff;
+  --color-border:        rgba(79,70,229,0.18);
+  --color-border-strong: rgba(79,70,229,0.32);
 
-  --color-primary:       #2c3e50;
-  --color-primary-hover: #1a252f;
-  --color-primary-dim:   rgba(44,62,80,0.10);
-  --color-accent:        #18bc9c;
-  --color-secondary:     #95a5a6;
-  --color-info:          #3498db;
+  --color-primary:       #5b21b6;
+  --color-primary-hover: #4c1d95;
+  --color-primary-dim:   rgba(91,33,182,0.14);
+  --color-accent:        #7c3aed;
+  --color-secondary:     #4b5563;
+  --color-info:          #0369a1;
 
-  --color-text-primary:  #2c3e50;
-  --color-text-secondary:#555555;
-  --color-text-muted:    #95a5a6;
+  --color-text-primary:  #09071a;
+  --color-text-secondary:#2e2a66;
+  --color-text-muted:    #5b5880;
 
-  --color-success:       #18bc9c;
-  --color-warning:       #f39c12;
-  --color-error:         #e74c3c;
-  --color-danger:        #e74c3c;
-  --color-live:          #e74c3c;
-  --color-movie:         #3498db;
-  --color-series:        #27ae60;
+  --color-success:       #15803d;
+  --color-warning:       #b45309;
+  --color-error:         #be123c;
+  --color-danger:        #be123c;
+  --color-live:          #be123c;
+  --color-movie:         #1d4ed8;
+  --color-series:        #047857;
 
-  --color-nav-bg:        #2c3e50;
+  --color-nav-bg:        #5b21b6;
   --color-nav-text:      #ffffff;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
 }
 
-/* ── Cosmo — vibrant blue, punchy orange ─────────────────────── */
-[data-theme="cosmo"] {
-  --color-bg:            #ffffff;
-  --color-surface:       #f5f5f5;
-  --color-card:          #eaeaea;
-  --color-card-hover:    #dddddd;
-  --color-border:        rgba(55,58,60,0.12);
-  --color-border-strong: rgba(55,58,60,0.22);
-
-  --color-primary:       #2780e3;
-  --color-primary-hover: #1a6acc;
-  --color-primary-dim:   rgba(39,128,227,0.12);
-  --color-accent:        #9954bb;
-  --color-secondary:     #373a3c;
-  --color-info:          #9954bb;
-
-  --color-text-primary:  #373a3c;
-  --color-text-secondary:#555555;
-  --color-text-muted:    #888888;
-
-  --color-success:       #3fb618;
-  --color-warning:       #ff7518;
-  --color-error:         #ff0039;
-  --color-danger:        #ff0039;
-  --color-live:          #ff0039;
-  --color-movie:         #2780e3;
-  --color-series:        #3fb618;
-
-  --color-nav-bg:        #2780e3;
-  --color-nav-text:      #ffffff;
+/* ── Source palette overrides for Fractals Day — deeper saturation ── */
+[data-theme="fractals-day"] {
+  --color-src-1: #6d28d9;   /* deep violet  ~270° */
+  --color-src-2: #a16207;   /* warm gold     ~43° */
+  --color-src-3: #c2410c;   /* burnt orange  ~22° */
+  --color-src-4: #86198f;   /* deep fuchsia ~295° */
+  --color-src-5: #9d174d;   /* deep rose    ~330° */
+  --color-src-6: #b45309;   /* dark amber    ~32° */
+  --color-src-7: #4c1d95;   /* dark purple  ~270° */
+  --color-src-8: #92400e;   /* dark ochre    ~30° */
 }
 
-/* ── Minty — soft mint green, coral accents ──────────────────── */
-[data-theme="minty"] {
-  --color-bg:            #ffffff;
-  --color-surface:       #f8fffe;
-  --color-card:          #e8f8f4;
-  --color-card-hover:    #d5f0e8;
-  --color-border:        rgba(120,194,173,0.22);
-  --color-border-strong: rgba(120,194,173,0.42);
-
-  --color-primary:       #78c2ad;
-  --color-primary-hover: #5aaa94;
-  --color-primary-dim:   rgba(120,194,173,0.15);
-  --color-accent:        #f3969a;
-  --color-secondary:     #f3969a;
-  --color-info:          #6cc3d5;
-
-  --color-text-primary:  #2a4a42;
-  --color-text-secondary:#4a7a6a;
-  --color-text-muted:    #7aaa98;
-
-  --color-success:       #56cc9d;
-  --color-warning:       #ffce67;
-  --color-error:         #ff7851;
-  --color-danger:        #ff7851;
-  --color-live:          #ff7851;
-  --color-movie:         #6cc3d5;
-  --color-series:        #56cc9d;  /* already green-ish, distinct enough from teal movie */
-
-  --color-nav-bg:        #78c2ad;
-  --color-nav-text:      #ffffff;
+/* ════════════════════════════════════════════════════════════════
+   V2 TOKEN BRIDGE — maps V2 design tokens to the color system
+   Ensures theme switches actually affect V2 token consumers.
+   [data-theme] has higher specificity than :root, so this
+   correctly overrides the dark-hardcoded :root V2 values.
+════════════════════════════════════════════════════════════════ */
+[data-theme] {
+  /* Background levels */
+  --bg-1: var(--color-bg);
+  --bg-2: var(--color-surface);
+  --bg-3: var(--color-card);
+  --bg-4: var(--color-card-hover);
+  /* Text */
+  --text-0: var(--color-text-primary);
+  --text-1: var(--color-text-secondary);
+  --text-2: var(--color-text-muted);
+  /* Semantic accents */
+  --accent-live: var(--color-live);
+  --accent-film: var(--color-movie);
+  --accent-series: var(--color-series);
+  --accent-interactive: var(--color-primary);
+  --accent-interactive-dim: var(--color-primary-dim);
+  --accent-warning: var(--color-warning);
+  --accent-danger: var(--color-danger);
+  --accent-success: var(--color-success);
 }
 
-/* ── United — Ubuntu orange ──────────────────────────────────── */
-[data-theme="united"] {
-  --color-bg:            #ffffff;
-  --color-surface:       #f8f8f8;
-  --color-card:          #eeeeee;
-  --color-card-hover:    #e0e0e0;
-  --color-border:        rgba(51,51,51,0.12);
-  --color-border-strong: rgba(51,51,51,0.22);
-
-  --color-primary:       #e95420;
-  --color-primary-hover: #cc4010;
-  --color-primary-dim:   rgba(233,84,32,0.12);
-  --color-accent:        #38b44a;
-  --color-secondary:     #aea79f;
-  --color-info:          #17a2b8;
-
-  --color-text-primary:  #333333;
-  --color-text-secondary:#555555;
-  --color-text-muted:    #999999;
-
-  --color-success:       #38b44a;
-  --color-warning:       #efb73e;
-  --color-error:         #df382c;
-  --color-danger:        #df382c;
-  --color-live:          #df382c;
-  --color-movie:         #17a2b8;
-  --color-series:        #38b44a;
-
-  --color-nav-bg:        #e95420;
-  --color-nav-text:      #ffffff;
-}
-
-/* ── Lux — minimal, black and gold ──────────────────────────── */
-[data-theme="lux"] {
-  --color-bg:            #ffffff;
-  --color-surface:       #f8f8f8;
-  --color-card:          #eeeeee;
-  --color-card-hover:    #e2e2e2;
-  --color-border:        rgba(26,26,26,0.12);
-  --color-border-strong: rgba(26,26,26,0.22);
-
-  --color-primary:       #1a1a1a;
-  --color-primary-hover: #333333;
-  --color-primary-dim:   rgba(26,26,26,0.10);
-  --color-accent:        #f0ad4e;
-  --color-secondary:     #6c757d;
-  --color-info:          #1f9bcf;
-
-  --color-text-primary:  #1a1a1a;
-  --color-text-secondary:#555555;
-  --color-text-muted:    #999999;
-
-  --color-success:       #4bbf73;
-  --color-warning:       #f0ad4e;
-  --color-error:         #d9534f;
-  --color-danger:        #d9534f;
-  --color-live:          #d9534f;
-  --color-movie:         #1f9bcf;
-  --color-series:        #4bbf73;
-
-  --color-nav-bg:        #1a1a1a;
-  --color-nav-text:      #ffffff;
-}
-
-/* ── Source palette overrides for light themes ───────────────── */
-/* Same hue zones, darkened for legibility on pale backgrounds.  */
-[data-theme="fractals-light"],
-[data-theme="cerulean"],
-[data-theme="light"],
-[data-theme="flatly"],
-[data-theme="cosmo"],
-[data-theme="minty"],
-[data-theme="united"],
-[data-theme="lux"] {
-  --color-src-1: #b45309;   /* dark amber   */
-  --color-src-2: #c2410c;   /* dark orange  */
-  --color-src-3: #6d28d9;   /* dark violet  */
-  --color-src-4: #a21caf;   /* dark fuchsia */
-  --color-src-5: #9d174d;   /* dark pink    */
-  --color-src-6: #15803d;   /* dark green   */
-  --color-src-7: #7e22ce;   /* dark purple  */
-  --color-src-8: #a16207;   /* dark yellow  */
+/* Light theme V2 adjustments
+   Dark mode: bg-0 = deepest, bg-1 = slightly less dark, bg-2 = card bg
+   Light mode: inverted — bg-2 = lightest body, bg-1 = slightly off-white panel/nav
+   Also: borders need to use dark ink, not white; text-3 needs different derivation */
+[data-theme="fractals-day"] {
+  /* Remap bg hierarchy for light — panel/nav gets surface, content gets bg */
+  --bg-0: var(--color-card);
+  --bg-1: var(--color-surface);
+  --bg-2: var(--color-bg);
+  --bg-3: var(--color-card);
+  /* Text */
+  --text-3: color-mix(in srgb, var(--color-text-muted) 60%, transparent);
+  /* Borders — visible on white */
+  --border-subtle: var(--color-border);
+  --border-default: var(--color-border-strong);
+  --border-strong: rgba(79,70,229,0.44);
 }
 
 /* ════════════════════════════════════════════════════════════════
@@ -544,7 +195,7 @@
 }
 
 html {
-  zoom: 1.1;
+  zoom: 1;
 }
 
 html,
@@ -642,7 +293,6 @@ input::placeholder {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 30%, transparent);
 }
 
-
 /* Nav search bar sits on a colored --color-nav-bg; needs white-tinted styling */
 .nav-search-input::placeholder {
   color: rgba(255, 255, 255, 0.55);
@@ -661,4 +311,9 @@ input::placeholder {
 @keyframes shimmer {
   0% { transform: translateX(-150%); }
   100% { transform: translateX(350%); }
+}
+
+@keyframes slideUpPrompt {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
 }

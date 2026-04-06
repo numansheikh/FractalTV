@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Category Option 4 — In Search</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #111118; color: #fff; font-family: -apple-system, sans-serif; font-size: 13px; display: flex; height: 100vh; overflow: hidden; }
+  .rail { width: 48px; background: #0c0c12; border-right: 1px solid rgba(255,255,255,0.07); display: flex; flex-direction: column; align-items: center; padding: 10px 0; gap: 2px; flex-shrink: 0; }
+  .rail-icon { width: 38px; height: 38px; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #505060; }
+  .rail-icon svg { width: 17px; height: 17px; }
+  .rail-icon.active { background: rgba(74,158,255,0.13); color: #4a9eff; }
+  .rail-spacer { flex: 1; }
+  .rail-div { width: 24px; height: 1px; background: rgba(255,255,255,0.07); margin: 4px 0; }
+  .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  .topbar { height: 38px; background: #0c0c12; border-bottom: 1px solid rgba(255,255,255,0.06); display: flex; align-items: center; padding: 0 16px; }
+  .topbar span { font-size: 10px; color: #404050; margin-left: auto; }
+  .content { flex: 1; overflow-y: auto; padding: 18px 20px 32px; display: flex; flex-direction: column; gap: 16px; }
+
+  /* Search bar — focused/active state */
+  .search-wrap { position: relative; }
+  .search-input { width: 100%; height: 42px; background: #1a1a24; border: 1.5px solid rgba(74,158,255,0.45); border-radius: 8px; color: #fff; font-size: 14px; padding: 0 16px 0 40px; outline: none; }
+  .search-icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: #4a9eff; }
+  .search-clear { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font-size: 11px; color: #505060; background: #222230; border: 1px solid rgba(255,255,255,0.08); border-radius: 4px; padding: 2px 7px; cursor: pointer; }
+
+  /* Inline filter chips */
+  .filter-row { display: flex; align-items: center; gap: 6px; }
+  .filter-label { font-size: 10px; color: #404050; }
+  .filter-chip { display: inline-flex; align-items: center; gap: 3px; padding: 3px 9px; border-radius: 20px; font-size: 11px; border: 1px solid rgba(255,255,255,0.09); color: #808090; background: #1a1a24; cursor: pointer; white-space: nowrap; }
+  .filter-chip:hover { border-color: rgba(255,255,255,0.18); color: #fff; }
+  .filter-chip.active { border-color: rgba(74,158,255,0.35); color: #4a9eff; background: rgba(74,158,255,0.08); }
+  .filter-sep { color: #2a2a38; font-size: 12px; }
+
+  /* Result groups */
+  .result-group { display: flex; flex-direction: column; gap: 9px; }
+  .group-hdr { display: flex; align-items: baseline; justify-content: space-between; }
+  .group-title { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #505060; }
+  .group-link { font-size: 11px; color: #404050; cursor: pointer; }
+  .group-link:hover { color: #4a9eff; }
+
+  .ch-row { display: flex; gap: 8px; }
+  .ch-card { flex-shrink: 0; width: 148px; background: #1a1a24; border-radius: 6px; border: 1px solid rgba(255,255,255,0.07); overflow: hidden; cursor: pointer; }
+  .ch-card:hover { border-color: rgba(255,255,255,0.15); }
+  .ch-art { aspect-ratio: 16/9; background: #222230; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 800; color: #404050; }
+  .ch-info { padding: 5px 8px 7px; }
+  .ch-name { font-size: 11px; font-weight: 600; color: #e0e0f0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ch-sub { font-size: 10px; color: #505060; margin-top: 1px; }
+  .live-pip { display: inline-block; width: 5px; height: 5px; background: #e05555; border-radius: 50%; margin-right: 3px; }
+
+  .po-row { display: flex; gap: 8px; }
+  .po-card { flex-shrink: 0; width: 100px; background: #1a1a24; border-radius: 6px; border: 1px solid rgba(255,255,255,0.07); overflow: hidden; cursor: pointer; }
+  .po-card:hover { border-color: rgba(255,255,255,0.15); }
+  .po-art { aspect-ratio: 2/3; background: #222230; position: relative; }
+  .po-badge { position: absolute; bottom: 5px; left: 5px; font-size: 8px; font-weight: 700; text-transform: uppercase; padding: 2px 5px; border-radius: 3px; }
+  .badge-movie { background: rgba(74,158,255,0.22); color: #4a9eff; }
+  .badge-series { background: rgba(45,186,133,0.22); color: #2dba85; }
+  .po-info { padding: 5px 7px 7px; }
+  .po-title { font-size: 10px; font-weight: 600; color: #e0e0f0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .po-meta { font-size: 9px; color: #505060; margin-top: 2px; }
+
+  /* highlight match in title */
+  .match { color: #fff; font-weight: 700; }
+</style>
+</head>
+<body>
+<div class="rail">
+  <div class="rail-icon active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg></div>
+  <div class="rail-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1" fill="currentColor"/></svg></div>
+  <div class="rail-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="2"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/></svg></div>
+  <div class="rail-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></div>
+  <div class="rail-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg></div>
+  <div class="rail-div"></div>
+  <div class="rail-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg></div>
+  <div class="rail-spacer"></div>
+  <div class="rail-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></div>
+</div>
+<div class="main">
+  <div class="topbar"><span>2 sources · 4,821 items</span></div>
+  <div class="content">
+
+    <!-- Search bar — active with query -->
+    <div class="search-wrap">
+      <svg class="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input class="search-input" value="dark" readonly />
+      <span class="search-clear">✕ clear</span>
+    </div>
+
+    <!-- Inline type + category filters — appear on search -->
+    <div class="filter-row">
+      <span class="filter-label">Filter:</span>
+      <div class="filter-chip active">All types</div>
+      <span class="filter-sep">·</span>
+      <div class="filter-chip">Live</div>
+      <div class="filter-chip">Movies</div>
+      <div class="filter-chip">Series</div>
+      <span class="filter-sep">·</span>
+      <div class="filter-chip">Genre ▾</div>
+      <div class="filter-chip">Language ▾</div>
+    </div>
+
+    <!-- Live results -->
+    <div class="result-group">
+      <div class="group-hdr">
+        <span class="group-title"><span class="live-pip"></span>Live Channels · 3 results</span>
+        <span class="group-link">Show all →</span>
+      </div>
+      <div class="ch-row">
+        <div class="ch-card"><div class="ch-art">BBC</div><div class="ch-info"><div class="ch-name">BBC <span class="match">Dark</span>side</div><div class="ch-sub">OPPLEX</div></div></div>
+        <div class="ch-card"><div class="ch-art">SKY</div><div class="ch-info"><div class="ch-name">Sky <span class="match">Dark</span>matter</div><div class="ch-sub">AR-SUBS</div></div></div>
+        <div class="ch-card"><div class="ch-art">HBО</div><div class="ch-info"><div class="ch-name"><span class="match">Dark</span>side TV</div><div class="ch-sub">OPPLEX</div></div></div>
+      </div>
+    </div>
+
+    <!-- Movie results -->
+    <div class="result-group">
+      <div class="group-hdr">
+        <span class="group-title">Movies · 14 results</span>
+        <span class="group-link">Show all →</span>
+      </div>
+      <div class="po-row">
+        <div class="po-card"><div class="po-art" style="background:#1a1a1e;"><span class="po-badge badge-movie">Movie</span></div><div class="po-info"><div class="po-title"><span class="match">Dark</span> Waters</div><div class="po-meta">2019 · ★ 7.6</div></div></div>
+        <div class="po-card"><div class="po-art" style="background:#1e1a1a;"><span class="po-badge badge-movie">Movie</span></div><div class="po-info"><div class="po-title">The <span class="match">Dark</span>ness</div><div class="po-meta">2016 · ★ 5.0</div></div></div>
+        <div class="po-card"><div class="po-art" style="background:#1a1e1e;"><span class="po-badge badge-movie">Movie</span></div><div class="po-info"><div class="po-title"><span class="match">Dark</span> Knight</div><div class="po-meta">2008 · ★ 9.0</div></div></div>
+        <div class="po-card"><div class="po-art" style="background:#1e1e1a;"><span class="po-badge badge-movie">Movie</span></div><div class="po-info"><div class="po-title">After <span class="match">Dark</span></div><div class="po-meta">2014 · ★ 5.8</div></div></div>
+        <div class="po-card"><div class="po-art" style="background:#1e1a1e;"><span class="po-badge badge-movie">Movie</span></div><div class="po-info"><div class="po-title"><span class="match">Dark</span> Places</div><div class="po-meta">2015 · ★ 6.1</div></div></div>
+      </div>
+    </div>
+
+    <!-- Series results -->
+    <div class="result-group">
+      <div class="group-hdr">
+        <span class="group-title">Series · 8 results</span>
+        <span class="group-link">Show all →</span>
+      </div>
+      <div class="po-row">
+        <div class="po-card"><div class="po-art" style="background:#1a1e1c;"><span class="po-badge badge-series">Series</span></div><div class="po-info"><div class="po-title"><span class="match">Dark</span></div><div class="po-meta">2017 · ★ 8.7</div></div></div>
+        <div class="po-card"><div class="po-art" style="background:#1c1a1e;"><span class="po-badge badge-series">Series</span></div><div class="po-info"><div class="po-title"><span class="match">Dark</span>side</div><div class="po-meta">2022 · ★ 7.2</div></div></div>
+        <div class="po-card"><div class="po-art" style="background:#1e1c1a;"><span class="po-badge badge-series">Series</span></div><div class="po-info"><div class="po-title">Into the <span class="match">Dark</span></div><div class="po-meta">2018 · ★ 6.4</div></div></div>
+        <div class="po-card"><div class="po-art" style="background:#1a1c1e;"><span class="po-badge badge-series">Series</span></div><div class="po-info"><div class="po-title">The <span class="match">Dark</span>ness</div><div class="po-meta">2019 · ★ 7.0</div></div></div>
+        <div class="po-card"><div class="po-art" style="background:#1e1a1c;"><span class="po-badge badge-series">Series</span></div><div class="po-info"><div class="po-title"><span class="match">Dark</span> Matter</div><div class="po-meta">2024 · ★ 7.8</div></div></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+</body>
+</html>

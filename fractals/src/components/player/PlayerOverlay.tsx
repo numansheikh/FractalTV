@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import Hls from 'hls.js'
 import Artplayer from 'artplayer'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ContentItem } from '@/lib/types'
 import { api } from '@/lib/api'
+import { useAppStore } from '@/stores/app.store'
 
 declare global {
   interface Window { electronDevTools?: () => void }
@@ -17,6 +19,8 @@ interface Props {
 export function PlayerOverlay({ content, onClose }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const artRef = useRef<Artplayer | null>(null)
+  const qc = useQueryClient()
+  const minWatchSeconds = useAppStore((s) => s.minWatchSeconds)
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -115,17 +119,31 @@ export function PlayerOverlay({ content, onClose }: Props) {
                 ;(art as any).hls = hls
                 hls.loadSource(src)
                 hls.attachMedia(video)
+                let networkRecoveryAttempted = false
+                let mediaRecoveryAttempted = false
                 hls.on(Hls.Events.ERROR, (_e: any, data: any) => {
                   if (data.fatal && !cancelled) {
-                    // Auto-recover from network errors (e.g. ISP switch)
                     if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-                      console.log('[HLS] Fatal network error, attempting recovery…')
-                      hls.startLoad()
+                      if (!networkRecoveryAttempted) {
+                        networkRecoveryAttempted = true
+                        console.log('[HLS] Fatal network error, attempting recovery…')
+                        hls.startLoad()
+                      } else {
+                        setError('Stream unavailable — network error')
+                        setLoading(false)
+                      }
                     } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-                      console.log('[HLS] Fatal media error, attempting recovery…')
-                      hls.recoverMediaError()
+                      if (!mediaRecoveryAttempted) {
+                        mediaRecoveryAttempted = true
+                        console.log('[HLS] Fatal media error, attempting recovery…')
+                        hls.recoverMediaError()
+                      } else {
+                        setError('Stream format not supported')
+                        setLoading(false)
+                      }
                     } else {
-                      setError(`${data.type}: ${data.details}`)
+                      setError(`Playback error: ${data.details ?? data.type}`)
+                      setLoading(false)
                     }
                   }
                 })
@@ -262,7 +280,7 @@ export function PlayerOverlay({ content, onClose }: Props) {
       const art = artRef.current
       if (!art || art.playing === false) return
       const t = Math.floor(art.currentTime)
-      if (t > 2) {
+      if (t >= minWatchSeconds) {
         api.user.setPosition(content.id, t)
       }
     }, 10000) // every 10s
@@ -272,14 +290,16 @@ export function PlayerOverlay({ content, onClose }: Props) {
       const art = artRef.current
       if (!art) return
       const t = Math.floor(art.currentTime)
-      if (t > 2) api.user.setPosition(content.id, t)
+      if (t >= minWatchSeconds) api.user.setPosition(content.id, t)
     }
 
-    // Completion detection
+    // Completion detection — only for content the user actually watched
+    // (duration > 30s AND currentTime past minWatchSeconds threshold)
     const onTimeUpdate = () => {
       if (completionMarkedRef.current) return
       const art = artRef.current
       if (!art || !art.duration || art.duration < 30) return
+      if (art.currentTime < minWatchSeconds) return
       if (art.currentTime / art.duration > 0.92) {
         completionMarkedRef.current = true
         api.user.setCompleted(content.id)
@@ -306,14 +326,20 @@ export function PlayerOverlay({ content, onClose }: Props) {
       clearInterval(saveInterval)
       clearTimeout(attachTimer)
       if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current)
-      // Save position on unmount
+      // Save position on unmount, then invalidate after IPC resolves
       const art = artRef.current
-      if (art) {
-        const t = Math.floor(art.currentTime)
-        if (t > 2) api.user.setPosition(content.id, t)
+      const t = art ? Math.floor(art.currentTime) : 0
+      const invalidateAll = () => {
+        qc.invalidateQueries({ queryKey: ['home-continue'] })
+        qc.invalidateQueries({ queryKey: ['library', 'continue-watching'] })
+      }
+      if (t >= minWatchSeconds) {
+        api.user.setPosition(content.id, t).then(invalidateAll).catch(invalidateAll)
+      } else {
+        invalidateAll()
       }
     }
-  }, [content.id, content.type])
+  }, [content.id, content.type, qc, minWatchSeconds])
 
   const handleResume = () => {
     if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current)

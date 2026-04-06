@@ -27,21 +27,22 @@ function makeColor(v: string): SourceColor {
   }
 }
 
-// Dedicated source palette — hue zones never overlap type colors.
-// --color-src-1 (amber) is reserved for the "All" tab button.
-// Sources start at src-2 so they never clash with "All".
-// Ordered to maximize hue distance between ANY number of adjacent sources:
-//   2 sources → orange, violet        (235° apart)
-//   3 sources → orange, violet, pink  (all 100°+ apart)
-//   4 sources → orange, violet, pink, green (all 70°+ apart)
+// Source palette — hue zones that never overlap type indicator colors
+// (red/rose=live, blue=movies, teal/emerald=series).
+// Ordered to maximize hue distance for the most common case (2–4 sources):
+//   1 source  → violet (280°)
+//   2 sources → violet, gold            (128° apart)
+//   3 sources → violet, gold, hot-pink  (128°, 80°, 56°)
+//   4 sources → violet, gold, hot-pink, orange (all 56°+ apart)
 const PALETTE: SourceColor[] = [
-  makeColor('--color-src-2'),   // orange        ~24°
-  makeColor('--color-src-3'),   // soft violet  ~259°
-  makeColor('--color-src-5'),   // hot pink     ~328°
-  makeColor('--color-src-6'),   // lime-green   ~142°
-  makeColor('--color-src-8'),   // yellow        ~53°
-  makeColor('--color-src-4'),   // fuchsia      ~294°
-  makeColor('--color-src-7'),   // light purple ~278°
+  makeColor('--color-src-1'),   // vivid violet  ~280°
+  makeColor('--color-src-2'),   // vivid gold     ~48°
+  makeColor('--color-src-5'),   // hot pink      ~328°   ← 80° from gold, 56° from orange
+  makeColor('--color-src-3'),   // vivid orange   ~24°
+  makeColor('--color-src-4'),   // vivid fuchsia ~294°
+  makeColor('--color-src-6'),   // warm amber     ~32°
+  makeColor('--color-src-7'),   // soft lavender ~278°
+  makeColor('--color-src-8'),   // bright lemon   ~53°
 ]
 
 export function getSourceColor(index: number): SourceColor {

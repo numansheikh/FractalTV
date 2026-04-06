@@ -29,6 +29,15 @@ export interface ContentItem {
   _username?: string
   _password?: string
   _extension?: string
+
+  // Continue-watching fields — present when returned from user:continue-watching
+  last_position?: number
+  last_watched_at?: number
+  // For series: the specific episode to resume
+  resume_episode_id?: string
+  resume_season_number?: number
+  resume_episode_number?: number
+  resume_episode_title?: string
 }
 
 export type ContentType = 'all' | 'live' | 'movie' | 'series'

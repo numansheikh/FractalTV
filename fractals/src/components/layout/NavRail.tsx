@@ -28,6 +28,7 @@ export function NavRail({ onOpenSources, onOpenSettings }: Props) {
   return (
     <div style={{
       width: 48,
+      height: '100%',
       flexShrink: 0,
       display: 'flex',
       flexDirection: 'column',

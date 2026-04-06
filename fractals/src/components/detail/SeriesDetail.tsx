@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ContentItem, BreadcrumbNav } from '@/lib/types'
 import { api } from '@/lib/api'
 import { useSourcesStore } from '@/stores/sources.store'
 import { useUserStore } from '@/stores/user.store'
+import { useSearchStore } from '@/stores/search.store'
 import { buildColorMap } from '@/lib/sourceColors'
 import { SlidePanel } from '@/components/layout/SlidePanel'
 import { EpisodeRow } from '@/components/cards/EpisodeRow'
@@ -26,6 +27,7 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
   const { sources } = useSourcesStore()
   const colorMap = buildColorMap(sources.map((s) => s.id))
   const userStore = useUserStore()
+  const setQuery = useSearchStore((s) => s.setQuery)
 
   const { data: enrichedItem, refetch } = useQuery({
     queryKey: ['content', item.id],
@@ -38,6 +40,17 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
     queryFn: () => api.series.getInfo(item.id),
     staleTime: 5 * 60_000,
   })
+
+  // Find in-progress episode for this series (resume support)
+  const { data: continueData = [] } = useQuery<ContentItem[]>({
+    queryKey: ['series-continue', item.id],
+    queryFn: async () => {
+      const all = await api.user.continueWatching({ type: 'series' }) as ContentItem[]
+      return all.filter((ci) => ci.id === item.id)
+    },
+    staleTime: 30_000,
+  })
+  const resumeEntry = continueData[0] ?? null
 
   const c = (enrichedItem as ContentItem | null) ?? item
   const isEnriched = !!(c.enriched)
@@ -58,6 +71,13 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
   const currentSeason = activeSeason ?? seasonKeys[0] ?? null
   const episodes: any[] = currentSeason ? (seasons[currentSeason] ?? []) : []
 
+  // Load user data for visible episodes so progress bars render correctly
+  useEffect(() => {
+    if (!primarySourceId || episodes.length === 0) return
+    const episodeIds = episodes.map((ep) => `${primarySourceId}:episode:${ep.id}`)
+    userStore.loadBulk(episodeIds)
+  }, [primarySourceId, episodes, userStore])
+
   const serverUrl: string = (seriesInfo as any)?.serverUrl ?? ''
   const username: string = (seriesInfo as any)?.username ?? ''
   const password: string = (seriesInfo as any)?.password ?? ''
@@ -69,23 +89,53 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
   })()
   const categoryName = (c as any).categoryName ?? (c as any).category_name
 
-  // First episode for the "Play S1 E1" action button default
+  // Determine which episode to play:
+  // 1. If user has an in-progress episode, use that (resume from where they left off)
+  // 2. Otherwise default to the first episode of the first season
   const firstEpisode = episodes[0] ?? null
-  const firstEpItem: ContentItem | undefined = firstEpisode
+
+  // Find resume episode in loaded episodes list
+  const resumeEpisodeInList = resumeEntry?.resume_episode_id
+    ? episodes.find((ep) => String(ep.id) === resumeEntry.resume_episode_id)
+    : null
+
+  // Switch to the resume season if needed
+  const resumeSeason = resumeEntry?.resume_season_number != null
+    ? String(resumeEntry.resume_season_number)
+    : null
+
+  // Auto-select the resume season once seasons are loaded
+  const [hasAutoSelectedSeason, setHasAutoSelectedSeason] = useState(false)
+  useEffect(() => {
+    if (!hasAutoSelectedSeason && resumeSeason && seasonKeys.includes(resumeSeason) && activeSeason === null) {
+      setHasAutoSelectedSeason(true)
+      setActiveSeason(resumeSeason)
+    }
+  }, [hasAutoSelectedSeason, resumeSeason, seasonKeys, activeSeason])
+
+  const episodeForPlay = resumeEpisodeInList ?? firstEpisode
+  const firstEpItem: ContentItem | undefined = episodeForPlay
     ? {
         ...item,
-        _streamId: String(firstEpisode.id),
+        // Use {sourceId}:episode:{streamId} — must match what's upserted into content during series:get-info
+        id: `${primarySourceId}:episode:${episodeForPlay.id}`,
+        title: `S${currentSeason ?? 1}E${episodeForPlay.episode_num} · ${episodeForPlay.title ?? ''}`,
+        _streamId: String(episodeForPlay.id),
         _serverUrl: serverUrl,
         _username: username,
         _password: password,
-        _extension: firstEpisode.container_extension,
+        _extension: episodeForPlay.container_extension,
       }
     : undefined
+
+  const playButtonLabel = resumeEntry && resumeEntry.resume_season_number != null && resumeEntry.resume_episode_number != null
+    ? `▶ Resume S${resumeEntry.resume_season_number}·E${resumeEntry.resume_episode_number}`
+    : firstEpisode ? '▶ Play from S1·E1' : '▶ Play'
 
   const handleRefetch = () => { refetch() }
 
   return (
-    <SlidePanel open={true} onClose={onClose} width={720} suppressClose={isPlaying}>
+    <SlidePanel open={true} onClose={onClose} width={Math.min(720, window.innerWidth * 0.92)} suppressClose={isPlaying}>
       <div style={{ display: 'flex', flexDirection: 'row', height: '100%', background: 'var(--bg-1)' }}>
 
         {/* ── Left column: Season selector + episode list ── */}
@@ -122,13 +172,17 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
             )}
             {seasonKeys.map((s) => {
               const isActive = currentSeason === s
+              // Season 0 from Xtream APIs = specials/extras
+              const label = s === '0' ? 'S' : s
               return (
                 <button
                   key={s}
                   onClick={() => setActiveSeason(s)}
+                  title={s === '0' ? 'Specials' : `Season ${s}`}
                   style={{
-                    width: 34,
+                    minWidth: 34,
                     height: 34,
+                    padding: '0 6px',
                     borderRadius: '50%',
                     display: 'flex',
                     alignItems: 'center',
@@ -150,7 +204,7 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
                     if (!isActive) e.currentTarget.style.borderColor = 'transparent'
                   }}
                 >
-                  {s}
+                  {label}
                 </button>
               )
             })}
@@ -188,13 +242,20 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
             )}
 
             {episodes.map((ep) => {
-              const epUserData = userStore.data[`episode:${ep.id}`]
+              const epUserData = userStore.data[`${primarySourceId}:episode:${ep.id}`]
               const isCompleted = epUserData?.completed === 1
               const progress = (() => {
                 if (!epUserData?.last_position || isCompleted) return 0
                 const durationSec = ep.duration
                   ? (() => {
-                      const parts = String(ep.duration).split(':').map(Number)
+                      const raw = ep.duration
+                      // If it's already a number (seconds), use directly
+                      if (typeof raw === 'number') return raw
+                      const str = String(raw)
+                      // If it's a pure numeric string, parse as seconds
+                      if (/^\d+(\.\d+)?$/.test(str)) return parseFloat(str)
+                      // Otherwise parse "HH:MM:SS" or "MM:SS"
+                      const parts = str.split(':').map(Number)
                       if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2]
                       if (parts.length === 2) return parts[0] * 60 + parts[1]
                       return 0
@@ -222,7 +283,7 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
                   onPlay={() => {
                     const epItem: ContentItem = {
                       ...item,
-                      id: `episode:${ep.id}`,
+                      id: `${primarySourceId}:episode:${ep.id}`,
                       title: `S${currentSeason}E${ep.episode_num} · ${ep.title ?? ''}`,
                       _streamId: String(ep.id),
                       _serverUrl: serverUrl,
@@ -350,6 +411,7 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
               item={c}
               onPlay={onPlay}
               episodeToPlay={firstEpItem}
+              overridePlayLabel={playButtonLabel}
             />
 
             {/* Plot */}
@@ -411,8 +473,8 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
                     <button
                       key={name}
                       onClick={() => {
-                        console.log('[SeriesDetail] Navigate to cast:', name)
-                        onNavigate({ type: 'series' })
+                        setQuery(name)
+                        onClose()
                       }}
                       style={{
                         padding: '4px 10px',

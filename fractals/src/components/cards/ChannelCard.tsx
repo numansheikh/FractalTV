@@ -22,6 +22,7 @@ export function ChannelCard({ item, onClick }: Props) {
   const hasPoster = poster && !imgError
   const primarySourceId = item.primarySourceId ?? item.primary_source_id
   const sourceColor = primarySourceId ? colorMap[primarySourceId] : undefined
+  const showSourceBar = sources.length > 1 && !!sourceColor
   const isFavorite = userData?.favorite === 1
 
   // Channel initials for fallback
@@ -45,15 +46,8 @@ export function ChannelCard({ item, onClick }: Props) {
         overflow: 'hidden',
         display: 'flex',
         flexDirection: 'column',
-        border: `1px solid ${
-          hovered
-            ? sourceColor
-              ? sourceColor.accent + '8c' /* ~55% */
-              : 'var(--border-strong)'
-            : sourceColor
-            ? sourceColor.accent + '33' /* ~20% */
-            : 'var(--border-subtle)'
-        }`,
+        border: `1px solid ${hovered ? 'var(--border-strong)' : 'var(--border-subtle)'}`,
+        borderLeft: showSourceBar ? `3px solid ${sourceColor!.accent}` : undefined,
         transition: 'border-color 0.12s',
         userSelect: 'none',
         position: 'relative',
@@ -64,19 +58,8 @@ export function ChannelCard({ item, onClick }: Props) {
         aspectRatio: '16/9',
         position: 'relative',
         overflow: 'hidden',
-        background: sourceColor
-          ? `color-mix(in srgb, ${sourceColor.accent} 12%, transparent)`
-          : 'var(--bg-3)',
+        background: 'var(--bg-3)',
       }}>
-        {/* Source color stripe — top edge */}
-        {sourceColor && (
-          <div style={{
-            position: 'absolute', top: 0, left: 0, right: 0, height: 2,
-            background: sourceColor.accent,
-            zIndex: 1,
-          }} />
-        )}
-
         {hasPoster ? (
           <img
             src={poster}
@@ -93,9 +76,7 @@ export function ChannelCard({ item, onClick }: Props) {
           <div style={{
             position: 'absolute', inset: 0,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            background: sourceColor
-              ? `color-mix(in srgb, ${sourceColor.accent} 12%, transparent)`
-              : 'var(--bg-3)',
+            background: 'var(--bg-3)',
           }}>
             <span style={{
               fontSize: 18,

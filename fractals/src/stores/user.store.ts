@@ -18,6 +18,7 @@ interface UserStore {
   setPosition: (id: string, pos: number) => void
   setCompleted: (id: string) => void
   setRating: (id: string, rating: number | null) => void
+  clearItemHistory: (id: string) => void
 }
 
 export const useUserStore = create<UserStore>((set, get) => ({
@@ -74,6 +75,15 @@ export const useUserStore = create<UserStore>((set, get) => ({
       data: {
         ...state.data,
         [id]: { ...defaultData(state.data[id]), rating },
+      },
+    }))
+  },
+
+  clearItemHistory: (id) => {
+    set((state) => ({
+      data: {
+        ...state.data,
+        [id]: { ...defaultData(state.data[id]), last_position: 0, completed: 0, last_watched_at: null },
       },
     }))
   },

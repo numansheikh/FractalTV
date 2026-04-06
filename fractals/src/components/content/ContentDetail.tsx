@@ -57,7 +57,11 @@ export function ContentDetail({ item, onPlay, onClose, onNavigate, isPlaying }: 
 
   const toggleFav = useMutation({
     mutationFn: () => api.user.toggleFavorite(item.id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['user-data', item.id] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['user-data', item.id] })
+      qc.invalidateQueries({ queryKey: ['browse-favorites'] })
+      qc.invalidateQueries({ queryKey: ['library', 'favorites'] })
+    },
   })
   const toggleWl = useMutation({
     mutationFn: () => api.user.toggleWatchlist(item.id),

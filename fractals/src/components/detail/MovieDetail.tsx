@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { ContentItem, BreadcrumbNav } from '@/lib/types'
 import { api } from '@/lib/api'
 import { useSourcesStore } from '@/stores/sources.store'
+import { useSearchStore } from '@/stores/search.store'
 import { buildColorMap } from '@/lib/sourceColors'
 import { SlidePanel } from '@/components/layout/SlidePanel'
 import { MetadataBlock } from './MetadataBlock'
@@ -22,6 +23,7 @@ export function MovieDetail({ item, onPlay, onClose, onNavigate, isPlaying }: Pr
 
   const { sources } = useSourcesStore()
   const colorMap = buildColorMap(sources.map((s) => s.id))
+  const setQuery = useSearchStore((s) => s.setQuery)
 
   const { data: enrichedItem, refetch } = useQuery({
     queryKey: ['content', item.id],
@@ -223,8 +225,8 @@ export function MovieDetail({ item, onPlay, onClose, onNavigate, isPlaying }: Pr
                   <button
                     key={name}
                     onClick={() => {
-                      console.log('[MovieDetail] Navigate to cast:', name)
-                      onNavigate({ type: item.type as any })
+                      setQuery(name)
+                      onClose()
                     }}
                     style={{
                       padding: '4px 10px',

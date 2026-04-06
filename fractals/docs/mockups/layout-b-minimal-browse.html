@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Option B — Minimal Browse</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0e0e14; color: #fff; font-family: -apple-system, sans-serif; font-size: 13px; display: flex; height: 100vh; overflow: hidden; }
+
+  /* Nav Rail */
+  .rail { width: 48px; background: #0a0a12; border-right: 1px solid rgba(255,255,255,0.07); display: flex; flex-direction: column; align-items: center; padding: 8px 0; gap: 2px; flex-shrink: 0; }
+  .rail-icon { width: 38px; height: 38px; border-radius: 8px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: #555566; font-size: 16px; }
+  .rail-icon.active { background: rgba(74,158,255,0.12); color: #4a9eff; }
+  .rail-spacer { flex: 1; }
+  .rail-divider { width: 24px; height: 1px; background: rgba(255,255,255,0.08); margin: 4px 0; }
+
+  /* Main */
+  .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+
+  /* Command bar */
+  .cmdbar { height: 44px; border-bottom: 1px solid rgba(255,255,255,0.06); background: #0a0a12; display: flex; align-items: center; padding: 0 12px; gap: 8px; flex-shrink: 0; }
+  .cat-btn { padding: 4px 10px; border-radius: 6px; background: #16161e; border: 1px solid rgba(255,255,255,0.08); color: #888898; font-size: 12px; cursor: pointer; white-space: nowrap; }
+  .search-box { flex: 1; min-width: 0; height: 32px; background: #16161e; border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; color: #888898; font-size: 12px; padding: 0 12px 0 30px; display: flex; align-items: center; position: relative; }
+  .search-icon { color: #444455; font-size: 13px; margin-right: 6px; }
+  .sort-btn { padding: 4px 10px; border-radius: 6px; background: #16161e; border: 1px solid rgba(255,255,255,0.08); color: #888898; font-size: 12px; cursor: pointer; white-space: nowrap; flex-shrink: 0; }
+
+  /* Content */
+  .content { flex: 1; overflow-y: auto; padding: 20px 20px 0; }
+
+  /* Recent row — compact single row */
+  .section-header { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
+  .section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #555566; }
+
+  .recent-row { display: flex; gap: 12px; margin-bottom: 28px; }
+  .recent-card { width: 200px; flex-shrink: 0; background: #16161e; border-radius: 8px; border: 1px solid rgba(255,255,255,0.06); display: flex; align-items: center; gap: 10px; padding: 10px; cursor: pointer; }
+  .recent-card:hover { background: #1e1e28; }
+  .rc-thumb { width: 32px; height: 46px; background: #282834; border-radius: 4px; flex-shrink: 0; }
+  .rc-info { min-width: 0; }
+  .rc-title { font-size: 12px; font-weight: 600; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .rc-meta { font-size: 10px; color: #555566; margin-top: 2px; }
+
+  /* Grid — larger cards, less dense */
+  .grid-section { }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 14px; }
+  .card { background: #16161e; border-radius: 8px; border: 1px solid rgba(255,255,255,0.06); overflow: hidden; cursor: pointer; }
+  .card:hover { border-color: rgba(255,255,255,0.14); }
+  .card-poster { aspect-ratio: 2/3; background: #1e1e28; position: relative; }
+  .card-badge { position: absolute; top: 7px; left: 7px; padding: 2px 6px; border-radius: 3px; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; background: rgba(0,0,0,0.7); }
+  .badge-movie { color: #4a9eff; }
+  .badge-series { color: #2dba85; }
+  .badge-live { color: #e05555; }
+  .card-meta { padding: 8px 10px 10px; }
+  .card-title { font-size: 12px; font-weight: 600; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .card-sub { font-size: 10px; color: #555566; margin-top: 3px; }
+</style>
+</head>
+<body>
+
+<div class="rail">
+  <div class="rail-icon active">⌂</div>
+  <div class="rail-icon">📡</div>
+  <div class="rail-icon">🎬</div>
+  <div class="rail-icon">📺</div>
+  <div class="rail-icon">🔖</div>
+  <div class="rail-divider"></div>
+  <div class="rail-icon">⊞</div>
+  <div class="rail-spacer"></div>
+  <div class="rail-icon">⚙</div>
+</div>
+
+<div class="main">
+  <div class="cmdbar">
+    <div class="cat-btn">All categories ▾</div>
+    <div class="search-box">
+      <span class="search-icon">⌕</span>
+      <span style="color:#444455;">Search movies, channels, actors…</span>
+    </div>
+    <div class="sort-btn">Latest Added ▾</div>
+  </div>
+
+  <div class="content">
+
+    <!-- Single compact recent row -->
+    <div class="section-header">
+      <span class="section-title">Continue watching</span>
+    </div>
+    <div class="recent-row">
+      <div class="recent-card">
+        <div class="rc-thumb" style="background:#2a1a1a;"></div>
+        <div class="rc-info"><div class="rc-title">Titanic</div><div class="rc-meta">Movie · 1h 47m left</div></div>
+      </div>
+      <div class="recent-card">
+        <div class="rc-thumb" style="background:#1a2a1a;"></div>
+        <div class="rc-info"><div class="rc-title">The Outsider</div><div class="rc-meta">Series · S1 E4</div></div>
+      </div>
+      <div class="recent-card">
+        <div class="rc-thumb" style="background:#1a1a2a;"></div>
+        <div class="rc-info"><div class="rc-title">Good Girls</div><div class="rc-meta">Series · S2 E1</div></div>
+      </div>
+      <div class="recent-card">
+        <div class="rc-thumb" style="background:#2a2a1a;"></div>
+        <div class="rc-info"><div class="rc-title">Frances Ha</div><div class="rc-meta">Movie · 37m left</div></div>
+      </div>
+    </div>
+
+    <!-- Browse grid — bigger cards, more air -->
+    <div class="section-header">
+      <span class="section-title">All content</span>
+      <span style="font-size:10px;color:#333344;">4,821 items</span>
+    </div>
+    <div class="grid">
+      <div class="card"><div class="card-poster" style="background:#1f2a1f;"><span class="card-badge badge-series">Series</span></div><div class="card-meta"><div class="card-title">Something Undone</div><div class="card-sub">2022 · ★ 7.4</div></div></div>
+      <div class="card"><div class="card-poster" style="background:#2a1f1f;"><span class="card-badge badge-movie">Movie</span></div><div class="card-meta"><div class="card-title">Sexual Animals</div><div class="card-sub">2020 · ★ 2.8</div></div></div>
+      <div class="card"><div class="card-poster" style="background:#1f1f2a;"><span class="card-badge badge-movie">Movie</span></div><div class="card-meta"><div class="card-title">Strictly Sexual</div><div class="card-sub">2008 · ★ 6.1</div></div></div>
+      <div class="card"><div class="card-poster" style="background:#2a2a1f;"><span class="card-badge badge-movie">Movie</span></div><div class="card-meta"><div class="card-title">Love & Sex</div><div class="card-sub">2000 · ★ 6.1</div></div></div>
+      <div class="card"><div class="card-poster" style="background:#1f2a2a;"><span class="card-badge badge-series">Series</span></div><div class="card-meta"><div class="card-title">ABC Murders</div><div class="card-sub">2018 · ★ 7.9</div></div></div>
+      <div class="card"><div class="card-poster" style="background:#2a1f2a;"><span class="card-badge badge-live">Live</span></div><div class="card-meta"><div class="card-title">CNN International</div><div class="card-sub">OPPLEX</div></div></div>
+      <div class="card"><div class="card-poster" style="background:#1f1f1f;"><span class="card-badge badge-movie">Movie</span></div><div class="card-meta"><div class="card-title">Good Girls</div><div class="card-sub">2018 · ★ 7.8</div></div></div>
+      <div class="card"><div class="card-poster" style="background:#201f2a;"><span class="card-badge badge-series">Series</span></div><div class="card-meta"><div class="card-title">The Outsider</div><div class="card-sub">2020 · ★ 8.1</div></div></div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

@@ -444,6 +444,36 @@ export function registerHandlers() {
 
     try {
       const info = await xtreamService.getSeriesInfo(source.serverUrl, source.username, source.password, sourceRow.external_id)
+
+      // Persist episodes into content + content_sources so position saves work
+      // (user_data.content_id FK references content.id — episodes must exist in DB)
+      const upsertEp = sqlite.prepare(`
+        INSERT INTO content (id, primary_source_id, external_id, type, title, parent_id, season_number, episode_number, container_extension, plot, updated_at)
+        VALUES (?, ?, ?, 'episode', ?, ?, ?, ?, ?, ?, unixepoch())
+        ON CONFLICT(id) DO UPDATE SET
+          title = excluded.title,
+          season_number = excluded.season_number,
+          episode_number = excluded.episode_number,
+          container_extension = excluded.container_extension,
+          plot = excluded.plot,
+          updated_at = excluded.updated_at
+      `)
+      const upsertEpSource = sqlite.prepare(`
+        INSERT INTO content_sources (id, content_id, source_id, external_id)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(id) DO NOTHING
+      `)
+      const insertEpisodes = sqlite.transaction((seasons: Record<string, any[]>) => {
+        for (const [, eps] of Object.entries(seasons)) {
+          for (const ep of eps) {
+            const epId = `${source.id}:episode:${ep.id}`
+            upsertEp.run(epId, source.id, String(ep.id), ep.title, args.contentId, ep.season, ep.episode_num, ep.container_extension ?? 'mkv', ep.plot ?? null)
+            upsertEpSource.run(epId, epId, source.id, String(ep.id))
+          }
+        }
+      })
+      insertEpisodes(info.seasons ?? {})
+
       return { ...info, sourceId: source.id, serverUrl: source.serverUrl, username: source.username, password: source.password }
     } catch (err) {
       return { error: String(err) }
@@ -501,8 +531,22 @@ export function registerHandlers() {
       JOIN content c ON c.id = ud.content_id
       WHERE ud.favorite = 1 AND ud.profile_id = 'default'
       ${typeFilter}
-      ORDER BY ud.last_watched_at DESC
+      ORDER BY COALESCE(ud.fav_sort_order, 999999) ASC, ud.last_watched_at DESC
     `).all(...params)
+  })
+
+  ipcMain.handle('user:reorder-favorites', async (_event, order: { contentId: string; sortOrder: number }[]) => {
+    const sqlite = getSqlite()
+    const update = sqlite.prepare(
+      `UPDATE user_data SET fav_sort_order = ? WHERE content_id = ? AND profile_id = 'default'`
+    )
+    const runAll = sqlite.transaction((items: typeof order) => {
+      for (const { contentId, sortOrder } of items) {
+        update.run(sortOrder, contentId)
+      }
+    })
+    runAll(order)
+    return { ok: true }
   })
 
   ipcMain.handle('user:watchlist', async (_event, args?: { type?: 'live' | 'movie' | 'series' }) => {
@@ -519,18 +563,69 @@ export function registerHandlers() {
     `).all(...params)
   })
 
-  ipcMain.handle('user:continue-watching', async () => {
+  ipcMain.handle('user:continue-watching', async (_event, args?: { type?: 'movie' | 'series' }) => {
     const sqlite = getSqlite()
-    return sqlite.prepare(`
-      SELECT c.*, c.primary_source_id as source_ids, ud.last_position
+
+    // In-progress movies: straightforward
+    const moviesSql = `
+      SELECT c.*, c.primary_source_id as source_ids, ud.last_position, ud.last_watched_at
       FROM user_data ud
       JOIN content c ON c.id = ud.content_id
       WHERE ud.last_position > 0 AND ud.completed = 0
-        AND c.type IN ('movie')
+        AND c.type = 'movie'
         AND ud.profile_id = 'default'
       ORDER BY ud.last_watched_at DESC
       LIMIT 20
-    `).all()
+    `
+
+    // In-progress series: find the most recently watched episode per series,
+    // return the parent series row enriched with episode resume info.
+    const seriesSql = `
+      WITH ranked_episodes AS (
+        SELECT
+          ep.parent_id,
+          ep.id          AS resume_episode_id,
+          ep.season_number  AS resume_season_number,
+          ep.episode_number AS resume_episode_number,
+          ep.title          AS resume_episode_title,
+          ud.last_position,
+          ud.last_watched_at,
+          ROW_NUMBER() OVER (
+            PARTITION BY ep.parent_id
+            ORDER BY ud.last_watched_at DESC
+          ) AS rn
+        FROM user_data ud
+        JOIN content ep ON ep.id = ud.content_id
+        WHERE ud.last_position > 0
+          AND ud.completed = 0
+          AND ep.type = 'episode'
+          AND ep.parent_id IS NOT NULL
+          AND ud.profile_id = 'default'
+      )
+      SELECT
+        c.*, c.primary_source_id AS source_ids,
+        r.resume_episode_id,
+        r.resume_season_number,
+        r.resume_episode_number,
+        r.resume_episode_title,
+        r.last_position,
+        r.last_watched_at
+      FROM ranked_episodes r
+      JOIN content c ON c.id = r.parent_id
+      WHERE r.rn = 1
+      ORDER BY r.last_watched_at DESC
+      LIMIT 20
+    `
+
+    if (args?.type === 'movie') return sqlite.prepare(moviesSql).all()
+    if (args?.type === 'series') return sqlite.prepare(seriesSql).all()
+
+    // No type = combined: merge movies + series, sort by recency
+    const movies = sqlite.prepare(moviesSql).all() as any[]
+    const series = sqlite.prepare(seriesSql).all() as any[]
+    return [...movies, ...series]
+      .sort((a, b) => (b.last_watched_at ?? 0) - (a.last_watched_at ?? 0))
+      .slice(0, 20)
   })
 
   ipcMain.handle('user:history', async (_event, args?: { limit?: number }) => {
@@ -580,6 +675,39 @@ export function registerHandlers() {
       VALUES (?, ?)
       ON CONFLICT(content_id) DO UPDATE SET rating = excluded.rating
     `).run(args.contentId, args.rating)
+    return { success: true }
+  })
+
+  // ── User data management ──────────────────────────────────────────────────
+
+  ipcMain.handle('user:clear-item-history', async (_event, contentId: string) => {
+    const sqlite = getSqlite()
+    sqlite.prepare(`
+      UPDATE user_data
+      SET last_position = 0, last_watched_at = NULL, completed = 0
+      WHERE content_id = ?
+    `).run(contentId)
+    return { success: true }
+  })
+
+  ipcMain.handle('user:clear-history', async () => {
+    const sqlite = getSqlite()
+    sqlite.prepare(`
+      UPDATE user_data
+      SET last_position = 0, last_watched_at = NULL, completed = 0
+    `).run()
+    return { success: true }
+  })
+
+  ipcMain.handle('user:clear-favorites', async () => {
+    const sqlite = getSqlite()
+    sqlite.prepare(`UPDATE user_data SET favorite = 0, watchlist = 0`).run()
+    return { success: true }
+  })
+
+  ipcMain.handle('user:clear-all-data', async () => {
+    const sqlite = getSqlite()
+    sqlite.prepare(`DELETE FROM user_data`).run()
     return { success: true }
   })
 

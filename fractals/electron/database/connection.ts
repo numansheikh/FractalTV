@@ -197,6 +197,8 @@ function createTables(db: Database.Database) {
   try { db.exec(`ALTER TABLE categories ADD COLUMN content_synced INTEGER NOT NULL DEFAULT 0`) } catch {}
   // position: order as returned by the provider API (0-based index)
   try { db.exec(`ALTER TABLE categories ADD COLUMN position INTEGER NOT NULL DEFAULT 0`) } catch {}
+  // fav_sort_order: manual ordering for favorite channels in My Channels home mode
+  try { db.exec(`ALTER TABLE user_data ADD COLUMN fav_sort_order INTEGER`) } catch {}
 
   // Migration: content IDs changed from `movie:{id}` to `{sourceId}:movie:{id}`
   // Clear content data so re-sync creates fresh rows. Sources/settings preserved.

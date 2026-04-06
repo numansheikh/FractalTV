@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { Source, SyncProgress, useSourcesStore } from '@/stores/sources.store'
+import { useAppStore } from '@/stores/app.store'
 import { buildColorMap } from '@/lib/sourceColors'
 import { api } from '@/lib/api'
 
@@ -112,6 +113,11 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
   const handleToggleDisable = async () => {
     setMenuOpen(false)
     await api.sources.toggleDisabled(source.id)
+    // If disabling, remove this source from the active filter so content doesn't ghost
+    if (!source.disabled) {
+      const { selectedSourceIds, toggleSourceFilter } = useAppStore.getState()
+      if (selectedSourceIds.includes(source.id)) toggleSourceFilter(source.id)
+    }
   }
 
   const handleDelete = () => {
