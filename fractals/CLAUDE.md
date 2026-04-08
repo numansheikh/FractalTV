@@ -338,11 +338,45 @@ These are defined in `:root` as dark defaults, then **bridged** via `[data-theme
 - Not a social app — no sharing, no public profiles, no cloud sync (for now)
 - Not a content provider — ships with zero content, user brings their own sources
 
-## Implementation status (as of 2026-04-08) — v0.2.1
+## Data model — vocabulary (locked 2026-04-09)
 
-**Phase 0 — Complete.** All v0.2.0 core: scaffold, DB + Xtream sync, TMDB enrichment, FTS5 search, browse/search UI, video player, EPG (XMLTV parser, EPG strip, Full EPG Guide panel), settings (appearance, player, enrichment), user data (favorites, watchlist, ratings, history, continue watching — fully wired).
-**Phase 1 — Polish & Complete Core.** ✅ UX refinement complete (commit 8346275d): (1.1) Pagination — "Show all" navigates to view, (1.2) Escape behavior — verified working (capture phase + fallback chain), (1.3) Library search — client-side live search filters all tabs with dynamic counts. Remaining: timeshift timeline (1.4).
-**Phase 2 — Rich Discovery (not started).** Metadata navigation + semantic search merged — normalized genre/cast/language tables, embedding worker, faceted browse, clickable metadata pills.
+The data model has two distinct layers, loosely coupled via a bridge:
+
+**Layer 1 — Provider data** (ephemeral, source-owned)
+- What M3U/Xtream APIs return: `stream_id`, `title`, `category_id`, `tvg_id`, `thumbnail_url`, container format
+- Three content types: **Live** (channels), **Movie** (VOD), **Series** (parent only; episodes fetched on demand)
+- Radio = Live variant (same structure, different category)
+- Tied to subscription — goes away when source is removed/expired
+
+**Layer 2 — Canonical identity + enriched metadata** (persistent, source-independent)
+- TMDB-sourced: English title, original title, year, genres, poster/backdrop, vote_average (free tier minimum)
+- Pro tier adds: cast, director, keywords, overview, spoken_languages, similarity/embeddings
+- Parental rating: deferred (extra API call, fetch lazily on detail open)
+- Anchored by `tmdb_id` — the deduplication key across all sources
+
+**Bridge** (the pointer)
+- Multiple provider streams (different sources, languages, regions) → one canonical identity
+- Decoupled: deleting a source removes provider data, not canonical identity
+- Eviction policy: canonical records with **user interaction** (watched, favorited, rated, watchlisted) persist forever; uninteracted records are evictable (TTL / source removal)
+
+**Search target = canonical identity**, not provider data
+- Search index on clean TMDB titles → fast, single query, cross-language by design
+- "father" finds Arabic, French, German versions — all map to same canonical
+- Unenriched items fall back to provider title search
+- Free tier: title + year + type. Pro tier: cast, genres, keywords, similarity
+
+**TMDB enrichment**
+- User brings their own free API key (current approach)
+- Background job: lazy batch enrichment after sync
+- Free key: 40 req/sec → full library enriched in minutes
+
+## Implementation status (as of 2026-04-09)
+
+> **⚠ Redesign in progress.** Current implementation (snapshot branch: `snapshot/v0.2.1-pre-redesign`) is organically evolved and does not reflect the data model above. Redesign starts from master, UI-first components are preserved, data layer will be rebuilt.
+
+**Phase 0 — Complete (pre-redesign).** Core scaffold, DB + Xtream sync, TMDB enrichment, FTS5 search, browse/search UI, video player, EPG, settings, user data.
+**Phase 1 — UI polish complete.** UX refinement (pagination nav, escape behavior, library search). Snapshot preserved.
+**Phase 2 — Data model redesign (active).** Rebuild DB schema around canonical identity + bridge. New search on canonical layer. Eviction policy. Loose coupling between provider and enriched data.
 **Phase 3 — Multi-platform (not started).** Capacitor for Android/iOS/TV, Tizen.
 
 ### v0.2.0 — completed features
