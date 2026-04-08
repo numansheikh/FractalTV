@@ -9,7 +9,7 @@ import { Pagination } from './Pagination'
 import { useSearchStore, ContentType } from '@/stores/search.store'
 import { useSourcesStore } from '@/stores/sources.store'
 import { useUserStore } from '@/stores/user.store'
-import { buildColorMap } from '@/lib/sourceColors'
+import { buildColorMapFromSources } from '@/lib/sourceColors'
 import { SourceTabBar } from '@/components/settings/SourceTabBar'
 import { FractalsIcon } from '@/components/shared/FractalsIcon'
 import { PersonalizedRows } from './PersonalizedRows'
@@ -57,7 +57,7 @@ interface Props {
 export function BrowseView({ onAddSource, onSyncSource, onRemoveSource, onSelectContent, sourcesCount }: Props) {
   const { query, type, setType, activeCategory, setActiveCategory } = useSearchStore()
   const { sources, selectedSourceIds } = useSourcesStore()
-  const colorMap = buildColorMap(sources.map((s) => s.id))
+  const colorMap = buildColorMapFromSources(sources)
 
   const [categoryFilter, setCategoryFilter] = useState('')
   const [page, setPage] = useState(1)

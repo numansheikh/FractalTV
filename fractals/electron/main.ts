@@ -13,6 +13,7 @@ function createWindow() {
     minHeight: 600,
     backgroundColor: '#0a0a0f',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+    fullscreenable: false,
     webPreferences: {
       preload: join(__dirname, '../preload/preload.js'),
       contextIsolation: true,
@@ -55,11 +56,19 @@ if (!gotTheLock) {
     createWindow()
 
     app.on('activate', () => {
-      if (BrowserWindow.getAllWindows().length === 0) createWindow()
+      const wins = BrowserWindow.getAllWindows()
+      if (wins.length === 0) {
+        createWindow()
+      } else {
+        if (wins[0].isMinimized()) wins[0].restore()
+        wins[0].show()
+        wins[0].focus()
+      }
     })
   })
 
   app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit()
   })
+
 }

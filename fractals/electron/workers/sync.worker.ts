@@ -94,30 +94,37 @@ async function run() {
     insertAllCats(seriesCats || [], 'series')
 
     const catCount = (liveCats?.length ?? 0) + (vodCats?.length ?? 0) + (seriesCats?.length ?? 0)
+    send('categories', catCount, catCount, `${catCount} categories (${liveCats?.length ?? 0} live, ${vodCats?.length ?? 0} movies, ${seriesCats?.length ?? 0} series)`)
 
     // ── Live streams ──────────────────────────────────────────────────────
-    send('live', 0, 0, 'Fetching live streams…')
+    send('live', 0, 0, 'Fetching channels…')
     const liveStreams: any[] = await fetchJson(`${apiBase}&action=get_live_streams`, FETCH_TIMEOUT, 'live_streams')
+    send('live', 0, liveStreams?.length ?? 0, `Saving ${(liveStreams?.length ?? 0).toLocaleString()} channels…`)
 
     const insertLive = db.prepare(`
-      INSERT OR REPLACE INTO content (id, primary_source_id, external_id, type, title, category_id, poster_url, catchup_supported, catchup_days, updated_at)
-      VALUES (?, ?, ?, 'live', ?, ?, ?, ?, ?, unixepoch())
+      INSERT INTO content (id, primary_source_id, external_id, type, title, category_id, poster_url, catchup_supported, catchup_days, epg_channel_id, updated_at)
+      VALUES (?, ?, ?, 'live', ?, ?, ?, ?, ?, ?, unixepoch())
+      ON CONFLICT(id) DO UPDATE SET
+        title = excluded.title, category_id = excluded.category_id,
+        poster_url = excluded.poster_url, catchup_supported = excluded.catchup_supported,
+        catchup_days = excluded.catchup_days, epg_channel_id = excluded.epg_channel_id,
+        updated_at = excluded.updated_at
     `)
     const insertSource = db.prepare(`
-      INSERT OR REPLACE INTO content_sources (id, content_id, source_id, external_id, quality)
+      INSERT OR IGNORE INTO content_sources (id, content_id, source_id, external_id, quality)
       VALUES (?, ?, ?, ?, 'HD')
     `)
     const insertFts = db.prepare(`INSERT OR REPLACE INTO content_fts (content_id, title) VALUES (?, ?)`)
-    const insertCC = db.prepare(`INSERT OR IGNORE INTO content_categories (content_id, category_id) VALUES (?, ?)`)
+    const insertCC = db.prepare(`INSERT OR IGNORE INTO content_categories (content_id, category_id) SELECT ?, ? WHERE EXISTS (SELECT 1 FROM categories WHERE id = ?)`)
 
     const BATCH = 500
     const batchLive = db.transaction((items: any[]) => {
       for (const s of items) {
         const cid = `${sourceId}:live:${s.stream_id}`
-        insertLive.run(cid, sourceId, String(s.stream_id), s.name, s.category_id || null, s.stream_icon || null, s.tv_archive ? 1 : 0, s.tv_archive_duration || 0)
+        insertLive.run(cid, sourceId, String(s.stream_id), s.name || `Channel ${s.stream_id}`, s.category_id || null, s.stream_icon || null, s.tv_archive ? 1 : 0, s.tv_archive_duration || 0, s.epg_channel_id || null)
         insertSource.run(cid, cid, sourceId, String(s.stream_id))
         insertFts.run(cid, normalize(s.name))
-        if (s.category_id) insertCC.run(cid, `${sourceId}:live:${s.category_id}`)
+        if (s.category_id) { const catId = `${sourceId}:live:${s.category_id}`; insertCC.run(cid, catId, catId) }
       }
     })
     for (let i = 0; i < (liveStreams?.length ?? 0); i += BATCH) {
@@ -128,20 +135,25 @@ async function run() {
     // ── VOD streams ───────────────────────────────────────────────────────
     send('movies', 0, 0, 'Fetching movies…')
     const vodStreams: any[] = await fetchJson(`${apiBase}&action=get_vod_streams`, FETCH_TIMEOUT, 'vod_streams')
+    send('movies', 0, vodStreams?.length ?? 0, `Saving ${(vodStreams?.length ?? 0).toLocaleString()} movies…`)
 
     const insertVod = db.prepare(`
-      INSERT OR REPLACE INTO content (id, primary_source_id, external_id, type, title, category_id, poster_url, rating_tmdb, container_extension, updated_at)
+      INSERT INTO content (id, primary_source_id, external_id, type, title, category_id, poster_url, rating_tmdb, container_extension, updated_at)
       VALUES (?, ?, ?, 'movie', ?, ?, ?, ?, ?, unixepoch())
+      ON CONFLICT(id) DO UPDATE SET
+        title = excluded.title, category_id = excluded.category_id,
+        poster_url = excluded.poster_url, rating_tmdb = excluded.rating_tmdb,
+        container_extension = excluded.container_extension, updated_at = excluded.updated_at
     `)
-    const insertVodSource = db.prepare(`INSERT OR REPLACE INTO content_sources (id, content_id, source_id, external_id) VALUES (?, ?, ?, ?)`)
+    const insertVodSource = db.prepare(`INSERT OR IGNORE INTO content_sources (id, content_id, source_id, external_id) VALUES (?, ?, ?, ?)`)
 
     const batchVod = db.transaction((items: any[]) => {
       for (const s of items) {
         const cid = `${sourceId}:movie:${s.stream_id}`
-        insertVod.run(cid, sourceId, String(s.stream_id), s.name, s.category_id || null, s.stream_icon || null, s.rating_5based ? s.rating_5based * 2 : null, s.container_extension || null)
+        insertVod.run(cid, sourceId, String(s.stream_id), s.name || `Movie ${s.stream_id}`, s.category_id || null, s.stream_icon || null, s.rating_5based ? s.rating_5based * 2 : null, s.container_extension || null)
         insertVodSource.run(cid, cid, sourceId, String(s.stream_id))
         insertFts.run(cid, normalize(s.name))
-        if (s.category_id) insertCC.run(cid, `${sourceId}:movie:${s.category_id}`)
+        if (s.category_id) { const catId = `${sourceId}:movie:${s.category_id}`; insertCC.run(cid, catId, catId) }
       }
     })
     for (let i = 0; i < (vodStreams?.length ?? 0); i += BATCH) {
@@ -152,20 +164,24 @@ async function run() {
     // ── Series ────────────────────────────────────────────────────────────
     send('series', 0, 0, 'Fetching series…')
     const seriesList: any[] = await fetchJson(`${apiBase}&action=get_series`, FETCH_TIMEOUT, 'series')
+    send('series', 0, seriesList?.length ?? 0, `Saving ${(seriesList?.length ?? 0).toLocaleString()} series…`)
 
     const insertSeries = db.prepare(`
-      INSERT OR REPLACE INTO content (id, primary_source_id, external_id, type, title, category_id, poster_url, plot, director, cast, rating_tmdb, updated_at)
+      INSERT INTO content (id, primary_source_id, external_id, type, title, category_id, poster_url, plot, director, cast, rating_tmdb, updated_at)
       VALUES (?, ?, ?, 'series', ?, ?, ?, ?, ?, ?, ?, unixepoch())
+      ON CONFLICT(id) DO UPDATE SET
+        title = excluded.title, category_id = excluded.category_id,
+        poster_url = excluded.poster_url, updated_at = excluded.updated_at
     `)
     const insertFtsSeries = db.prepare(`INSERT OR REPLACE INTO content_fts (content_id, title, plot, cast, director) VALUES (?, ?, ?, ?, ?)`)
 
     const batchSeries = db.transaction((items: any[]) => {
       for (const s of items) {
         const cid = `${sourceId}:series:${s.series_id}`
-        insertSeries.run(cid, sourceId, String(s.series_id), s.name, s.category_id || null, s.cover || null, s.plot || null, s.director || null, s.cast || null, s.rating_5based ? s.rating_5based * 2 : null)
+        insertSeries.run(cid, sourceId, String(s.series_id), s.name || `Series ${s.series_id}`, s.category_id || null, s.cover || null, s.plot || null, s.director || null, s.cast || null, s.rating_5based ? s.rating_5based * 2 : null)
         insertVodSource.run(cid, cid, sourceId, String(s.series_id))
         insertFtsSeries.run(cid, normalize(s.name), normalize(s.plot), normalize(s.cast), normalize(s.director))
-        if (s.category_id) insertCC.run(cid, `${sourceId}:series:${s.category_id}`)
+        if (s.category_id) { const catId = `${sourceId}:series:${s.category_id}`; insertCC.run(cid, catId, catId) }
       }
     })
     for (let i = 0; i < (seriesList?.length ?? 0); i += BATCH) {

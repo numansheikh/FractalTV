@@ -40,13 +40,16 @@ export function Player({ content, onClose }: Props) {
     setLoading(true)
     setError(null)
     setStreamUrl(null)
+    setIsAudioOnly(false)
 
-    // Episodes carry their own stream URL directly (built in ContentDetail)
-    const episodeUrlPromise: Promise<any> = (content as any)._streamId
-      ? Promise.resolve({
-          url: `${(content as any)._serverUrl.replace(/\/$/, '')}/series/${encodeURIComponent((content as any)._username)}/${encodeURIComponent((content as any)._password)}/${(content as any)._streamId}.${(content as any)._extension ?? 'mkv'}`
-        })
-      : api.content.getStreamUrl({ contentId: content.id })
+    // Episodes / catchup carry their own stream URL directly
+    const episodeUrlPromise: Promise<any> = content._catchupUrl
+      ? Promise.resolve({ url: content._catchupUrl })
+      : (content as any)._streamId
+        ? Promise.resolve({
+            url: `${(content as any)._serverUrl.replace(/\/$/, '')}/series/${encodeURIComponent((content as any)._username)}/${encodeURIComponent((content as any)._password)}/${(content as any)._streamId}.${(content as any)._extension ?? 'mkv'}`
+          })
+        : api.content.getStreamUrl({ contentId: content.id })
 
     episodeUrlPromise.then((result: any) => {
       if (cancelled) return
@@ -144,19 +147,34 @@ export function Player({ content, onClose }: Props) {
       art.on('ready', () => {
         if (!cancelled) setLoading(false)
 
-        // Audio-only detection: only trust videoWidth/Height after stream is playing
+        // Audio-only detection via native video events — more reliable than timeouts
         const video = art.template.$video as HTMLVideoElement
         if (video) {
-          const checkAudioOnly = () => {
-            if (cancelled || video.paused || video.ended || video.currentTime < 1) return
-            // No video dimensions after playback = genuinely audio-only
-            if (video.videoWidth === 0 && video.videoHeight === 0) {
-              setIsAudioOnly(true)
+          const checkDimensions = () => {
+            if (cancelled) return
+            video.removeEventListener('loadedmetadata', checkDimensions)
+            setIsAudioOnly(video.videoWidth === 0 && video.videoHeight === 0)
+          }
+
+          // Primary: loadedmetadata fires when browser knows all track info (incl. dimensions)
+          video.addEventListener('loadedmetadata', checkDimensions)
+
+          // Fallback: timeupdate fires once playback is active — catches streams where
+          // loadedmetadata already fired before our listener was attached
+          const onTimeUpdate = () => {
+            if (video.currentTime > 1) {
+              video.removeEventListener('timeupdate', onTimeUpdate)
+              checkDimensions()
             }
           }
-          // Check late — give video tracks time to initialize
-          setTimeout(checkAudioOnly, 4000)
-          setTimeout(checkAudioOnly, 8000)
+          video.addEventListener('timeupdate', onTimeUpdate)
+
+          // Last-resort timeout for unusual streams that never fire either event
+          setTimeout(() => {
+            video.removeEventListener('loadedmetadata', checkDimensions)
+            video.removeEventListener('timeupdate', onTimeUpdate)
+            if (!cancelled) setIsAudioOnly(video.videoWidth === 0 && video.videoHeight === 0)
+          }, 15000)
         }
 
         // ArtPlayer uses $progress.clientWidth for seek % but positions the indicator

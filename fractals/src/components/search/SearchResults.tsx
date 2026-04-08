@@ -1,42 +1,32 @@
-import { useState } from 'react'
+import React from 'react'
 import { ContentItem } from '@/lib/types'
 import { PosterCard } from '@/components/cards/PosterCard'
 import { ChannelCard } from '@/components/cards/ChannelCard'
 
+interface TypeBucket {
+  results: ContentItem[]
+  isExpanded: boolean
+  onShowAll: () => void
+  onShowLess: () => void
+}
+
 interface Props {
-  items: ContentItem[]
+  live: TypeBucket
+  movies: TypeBucket
+  series: TypeBucket
   onSelect: (item: ContentItem) => void
 }
 
-interface SectionConfig {
-  key: 'live' | 'movie' | 'series'
-  label: string
-  accentColor: string
-}
-
-const SECTIONS: SectionConfig[] = [
-  { key: 'live',   label: 'Live Channels', accentColor: 'var(--accent-live)' },
-  { key: 'movie',  label: 'Movies',        accentColor: 'var(--accent-film)' },
-  { key: 'series', label: 'Series',        accentColor: 'var(--accent-series)' },
-]
-
 const INITIAL_CAP = 20
 
-export function SearchResults({ items, onSelect }: Props) {
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({
-    live: false,
-    movie: false,
-    series: false,
-  })
+const SECTIONS = [
+  { key: 'live'   as const, label: 'Live Channels', accentColor: 'var(--accent-live)',    isChannel: true  },
+  { key: 'movies' as const, label: 'Movies',        accentColor: 'var(--accent-film)',    isChannel: false },
+  { key: 'series' as const, label: 'Series',        accentColor: 'var(--accent-series)',  isChannel: false },
+]
 
-  const grouped = {
-    live:   items.filter((i) => i.type === 'live'),
-    movie:  items.filter((i) => i.type === 'movie'),
-    series: items.filter((i) => i.type === 'series'),
-  }
-
-  const toggleSection = (key: string) =>
-    setExpanded((prev) => ({ ...prev, [key]: !prev[key] }))
+export function SearchResults({ live, movies, series, onSelect }: Props) {
+  const buckets: Record<string, TypeBucket> = { live, movies, series }
 
   return (
     <div
@@ -48,16 +38,18 @@ export function SearchResults({ items, onSelect }: Props) {
         fontFamily: 'var(--font-ui)',
       }}
     >
-      {SECTIONS.map(({ key, label, accentColor }) => {
-        const all = grouped[key]
-        if (all.length === 0) return null
+      {SECTIONS.map(({ key, label, accentColor, isChannel }) => {
+        const bucket = buckets[key]
+        const { results, isExpanded, onShowAll, onShowLess } = bucket
 
-        const isExpanded = expanded[key]
-        const isCapped = !isExpanded && all.length > INITIAL_CAP
-        const visible = isExpanded ? all : all.slice(0, INITIAL_CAP)
-        const countLabel = isCapped ? `(${INITIAL_CAP}+)` : `(${all.length})`
+        if (results.length === 0) return null
 
-        const isChannel = key === 'live'
+        // N+1 trick: if we got more than INITIAL_CAP rows, there are more to fetch
+        const hasMore = !isExpanded && results.length > INITIAL_CAP
+        const visible = isExpanded ? results : results.slice(0, INITIAL_CAP)
+        const countLabel = isExpanded ? `(${results.length})` : hasMore ? `(${INITIAL_CAP}+)` : `(${results.length})`
+        const showToggle = hasMore || isExpanded
+
         const gridStyle: React.CSSProperties = {
           display: 'grid',
           gridTemplateColumns: isChannel
@@ -101,31 +93,28 @@ export function SearchResults({ items, onSelect }: Props) {
                 {countLabel}
               </span>
 
-              {/* Spacer */}
               <div style={{ flex: 1 }} />
 
-              <button
-                onClick={() => toggleSection(key)}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  padding: '0 2px',
-                  cursor: 'pointer',
-                  fontSize: 11,
-                  color: accentColor,
-                  fontFamily: 'var(--font-ui)',
-                  lineHeight: 1,
-                  opacity: 0.85,
-                }}
-                onMouseEnter={(e) =>
-                  ((e.currentTarget as HTMLButtonElement).style.opacity = '1')
-                }
-                onMouseLeave={(e) =>
-                  ((e.currentTarget as HTMLButtonElement).style.opacity = '0.85')
-                }
-              >
-                {isExpanded ? 'Show less ←' : 'Show all →'}
-              </button>
+              {showToggle && (
+                <button
+                  onClick={isExpanded ? onShowLess : onShowAll}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    padding: '0 2px',
+                    cursor: 'pointer',
+                    fontSize: 11,
+                    color: accentColor,
+                    fontFamily: 'var(--font-ui)',
+                    lineHeight: 1,
+                    opacity: 0.85,
+                  }}
+                  onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.opacity = '1')}
+                  onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.opacity = '0.85')}
+                >
+                  {isExpanded ? 'Show less ←' : 'Show all →'}
+                </button>
+              )}
             </div>
 
             {/* Card grid */}

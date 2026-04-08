@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useAppStore } from '@/stores/app.store'
 import { useSourcesStore } from '@/stores/sources.store'
 import { useSearchStore } from '@/stores/search.store'
-import { buildColorMap } from '@/lib/sourceColors'
+import { buildColorMapFromSources } from '@/lib/sourceColors'
 
 const SORT_OPTIONS = [
   { label: 'Latest Added', value: 'updated:desc' },
@@ -22,12 +22,14 @@ export function CommandBar({ sort, onSortChange }: Props) {
   const { query, setQuery } = useSearchStore()
   const { selectedSourceIds, toggleSourceFilter, activeView, viewMode, setViewMode } = useAppStore()
   const { sources } = useSourcesStore()
-  const colorMap = buildColorMap(sources.map((s) => s.id))
+  const colorMap = buildColorMapFromSources(sources)
   const inputRef = useRef<HTMLInputElement>(null)
   const [showSort, setShowSort] = useState(false)
 
-  // Hide sort on home — home has its own layout
-  const showSortBtn = activeView !== 'home' || !!query
+  const isHome = activeView === 'home'
+  // Home has its own search bar in the hero area
+  const showSearch = !isHome
+  const showSortBtn = !isHome || !!query
   // View toggle for live TV (always visible, even during search)
   const showViewToggle = activeView === 'live'
 
@@ -57,8 +59,8 @@ export function CommandBar({ sort, onSortChange }: Props) {
       position: 'relative',
       minWidth: 0,
     }}>
-      {/* Search input */}
-      <div style={{ flex: 1, position: 'relative', display: 'flex', alignItems: 'center', minWidth: 0 }}>
+      {/* Search input — hidden on home (home has its own hero search) */}
+      {showSearch && <div style={{ flex: 1, position: 'relative', display: 'flex', alignItems: 'center', minWidth: 0 }}>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-2)" strokeWidth="2" strokeLinecap="round"
           style={{ position: 'absolute', left: 10, pointerEvents: 'none' }}>
           <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
@@ -92,7 +94,10 @@ export function CommandBar({ sort, onSortChange }: Props) {
             </svg>
           </button>
         )}
-      </div>
+      </div>}
+
+      {/* Spacer on home so dots stay right-aligned */}
+      {isHome && <div style={{ flex: 1 }} />}
 
       {/* Sort dropdown */}
       {showSortBtn && (

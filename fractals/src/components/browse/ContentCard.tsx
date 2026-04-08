@@ -1,6 +1,6 @@
 import { motion } from 'framer-motion'
 import { useSourcesStore } from '@/stores/sources.store'
-import { buildColorMap } from '@/lib/sourceColors'
+import { buildColorMapFromSources } from '@/lib/sourceColors'
 
 export interface ContentItem {
   id: string
@@ -33,14 +33,14 @@ const TYPE_META: Record<string, { label: string; color: string; bg: string }> = 
 
 export function ContentCard({ item, onClick }: Props) {
   const { sources } = useSourcesStore()
-  const colorMap = buildColorMap(sources.map((s) => s.id))
+  const colorMap = buildColorMapFromSources(sources)
 
   const genres = item.genres ? tryParseGenres(item.genres).slice(0, 2) : []
   const rating = item.ratingTmdb ?? item.rating_tmdb ?? item.ratingImdb ?? item.rating_imdb
   const meta = TYPE_META[item.type]
   const sourceCount = item.sourceIds ? item.sourceIds.split(',').length : 1
 
-  const primarySourceId = item.primarySourceId ?? item.primary_source_id
+  const primarySourceId = item.primarySourceId ?? item.primary_source_id ?? (item as any).source_ids ?? item.id?.split(':')[0]
   const primarySource = primarySourceId ? sources.find((s) => s.id === primarySourceId) : undefined
   const sourceColor = primarySourceId ? colorMap[primarySourceId] : undefined
 

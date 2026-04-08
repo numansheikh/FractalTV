@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import Hls from 'hls.js'
 import Artplayer from 'artplayer'
@@ -6,6 +6,10 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { ContentItem } from '@/lib/types'
 import { api } from '@/lib/api'
 import { useAppStore } from '@/stores/app.store'
+import { ChannelSurfer } from '@/components/live/ChannelSurfer'
+import { TimeshiftBar } from './TimeshiftBar'
+import { useSourcesStore } from '@/stores/sources.store'
+import { buildColorMapFromSources } from '@/lib/sourceColors'
 
 declare global {
   interface Window { electronDevTools?: () => void }
@@ -14,13 +18,33 @@ declare global {
 interface Props {
   content: ContentItem
   onClose: () => void
+  onSurfChannel?: (dir: 1 | -1) => ContentItem | null
 }
 
-export function PlayerOverlay({ content, onClose }: Props) {
+export function PlayerOverlay({ content, onClose, onSurfChannel }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const artRef = useRef<Artplayer | null>(null)
   const qc = useQueryClient()
   const minWatchSeconds = useAppStore((s) => s.minWatchSeconds)
+  const controlsMode = useAppStore((s) => s.controlsMode)
+  const sources = useSourcesStore((s) => s.sources)
+  const colorMap = buildColorMapFromSources(sources)
+
+  // localContent drives all UI — decoupled from ArtPlayer rebuild cycle
+  // so in-place channel surfs can update the display without destroying the player
+  const [localContent, setLocalContent] = useState(content)
+  useEffect(() => { setLocalContent(content) }, [content.id])
+
+  // EPG: fetch now/next for live channels, refresh every 60s
+  useEffect(() => {
+    if (localContent.type !== 'live') return
+    let alive = true
+    const fetch = () => api.epg.nowNext(localContent.id).then((d) => { if (alive) setEpgNowNext(d) })
+    fetch()
+    const t = setInterval(fetch, 60_000)
+    return () => { alive = false; clearInterval(t) }
+  }, [localContent.id, localContent.type])
+  const srcColor = colorMap[localContent.primarySourceId ?? localContent.primary_source_id ?? (localContent as any).source_ids ?? localContent.id?.split(':')[0] ?? '']
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -31,15 +55,33 @@ export function PlayerOverlay({ content, onClose }: Props) {
   const osdTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [resumePrompt, setResumePrompt] = useState<number | null>(null) // saved position in seconds
   const resumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [showSurfer, setShowSurfer] = useState(false)
+  const surferTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [epgNowNext, setEpgNowNext] = useState<{ now: any; next: any } | null>(null)
   const completionMarkedRef = useRef(false)
   const positionSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const suppressRebuildRef = useRef(false) // skip ArtPlayer rebuild on in-place channel switch
+
+  // Timeshift state
+  const [isTimeshift, setIsTimeshift] = useState(false)
+  const [timeshiftProg, setTimeshiftProg] = useState<{ id: string; title: string; startTime: number; endTime: number } | null>(null)
+  const catchupSupported = !!(localContent as any).catchup_supported
+  const catchupDays = (localContent as any).catchup_days ?? 0
+  const liveStreamUrlRef = useRef<string | null>(null) // remember the live URL for "go back to live"
 
   useEffect(() => {
+    // In-place channel switch — stream is already being swapped via HLS, skip rebuild
+    if (suppressRebuildRef.current) {
+      suppressRebuildRef.current = false
+      return
+    }
+
     let cancelled = false
 
     setLoading(true)
     setError(null)
     setStreamUrl(null)
+    setIsAudioOnly(false)
 
     // Episodes carry their own stream URL directly (built in ContentDetail)
     const episodeUrlPromise: Promise<any> = (content as any)._streamId
@@ -59,6 +101,7 @@ export function PlayerOverlay({ content, onClose }: Props) {
 
       const url: string = result.url
       setStreamUrl(url)
+      if (content.type === 'live') liveStreamUrlRef.current = url
 
       // External player preference
       const pref = localStorage.getItem('fractals-player') as 'artplayer' | 'mpv' | 'vlc' | null
@@ -78,12 +121,20 @@ export function PlayerOverlay({ content, onClose }: Props) {
       const isHls = url.includes('.m3u8') || url.includes('m3u8')
       const isLive = content.type === 'live'
 
+      // Resolve controlsMode → ArtPlayer autoHide value (ms). 0 = always visible.
+      const autoHideMs = controlsMode === 'never' ? 1
+        : controlsMode === 'auto-2' ? 2000
+        : controlsMode === 'auto-3' ? 3000
+        : controlsMode === 'auto-5' ? 5000
+        : 0 // 'always'
+
       const art = new Artplayer({
         container: containerRef.current,
         url,
         autoplay: true,
+        autoHide: autoHideMs,
         pip: true,
-        fullscreen: true,
+        fullscreen: false, // handled via Electron window fullscreen so our React UI stays visible
         hotkey: true,
         playbackRate: !isLive,
         aspectRatio: true,
@@ -158,19 +209,32 @@ export function PlayerOverlay({ content, onClose }: Props) {
       art.on('ready', () => {
         if (!cancelled) setLoading(false)
 
-        // Audio-only detection: only trust videoWidth/Height after stream is playing
+        // Hide ArtPlayer's floating live-edge badge (top-right) — we have our own top bar
+        const liveEdge = containerRef.current?.querySelector('.art-live-edge') as HTMLElement | null
+        if (liveEdge) liveEdge.style.setProperty('display', 'none', 'important')
+
+        // Hide bottom bar entirely when controlsMode is 'never'
+        if (controlsMode === 'never') {
+          const bottom = containerRef.current?.querySelector('.art-bottom') as HTMLElement | null
+          if (bottom) bottom.style.setProperty('display', 'none', 'important')
+        }
+
+
+        // Audio-only detection: check on metadata load + playing event + timed fallback
         const video = art.template.$video as HTMLVideoElement
         if (video) {
           const checkAudioOnly = () => {
-            if (cancelled || video.paused || video.ended || video.currentTime < 1) return
-            // No video dimensions after playback = genuinely audio-only
+            if (cancelled) return
             if (video.videoWidth === 0 && video.videoHeight === 0) {
               setIsAudioOnly(true)
             }
           }
-          // Check late — give video tracks time to initialize
-          setTimeout(checkAudioOnly, 4000)
-          setTimeout(checkAudioOnly, 8000)
+          // Immediate check on metadata (fastest path for audio-only streams)
+          video.addEventListener('loadedmetadata', checkAudioOnly, { once: true })
+          // Fallback checks after playback starts — some HLS streams report dims late
+          art.on('video:playing', checkAudioOnly)
+          setTimeout(checkAudioOnly, 3000)
+          setTimeout(checkAudioOnly, 6000)
         }
 
         // ArtPlayer uses $progress.clientWidth for seek % but positions the indicator
@@ -244,9 +308,10 @@ export function PlayerOverlay({ content, onClose }: Props) {
     })
 
     return () => {
+      // Skip teardown during in-place channel switch — HLS is being swapped directly
+      if (suppressRebuildRef.current) return
       cancelled = true
       if (artRef.current) {
-        // Destroy hls instance if attached
         const hls = (artRef.current as any).hls
         hls?.destroy()
         artRef.current.destroy()
@@ -353,6 +418,48 @@ export function PlayerOverlay({ content, onClose }: Props) {
     setResumePrompt(null)
   }
 
+  // In-place channel switch — no ArtPlayer teardown, preserves fullscreen state
+  const doChannelSwitch = useCallback((next: ContentItem) => {
+    // Update UI immediately
+    setLocalContent(next)
+    setIsAudioOnly(false)
+    setShowSurfer(true)
+    if (surferTimerRef.current) clearTimeout(surferTimerRef.current)
+    surferTimerRef.current = setTimeout(() => setShowSurfer(false), 3000)
+
+    // Update store so surfChannel() knows the new position on next keypress
+    // suppressRebuildRef prevents the ArtPlayer useEffect from tearing down the player
+    suppressRebuildRef.current = true
+    useAppStore.getState().setPlayingContent(next)
+
+    // Swap HLS source directly on the video element — art.switchUrl() doesn't
+    // re-invoke the customType handler so it doesn't work for HLS streams
+    const art = artRef.current
+    if (!art) return
+
+    api.content.getStreamUrl({ contentId: next.id }).then((result: any) => {
+      if (!result?.url || !artRef.current) return
+      const url: string = result.url
+      const video = artRef.current.template.$video as HTMLVideoElement
+      const isHls = url.includes('.m3u8') || url.includes('m3u8')
+
+      const oldHls = (artRef.current as any).hls
+      oldHls?.destroy()
+      ;(artRef.current as any).hls = null
+
+      if (isHls && Hls.isSupported()) {
+        const hls = new Hls({ enableWorker: true, lowLatencyMode: true })
+        ;(artRef.current as any).hls = hls
+        hls.loadSource(url)
+        hls.attachMedia(video)
+      } else {
+        video.src = url
+        video.load()
+        video.play().catch(() => {})
+      }
+    })
+  }, [])
+
   // Keyboard: Escape to close, D for debug, arrows for seek/volume
   // Seek: 1 press = ±5s, 2 quick presses = ±10s, 3+ quick presses = ±25s
   useEffect(() => {
@@ -367,9 +474,19 @@ export function PlayerOverlay({ content, onClose }: Props) {
     const SEEK_AMOUNTS = [5, 10, 25] // 1 press, 2 presses, 3+ presses
     const SEEK_WINDOW_MS = 400
 
+    let lastSeekTime = 0
+    const MIN_SEEK_GAP = 300 // ms — prevent hammering the media pipeline
+
     const commitSeek = () => {
       const art = artRef.current
       if (!art || seekState.dir === 0) return
+      const now = Date.now()
+      if (now - lastSeekTime < MIN_SEEK_GAP) {
+        // Too fast — reschedule
+        seekState.timer = setTimeout(commitSeek, MIN_SEEK_GAP)
+        return
+      }
+      lastSeekTime = now
       const amount = SEEK_AMOUNTS[Math.min(seekState.count, SEEK_AMOUNTS.length) - 1]
       const delta = seekState.dir * amount
       art.seek = Math.max(0, Math.min(art.duration, art.currentTime + delta))
@@ -383,6 +500,19 @@ export function PlayerOverlay({ content, onClose }: Props) {
       e.stopImmediatePropagation()
       if (e.key === 'Escape') { onClose(); return }
       if (e.key === 'd' || e.key === 'D') { setShowDebug((x) => !x); return }
+
+      // Channel surf: PageUp/PageDown (Win) or Cmd+↑/↓ (Mac) — live TV only
+      if (localContent.type === 'live' && onSurfChannel) {
+        const isMacUp = e.metaKey && e.key === 'ArrowUp'
+        const isMacDown = e.metaKey && e.key === 'ArrowDown'
+        const dir = (e.key === 'PageUp' || isMacUp) ? -1 : (e.key === 'PageDown' || isMacDown) ? 1 : null
+        if (dir !== null) {
+          e.preventDefault()
+          const next = onSurfChannel(dir)
+          if (next) doChannelSwitch(next)
+          return
+        }
+      }
       const art = artRef.current
       if (!art) return
 
@@ -394,7 +524,7 @@ export function PlayerOverlay({ content, onClose }: Props) {
 
       if (e.key === 'f' || e.key === 'F') {
         e.preventDefault()
-        art.fullscreen = !art.fullscreen
+        ;(window as any).api?.window?.toggleFullscreen()
         return
       }
 
@@ -445,6 +575,40 @@ export function PlayerOverlay({ content, onClose }: Props) {
     }
   }, [onClose])
 
+  // Timeshift: switch stream in-place (reuse HLS swap pattern)
+  const switchToUrl = useCallback((url: string) => {
+    const art = artRef.current
+    if (!art) return
+    const video = art.template.$video as HTMLVideoElement
+    const isHls = url.includes('.m3u8') || url.includes('m3u8')
+    const oldHls = (art as any).hls
+    oldHls?.destroy()
+    ;(art as any).hls = null
+    if (isHls && Hls.isSupported()) {
+      const hls = new Hls({ enableWorker: true, lowLatencyMode: true })
+      ;(art as any).hls = hls
+      hls.loadSource(url)
+      hls.attachMedia(video)
+    } else {
+      video.src = url
+      video.load()
+      video.play().catch(() => {})
+    }
+  }, [])
+
+  const handlePlayCatchup = useCallback((url: string, prog: { id: string; title: string; startTime: number; endTime: number }) => {
+    switchToUrl(url)
+    setIsTimeshift(true)
+    setTimeshiftProg(prog)
+  }, [switchToUrl])
+
+  const handleGoLive = useCallback(() => {
+    const liveUrl = liveStreamUrlRef.current
+    if (liveUrl) switchToUrl(liveUrl)
+    setIsTimeshift(false)
+    setTimeshiftProg(null)
+  }, [switchToUrl])
+
   const fmt = (s: number) => {
     if (!isFinite(s)) return '--:--'
     const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = Math.floor(s % 60)
@@ -456,25 +620,92 @@ export function PlayerOverlay({ content, onClose }: Props) {
   return (
     <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 60, background: '#000', isolation: 'isolate' }}>
 
-      {/* Close button — always visible */}
-      <button
-        onClick={onClose}
-        title="Close (Esc)"
-        style={{
-          position: 'absolute', top: 14, left: 14, zIndex: 100,
-          width: 36, height: 36, borderRadius: '50%',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.12)',
-          color: '#fff', cursor: 'pointer', backdropFilter: 'blur(8px)',
-          transition: 'background 0.1s',
-        }}
-        onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.85)' }}
-        onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.6)' }}
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-          <path d="m12 19-7-7 7-7" /><path d="M19 12H5" />
-        </svg>
-      </button>
+      {/* Live top bar — channel info + back button */}
+      {localContent.type === 'live' ? (
+        <div style={{
+          position: 'absolute', top: 0, left: 0, right: 0, zIndex: 100,
+          padding: '14px 18px',
+          background: 'linear-gradient(180deg, rgba(0,0,0,0.72) 0%, transparent 100%)',
+          display: 'flex', alignItems: 'center', gap: 12,
+          pointerEvents: 'none',
+        }}>
+          {/* Back button */}
+          <button
+            onClick={onClose}
+            title="Back (Esc)"
+            style={{
+              width: 34, height: 34, borderRadius: 8, flexShrink: 0,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.12)',
+              color: '#fff', cursor: 'pointer', backdropFilter: 'blur(8px)',
+              transition: 'background 0.1s', pointerEvents: 'all',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.8)' }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.5)' }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+              <path d="m12 19-7-7 7-7" /><path d="M19 12H5" />
+            </svg>
+          </button>
+
+          {/* Source color dot */}
+          {srcColor && (
+            <span style={{ width: 7, height: 7, borderRadius: '50%', background: srcColor.accent, flexShrink: 0, display: 'inline-block' }} />
+          )}
+
+          {/* Channel info */}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {localContent.title}
+            </div>
+            {isTimeshift && timeshiftProg ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 3 }}>
+                <span style={{ fontSize: 11, fontWeight: 600, color: '#b388ff', letterSpacing: '0.06em', textTransform: 'uppercase', flexShrink: 0 }}>CATCHUP</span>
+                <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.75)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {timeshiftProg.title}
+                </span>
+              </div>
+            ) : epgNowNext?.now ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 3 }}>
+                <span style={{ fontSize: 11, fontWeight: 600, color: '#e05555', letterSpacing: '0.06em', textTransform: 'uppercase', flexShrink: 0 }}>NOW</span>
+                <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.75)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {epgNowNext.now.title}
+                </span>
+                {epgNowNext.next && (
+                  <>
+                    <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', flexShrink: 0 }}>·</span>
+                    <span style={{ fontSize: 11, fontWeight: 500, color: 'rgba(255,255,255,0.4)', flexShrink: 0 }}>NEXT</span>
+                    <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {epgNowNext.next.title}
+                    </span>
+                  </>
+                )}
+              </div>
+            ) : null}
+          </div>
+
+        </div>
+      ) : (
+        /* VOD: simple close button */
+        <button
+          onClick={onClose}
+          title="Close (Esc)"
+          style={{
+            position: 'absolute', top: 14, left: 14, zIndex: 100,
+            width: 36, height: 36, borderRadius: '50%',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.12)',
+            color: '#fff', cursor: 'pointer', backdropFilter: 'blur(8px)',
+            transition: 'background 0.1s',
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.85)' }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.6)' }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+            <path d="m12 19-7-7 7-7" /><path d="M19 12H5" />
+          </svg>
+        </button>
+      )}
 
       {/* ArtPlayer container */}
       <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
@@ -496,9 +727,9 @@ export function PlayerOverlay({ content, onClose }: Props) {
             }}
           >
             {/* Station poster/logo */}
-            {content.poster_url && (
+            {(localContent.posterUrl || localContent.poster_url) && (
               <img
-                src={content.poster_url}
+                src={localContent.posterUrl ?? localContent.poster_url}
                 alt=""
                 style={{
                   width: 120, height: 120, borderRadius: 20,
@@ -515,7 +746,7 @@ export function PlayerOverlay({ content, onClose }: Props) {
               textAlign: 'center', padding: '0 40px',
               textShadow: '0 2px 12px rgba(0,0,0,0.5)',
             }}>
-              {content.title}
+              {localContent.title}
             </div>
             <div style={{
               fontSize: 12, color: 'rgba(255,255,255,0.4)',
@@ -565,9 +796,9 @@ export function PlayerOverlay({ content, onClose }: Props) {
       <AnimatePresence>
         {loading && (
           <motion.div key="loader" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, pointerEvents: 'none', zIndex: 90 }}>
+            style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, pointerEvents: 'none', zIndex: 90 }}>
             <div style={{ width: 40, height: 40, borderRadius: '50%', border: '2px solid rgba(124,77,255,0.25)', borderTopColor: 'var(--accent-interactive)', animation: 'spin 0.8s linear infinite' }} />
-            <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.6)' }}>{content.title}</p>
+            <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.6)', textAlign: 'center', maxWidth: 280 }}>{localContent.title}</p>
           </motion.div>
         )}
       </AnimatePresence>
@@ -610,25 +841,54 @@ export function PlayerOverlay({ content, onClose }: Props) {
             exit={{ opacity: 0, scale: 0.9 }}
             transition={{ duration: 0.12 }}
             style={{
-              position: 'absolute', top: '50%', left: '50%',
-              transform: 'translate(-50%, -50%)',
+              position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
               zIndex: 95, pointerEvents: 'none',
-              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
-              background: 'rgba(0,0,0,0.3)', backdropFilter: 'blur(10px)',
-              borderRadius: 16, padding: '18px 28px',
-              border: '1px solid rgba(255,255,255,0.1)',
             }}
           >
-            <OsdIcon type={osd.icon} />
-            <span style={{ fontSize: 20, fontWeight: 700, color: '#fff', letterSpacing: '-0.01em' }}>
-              {osd.text}
-            </span>
-            <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.45)' }}>
-              {osd.icon.startsWith('seek') ? 'seek' : 'volume'}
-            </span>
+            <div style={{
+              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
+              background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(10px)',
+              borderRadius: 16, padding: '18px 28px',
+              border: '1px solid rgba(255,255,255,0.1)',
+            }}>
+              <OsdIcon type={osd.icon} />
+              <span style={{ fontSize: 20, fontWeight: 700, color: '#fff', letterSpacing: '-0.01em' }}>
+                {osd.text}
+              </span>
+              <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.45)' }}>
+                {osd.icon.startsWith('seek') ? 'seek' : 'volume'}
+              </span>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Timeshift bar — live channels with catchup only */}
+      {localContent.type === 'live' && catchupSupported && catchupDays > 0 && !loading && !error && (
+        <TimeshiftBar
+          contentId={localContent.id}
+          catchupDays={catchupDays}
+          onPlayCatchup={handlePlayCatchup}
+          onGoLive={handleGoLive}
+          isTimeshift={isTimeshift}
+          currentProg={timeshiftProg}
+        />
+      )}
+
+      {/* Channel surfer overlay — live TV only */}
+      {localContent.type === 'live' && showSurfer && (
+        <ChannelSurfer
+          channels={useAppStore.getState().channelSurfList}
+          activeId={localContent.id}
+          onSwitch={(ch) => {
+            useAppStore.getState().setPlayingContent(ch)
+            if (surferTimerRef.current) clearTimeout(surferTimerRef.current)
+            surferTimerRef.current = setTimeout(() => setShowSurfer(false), 3000)
+          }}
+          onClose={() => setShowSurfer(false)}
+        />
+      )}
 
       {/* Stream info panel (D key to toggle) */}
       <AnimatePresence>
@@ -649,9 +909,9 @@ export function PlayerOverlay({ content, onClose }: Props) {
                 <svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M1 1l10 10M11 1L1 11" /></svg>
               </button>
             </div>
-            <Row label="title" value={content.title} />
-            <Row label="content id" value={content.id} />
-            <Row label="type" value={content.type} />
+            <Row label="title" value={localContent.title} />
+            <Row label="content id" value={localContent.id} />
+            <Row label="type" value={localContent.type} />
             <Row label="stream url" value={streamUrl ?? (loading ? 'resolving…' : 'not set')}
               color={error ? '#f87171' : streamUrl ? '#86efac' : 'rgba(255,255,255,0.5)'} copyable />
             {error && <Row label="error" value={error} color="#f87171" />}

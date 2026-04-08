@@ -1,5 +1,9 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, lazy, Suspense } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+
+const SearchResults = lazy(() =>
+  import('@/components/search/SearchResults').then((m) => ({ default: m.SearchResults }))
+)
 import {
   DndContext, closestCenter, PointerSensor, KeyboardSensor,
   useSensor, useSensors, DragEndEvent,
@@ -12,7 +16,7 @@ import { CSS } from '@dnd-kit/utilities'
 import { useAppStore } from '@/stores/app.store'
 import { useSearchStore } from '@/stores/search.store'
 import { useSourcesStore } from '@/stores/sources.store'
-import { buildColorMap } from '@/lib/sourceColors'
+import { buildColorMapFromSources } from '@/lib/sourceColors'
 import { api } from '@/lib/api'
 import { ContentItem } from '@/lib/types'
 
@@ -22,14 +26,13 @@ interface Props {
 
 export function HomeView({ onSelectContent }: Props) {
   const {
-    setView, selectedSourceIds, toggleSourceFilter,
+    setView, selectedSourceIds,
     homeMode, setHomeMode,
     hasSeenChannelsModePrompt, setHasSeenChannelsModePrompt,
-    setShowSources,
+    setShowSources, setChannelSurfContext,
   } = useAppStore()
   const { query, setQuery } = useSearchStore()
   const { sources } = useSourcesStore()
-  const colorMap = buildColorMap(sources.map((s) => s.id))
   const inputRef = useRef<HTMLInputElement>(null)
 
   // Favorite channels — drives both the prompt and Mode B content
@@ -41,13 +44,22 @@ export function HomeView({ onSelectContent }: Props) {
   })
   const favChannels = selectedSourceIds.length > 0
     ? allFavChannels.filter((c) => {
-        const srcId = c.primarySourceId ?? c.primary_source_id
+        const srcId = c.primarySourceId ?? c.primary_source_id ?? (c as any).source_ids ?? c.id?.split(':')[0]
         return srcId ? selectedSourceIds.includes(srcId) : true
       })
     : allFavChannels
 
   const hasFavChannels = favChannels.length > 0
   const effectiveMode = homeMode
+
+  // Capture surf context for live channels launched from home
+  const handleSelectContent = useCallback((item: ContentItem) => {
+    if (item.type === 'live') {
+      const idx = favChannels.findIndex((c) => c.id === item.id)
+      setChannelSurfContext(favChannels, idx >= 0 ? idx : 0)
+    }
+    onSelectContent(item)
+  }, [favChannels, onSelectContent, setChannelSurfContext])
 
   // Show the "switch to channels mode" prompt once, on mount, when conditions are met
   const [showPrompt, setShowPrompt] = useState(false)
@@ -86,8 +98,6 @@ export function HomeView({ onSelectContent }: Props) {
     return () => window.removeEventListener('keydown', handler)
   }, [])
 
-  const activeSources = sources.filter((s) => !s.disabled)
-
   // First-launch: no sources at all
   if (sources.length === 0) {
     return (
@@ -125,38 +135,18 @@ export function HomeView({ onSelectContent }: Props) {
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
-      {/* Content area — scrollable, fills remaining space */}
+      {/* Hero area — search + mode toggle */}
       <div style={{
-        flex: 1, overflowY: 'auto', padding: '24px 32px 12px',
-        display: 'flex', flexDirection: 'column', gap: 24,
-        position: 'relative',
-      }}>
-        {effectiveMode === 'channels'
-          ? hasFavChannels
-            ? <ChannelsMode items={favChannels} onSelectContent={onSelectContent} onBrowseAll={() => setView('live')} />
-            : <EmptyChannelsMode onSwitchToDiscover={() => setHomeMode('discover')} onBrowseLive={() => setView('live')} />
-          : <DiscoverMode favChannels={favChannels} selectedSourceIds={selectedSourceIds} onSelectContent={onSelectContent} onBrowseAll={setView} />
-        }
-
-        {showPrompt && (
-          <SwitchModePrompt
-            onSwitch={() => dismissPrompt(true)}
-            onDismiss={() => dismissPrompt(false)}
-          />
-        )}
-      </div>
-
-      {/* Bottom bar — search + source dots */}
-      <div style={{
-        padding: '10px 24px 14px',
-        display: 'flex', alignItems: 'center', gap: 12,
+        padding: '10px 24px',
+        borderBottom: '1px solid var(--border-subtle)',
+        display: 'flex', alignItems: 'center', gap: 10,
         flexShrink: 0,
       }}>
         {/* Search input */}
         <div style={{ flex: 1, position: 'relative' }}>
           <svg
-            style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-2)', pointerEvents: 'none' }}
-            width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"
+            style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-2)', pointerEvents: 'none' }}
+            width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"
           >
             <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
           </svg>
@@ -166,52 +156,73 @@ export function HomeView({ onSelectContent }: Props) {
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search movies, channels, actors…"
             style={{
-              width: '100%', height: 44,
-              background: 'var(--bg-1)',
+              width: '100%', height: 34,
+              background: 'var(--bg-2)',
               border: `1px solid ${query ? 'var(--accent-interactive)' : 'var(--border-default)'}`,
-              borderRadius: 10, color: 'var(--text-0)',
-              fontSize: 14, padding: '0 80px 0 42px', outline: 'none',
+              borderRadius: 7, color: 'var(--text-0)',
+              fontSize: 13, padding: '0 68px 0 34px', outline: 'none',
               transition: 'border-color 0.15s',
             }}
             onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--accent-interactive)' }}
             onBlur={(e) => { if (!query) e.currentTarget.style.borderColor = 'var(--border-default)' }}
           />
-          <div style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', display: 'flex', alignItems: 'center', gap: 6 }}>
             {query && (
               <button onClick={() => setQuery('')} style={{ background: 'none', border: 'none', color: 'var(--text-2)', cursor: 'pointer', fontSize: 11, padding: '2px 4px' }}>
                 clear
               </button>
             )}
-            <kbd style={{ fontSize: 10, color: 'var(--text-3)', background: 'var(--bg-2)', padding: '3px 7px', borderRadius: 4, border: '1px solid var(--border-subtle)' }}>/</kbd>
+            <kbd style={{ fontSize: 10, color: 'var(--text-3)', background: 'var(--bg-3)', padding: '2px 6px', borderRadius: 4, border: '1px solid var(--border-subtle)' }}>/</kbd>
           </div>
         </div>
 
-        {/* Source filter dots — wrap naturally into 2-column rows */}
-        {activeSources.length > 1 && (
+        {/* Mode toggle */}
+        {!query && (
           <div style={{
-            display: 'flex', flexWrap: 'wrap',
-            gap: 5, width: 25, alignContent: 'center',
+            display: 'flex', background: 'var(--bg-3)',
+            borderRadius: 7, padding: 2, gap: 1, flexShrink: 0,
           }}>
-            {activeSources.map((src) => {
-              const color = colorMap[src.id]?.accent ?? 'var(--text-2)'
-              const isActive = selectedSourceIds.length === 0 || selectedSourceIds.includes(src.id)
-              return (
-                <button
-                  key={src.id}
-                  onClick={() => toggleSourceFilter(src.id)}
-                  title={src.name}
-                  style={{
-                    width: 10, height: 10, borderRadius: '50%',
-                    background: isActive ? color : 'transparent',
-                    border: `2px solid ${color}`,
-                    cursor: 'pointer', padding: 0,
-                    transition: 'all 0.1s',
-                    opacity: isActive ? 1 : 0.5,
-                  }}
-                />
-              )
-            })}
+            {(['discover', 'channels'] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => setHomeMode(m)}
+                style={{
+                  fontSize: 11, padding: '4px 10px', borderRadius: 5,
+                  border: 'none', cursor: 'pointer',
+                  fontFamily: 'var(--font-ui)', fontWeight: 500,
+                  background: homeMode === m ? 'var(--bg-1)' : 'transparent',
+                  color: homeMode === m ? 'var(--text-0)' : 'var(--text-2)',
+                  boxShadow: homeMode === m ? '0 1px 3px rgba(0,0,0,0.4)' : 'none',
+                  transition: 'background 0.1s, color 0.1s',
+                }}
+              >
+                {m === 'discover' ? 'Discover' : 'My Channels'}
+              </button>
+            ))}
           </div>
+        )}
+      </div>
+
+      {/* Content area — scrollable */}
+      <div style={{
+        flex: 1, overflowY: 'auto', padding: query ? '16px 24px' : '20px 24px 16px',
+        display: 'flex', flexDirection: 'column', gap: query ? 0 : 24,
+        position: 'relative',
+      }}>
+        {query ? (
+          <HomeSearchResults query={query} onSelectContent={onSelectContent} />
+        ) : effectiveMode === 'channels'
+          ? hasFavChannels
+            ? <ChannelsMode items={favChannels} onSelectContent={handleSelectContent} />
+            : <EmptyChannelsMode onSwitchToDiscover={() => setHomeMode('discover')} onBrowseLive={() => setView('live')} />
+          : <DiscoverMode favChannels={favChannels} selectedSourceIds={selectedSourceIds} onSelectContent={handleSelectContent} onBrowseAll={setView} />
+        }
+
+        {!query && showPrompt && (
+          <SwitchModePrompt
+            onSwitch={() => dismissPrompt(true)}
+            onDismiss={() => dismissPrompt(false)}
+          />
         )}
       </div>
     </div>
@@ -272,13 +283,12 @@ function DiscoverMode({ favChannels, selectedSourceIds, onSelectContent, onBrows
 
 // ── Channels mode (sortable favorite channels grid) ──────────────
 
-function ChannelsMode({ items, onSelectContent, onBrowseAll }: {
+function ChannelsMode({ items, onSelectContent }: {
   items: ContentItem[]
   onSelectContent: (item: ContentItem) => void
-  onBrowseAll: () => void
 }) {
   const sources = useSourcesStore((s) => s.sources)
-  const colorMap = buildColorMap(sources.map((s) => s.id))
+  const colorMap = buildColorMapFromSources(sources)
   const showSourceBar = sources.filter((s) => !s.disabled).length > 1
   const qc = useQueryClient()
 
@@ -347,14 +357,6 @@ function ChannelsMode({ items, onSelectContent, onBrowseAll }: {
             drag to reorder
           </span>
         </div>
-        <button
-          onClick={onBrowseAll}
-          style={{ background: 'none', border: 'none', fontSize: 11, color: 'var(--text-1)', cursor: 'pointer', fontFamily: 'var(--font-ui)' }}
-          onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--accent-live)' }}
-          onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-1)' }}
-        >
-          Browse all →
-        </button>
       </div>
 
       {/* Sortable grid */}
@@ -366,7 +368,7 @@ function ChannelsMode({ items, onSelectContent, onBrowseAll }: {
             gap: 10,
           }}>
             {orderedItems.map((item) => {
-              const primarySrcId = item.primarySourceId ?? item.primary_source_id
+              const primarySrcId = item.primarySourceId ?? item.primary_source_id ?? (item as any).source_ids ?? item.id?.split(':')[0]
               const srcColor = showSourceBar && primarySrcId ? colorMap[primarySrcId]?.accent : undefined
               return (
                 <SortableFavCard
@@ -734,14 +736,14 @@ function ContentRow({ title, type, accent, showLiveDot, pinnedItems, continueWat
     // Apply source filter client-side
     items = selectedSourceIds.length > 0
       ? continueData.filter((item) => {
-          const srcId = item.primarySourceId ?? item.primary_source_id
+          const srcId = item.primarySourceId ?? item.primary_source_id ?? (item as any).source_ids ?? item.id?.split(':')[0]
           return srcId ? selectedSourceIds.includes(srcId) : true
         })
       : continueData
   } else if (isWatchlist) {
     items = selectedSourceIds.length > 0
       ? watchlistData.filter((item) => {
-          const srcId = item.primarySourceId ?? item.primary_source_id
+          const srcId = item.primarySourceId ?? item.primary_source_id ?? (item as any).source_ids ?? item.id?.split(':')[0]
           return srcId ? selectedSourceIds.includes(srcId) : true
         })
       : watchlistData
@@ -922,4 +924,86 @@ function PosterSkeleton() {
 
 function ChannelSkeleton() {
   return <div style={{ flexShrink: 0, width: 148, borderRadius: 6, background: 'var(--bg-2)', border: '1px solid var(--border-default)' }}><div style={{ aspectRatio: '16/9' }} /><div style={{ height: 28 }} /></div>
+}
+
+// ── Inline search results for Home view ──────────────────────────
+// Shown inside HomeView when query is non-empty so the bottom search
+// bar never unmounts (and never loses focus).
+
+const SEARCH_INIT = 21
+const SEARCH_FULL = 9999
+const SEARCH_INITIAL_CAP = 20
+
+function HomeSearchResults({ query, onSelectContent }: { query: string; onSelectContent: (item: ContentItem) => void }) {
+  const { selectedSourceIds, setChannelSurfContext } = useAppStore()
+
+  const [liveLimit, setLiveLimit] = useState(SEARCH_INIT)
+  const [movieLimit, setMovieLimit] = useState(SEARCH_INIT)
+  const [seriesLimit, setSeriesLimit] = useState(SEARCH_INIT)
+
+  // Reset limits when query changes
+  useEffect(() => { setLiveLimit(SEARCH_INIT); setMovieLimit(SEARCH_INIT); setSeriesLimit(SEARCH_INIT) }, [query])
+
+  const searchArgs = (type: 'live' | 'movie' | 'series', limit: number) => ({
+    query, type, sourceIds: selectedSourceIds.length ? selectedSourceIds : undefined, limit,
+  })
+
+  const { data: liveResults = [], isFetching: liveFetching } = useQuery<ContentItem[]>({
+    queryKey: ['search', query, 'live', selectedSourceIds, liveLimit],
+    queryFn: () => api.search.query(searchArgs('live', liveLimit)),
+    staleTime: 10_000, enabled: !!query,
+  })
+  const { data: movieResults = [], isFetching: movieFetching } = useQuery<ContentItem[]>({
+    queryKey: ['search', query, 'movie', selectedSourceIds, movieLimit],
+    queryFn: () => api.search.query(searchArgs('movie', movieLimit)),
+    staleTime: 10_000, enabled: !!query,
+  })
+  const { data: seriesResults = [], isFetching: seriesFetching } = useQuery<ContentItem[]>({
+    queryKey: ['search', query, 'series', selectedSourceIds, seriesLimit],
+    queryFn: () => api.search.query(searchArgs('series', seriesLimit)),
+    staleTime: 10_000, enabled: !!query,
+  })
+
+  const isFetching = liveFetching && movieFetching && seriesFetching
+  const hasResults = liveResults.length > 0 || movieResults.length > 0 || seriesResults.length > 0
+
+  const handleSelect = useCallback((item: ContentItem) => {
+    if (item.type === 'live') {
+      const liveForSurf = (liveResults as ContentItem[]).slice(
+        0, liveLimit > SEARCH_INIT ? liveResults.length : SEARCH_INITIAL_CAP
+      )
+      const idx = liveForSurf.findIndex((i) => i.id === item.id)
+      setChannelSurfContext(liveForSurf, idx >= 0 ? idx : 0)
+    }
+    onSelectContent(item)
+  }, [liveResults, liveLimit, onSelectContent, setChannelSurfContext])
+
+  if (isFetching && !hasResults) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 48, color: 'var(--text-2)', fontSize: 13 }}>
+        Searching…
+      </div>
+    )
+  }
+
+  if (!isFetching && !hasResults) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 48, gap: 8, textAlign: 'center' }}>
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" strokeWidth="1.5" strokeLinecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-1)', margin: 0 }}>No results for "{query}"</p>
+        <p style={{ fontSize: 12, color: 'var(--text-2)', margin: 0 }}>Try a different search term</p>
+      </div>
+    )
+  }
+
+  return (
+    <Suspense fallback={null}>
+      <SearchResults
+        live={{   results: liveResults   as ContentItem[], isExpanded: liveLimit   > SEARCH_INIT, onShowAll: () => setLiveLimit(SEARCH_FULL),   onShowLess: () => setLiveLimit(SEARCH_INIT) }}
+        movies={{  results: movieResults  as ContentItem[], isExpanded: movieLimit  > SEARCH_INIT, onShowAll: () => setMovieLimit(SEARCH_FULL),  onShowLess: () => setMovieLimit(SEARCH_INIT) }}
+        series={{  results: seriesResults as ContentItem[], isExpanded: seriesLimit > SEARCH_INIT, onShowAll: () => setSeriesLimit(SEARCH_FULL), onShowLess: () => setSeriesLimit(SEARCH_INIT) }}
+        onSelect={handleSelect}
+      />
+    </Suspense>
+  )
 }

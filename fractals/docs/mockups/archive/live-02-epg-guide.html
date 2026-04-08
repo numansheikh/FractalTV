@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Fractals — EPG Guide · Full Timeline</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg-0: #08080c; --bg-1: #0e0e14; --bg-2: #16161e; --bg-3: #1e1e28; --bg-4: #282834;
+  --border-subtle: rgba(255,255,255,0.08); --border-default: rgba(255,255,255,0.14); --border-strong: rgba(255,255,255,0.24);
+  --text-0: #f5f3ff; --text-1: #c4bfe8; --text-2: #7a7590; --text-3: #4a4760;
+  --accent-live: #f43f5e; --accent-film: #60a5fa; --accent-series: #34d399;
+  --accent-interactive: #8b5cf6; --accent-interactive-dim: rgba(139,92,246,0.18);
+  --accent-warning: #fbbf24; --accent-success: #4ade80;
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "SF Mono", "JetBrains Mono", monospace;
+  --ch-col: 180px;
+  --hour-px: 320px; /* pixels per hour */
+}
+body { font-family: var(--font-ui); background: var(--bg-0); color: var(--text-0); height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
+
+/* Top bar */
+.topbar { height: 44px; background: var(--bg-1); border-bottom: 1px solid var(--border-default); display: flex; align-items: center; gap: 10px; padding: 0 14px; flex-shrink: 0; }
+.topbar-title { font-size: 13px; font-weight: 600; color: var(--text-0); }
+.topbar-time { font-size: 11px; color: var(--text-2); font-family: var(--font-mono); margin-left: 4px; }
+.topbar-spacer { flex: 1; }
+.topbar-btn { height: 28px; padding: 0 10px; border-radius: 6px; background: var(--bg-2); border: 1px solid var(--border-default); color: var(--text-1); font-size: 11px; cursor: pointer; display: flex; align-items: center; gap: 5px; }
+.topbar-btn.live { background: rgba(244,63,94,0.1); border-color: rgba(244,63,94,0.3); color: var(--accent-live); }
+.live-pulse { width: 6px; height: 6px; border-radius: 50%; background: var(--accent-live); animation: pulse 1.5s ease-in-out infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+/* Date tabs */
+.date-tabs { height: 36px; background: var(--bg-1); border-bottom: 1px solid var(--border-default); display: flex; align-items: center; gap: 2px; padding: 0 14px; flex-shrink: 0; }
+.date-tab { height: 26px; padding: 0 12px; border-radius: 5px; font-size: 11px; font-weight: 500; color: var(--text-2); cursor: pointer; display: flex; align-items: center; border: none; background: none; }
+.date-tab.active { background: var(--accent-interactive-dim); color: var(--accent-interactive); font-weight: 600; }
+.date-tab:hover:not(.active) { background: var(--bg-3); color: var(--text-1); }
+
+/* Guide body */
+.guide-body { flex: 1; display: flex; overflow: hidden; }
+
+/* Channel column */
+.ch-col { width: var(--ch-col); flex-shrink: 0; background: var(--bg-1); border-right: 1px solid var(--border-default); display: flex; flex-direction: column; overflow: hidden; }
+.ch-col-header { height: 36px; border-bottom: 1px solid var(--border-default); display: flex; align-items: center; padding: 0 12px; }
+.ch-search { width: 100%; height: 24px; background: var(--bg-3); border: 1px solid var(--border-subtle); border-radius: 4px; color: var(--text-1); font-size: 11px; padding: 0 8px; font-family: var(--font-ui); }
+.ch-list { flex: 1; overflow-y: auto; overflow-x: hidden; }
+.ch-row { height: 56px; display: flex; align-items: center; gap: 8px; padding: 0 12px; border-bottom: 1px solid var(--border-subtle); cursor: pointer; flex-shrink: 0; }
+.ch-row:hover { background: var(--bg-3); }
+.ch-row.focused { background: var(--accent-interactive-dim); }
+.ch-logo-sm { width: 32px; height: 32px; border-radius: 4px; background: var(--bg-3); display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 800; color: var(--text-3); flex-shrink: 0; overflow: hidden; }
+.ch-info { flex: 1; min-width: 0; }
+.ch-name-sm { font-size: 11px; font-weight: 600; color: var(--text-0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ch-num-sm { font-size: 9px; color: var(--text-3); font-family: var(--font-mono); }
+
+/* Timeline area */
+.timeline-wrap { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.time-header { height: 36px; border-bottom: 1px solid var(--border-default); display: flex; align-items: center; overflow: hidden; flex-shrink: 0; background: var(--bg-2); position: relative; }
+.time-labels { display: flex; flex-shrink: 0; padding-left: 20px; }
+.time-label { width: var(--hour-px); flex-shrink: 0; font-size: 10px; color: var(--text-2); font-family: var(--font-mono); padding-left: 4px; border-left: 1px solid var(--border-subtle); }
+/* Current time line */
+.now-line { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--accent-live); z-index: 10; }
+.now-line::before { content: ''; position: absolute; top: 0; left: -4px; width: 10px; height: 10px; background: var(--accent-live); border-radius: 50%; }
+
+/* Program rows */
+.program-rows { flex: 1; overflow: auto; position: relative; }
+.program-row { height: 56px; display: flex; align-items: stretch; border-bottom: 1px solid var(--border-subtle); flex-shrink: 0; position: relative; }
+.programs { display: flex; align-items: stretch; position: relative; padding: 4px 0; gap: 2px; padding-left: 20px; }
+
+/* Program block */
+.prog { height: 48px; border-radius: 5px; padding: 0 8px; display: flex; flex-direction: column; justify-content: center; gap: 2px; overflow: hidden; cursor: pointer; flex-shrink: 0; transition: filter 0.1s; border: 1px solid transparent; }
+.prog:hover { filter: brightness(1.15); border-color: var(--border-strong); }
+.prog.past { opacity: 0.45; cursor: pointer; }
+.prog.past:hover { opacity: 0.7; }
+.prog.current { border-color: rgba(244,63,94,0.4); }
+.prog.current::after { content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 2px; background: var(--accent-live); }
+.prog-title { font-size: 11px; font-weight: 600; color: var(--text-0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prog-time { font-size: 9px; color: rgba(255,255,255,0.55); font-family: var(--font-mono); }
+.prog-icons { display: flex; gap: 4px; align-items: center; margin-top: 1px; }
+.prog-catchup { font-size: 8px; color: var(--accent-warning); background: rgba(251,191,36,0.12); padding: 1px 4px; border-radius: 2px; font-weight: 600; }
+.prog-new { font-size: 8px; color: var(--accent-success); background: rgba(74,222,128,0.12); padding: 1px 4px; border-radius: 2px; font-weight: 600; }
+
+/* Now line in program area */
+.program-rows .now-line { position: absolute; top: 0; bottom: 0; left: calc(20px + 1.25 * var(--hour-px)); width: 2px; background: var(--accent-live); z-index: 5; pointer-events: none; }
+.now-label-float { position: absolute; top: 4px; left: calc(20px + 1.25 * var(--hour-px) - 20px); background: var(--accent-live); color: #fff; font-size: 9px; font-weight: 700; padding: 2px 5px; border-radius: 3px; z-index: 6; white-space: nowrap; pointer-events: none; }
+
+/* Program color themes */
+.c-sport { background: rgba(244,63,94,0.15); }
+.c-news  { background: rgba(96,165,250,0.15); }
+.c-ent   { background: rgba(139,92,246,0.15); }
+.c-doc   { background: rgba(52,211,153,0.15); }
+.c-kids  { background: rgba(251,191,36,0.15); }
+</style>
+</head>
+<body>
+
+<!-- Top bar -->
+<div class="topbar">
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-2)" stroke-width="2" stroke-linecap="round"><path d="M1 6l5 5 5-5 5 5 5-5"/><rect x="2" y="8" width="20" height="12" rx="2"/></svg>
+  <span class="topbar-title">TV Guide</span>
+  <span class="topbar-time">Wednesday 20:25</span>
+  <div class="topbar-spacer"></div>
+  <button class="topbar-btn live"><div class="live-pulse"></div> Jump to Live</button>
+  <button class="topbar-btn" style="margin-left:6px">
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+    Search programs
+  </button>
+  <button class="topbar-btn" style="margin-left:4px">
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="14" y2="12"/><line x1="4" y1="18" x2="11" y2="18"/></svg>
+    Filters
+  </button>
+</div>
+
+<!-- Date tabs -->
+<div class="date-tabs">
+  <button class="date-tab">Mon 31</button>
+  <button class="date-tab">Tue 1</button>
+  <button class="date-tab active">Wed 2 · Today</button>
+  <button class="date-tab">Thu 3</button>
+  <button class="date-tab">Fri 4</button>
+  <button class="date-tab">Sat 5</button>
+  <button class="date-tab">Sun 6</button>
+</div>
+
+<div class="guide-body">
+  <!-- Channel column -->
+  <div class="ch-col">
+    <div class="ch-col-header">
+      <input class="ch-search" placeholder="Filter channels…">
+    </div>
+    <div class="ch-list">
+      <div class="ch-row focused">
+        <div class="ch-logo-sm" style="background:linear-gradient(135deg,#1a0a2e,#2d1060)">ESPN</div>
+        <div class="ch-info"><div class="ch-name-sm">ESPN</div><div class="ch-num-sm">101</div></div>
+      </div>
+      <div class="ch-row">
+        <div class="ch-logo-sm" style="background:linear-gradient(135deg,#0a1628,#0d2347)">BBC1</div>
+        <div class="ch-info"><div class="ch-name-sm">BBC One</div><div class="ch-num-sm">1</div></div>
+      </div>
+      <div class="ch-row">
+        <div class="ch-logo-sm" style="background:linear-gradient(135deg,#1a1a08,#2d2a00)">SKY</div>
+        <div class="ch-info"><div class="ch-name-sm">Sky Sports News</div><div class="ch-num-sm">409</div></div>
+      </div>
+      <div class="ch-row">
+        <div class="ch-logo-sm" style="background:linear-gradient(135deg,#080a1a,#10142e)">CNN</div>
+        <div class="ch-info"><div class="ch-name-sm">CNN International</div><div class="ch-num-sm">200</div></div>
+      </div>
+      <div class="ch-row">
+        <div class="ch-logo-sm" style="background:linear-gradient(135deg,#1a0808,#2e0d0d)">FOX</div>
+        <div class="ch-info"><div class="ch-name-sm">Fox Sports</div><div class="ch-num-sm">150</div></div>
+      </div>
+      <div class="ch-row">
+        <div class="ch-logo-sm" style="background:linear-gradient(135deg,#081a10,#0d2e18)">ITV</div>
+        <div class="ch-info"><div class="ch-name-sm">ITV</div><div class="ch-num-sm">3</div></div>
+      </div>
+      <div class="ch-row">
+        <div class="ch-logo-sm" style="background:linear-gradient(135deg,#0d0820,#1a1040)">MTV</div>
+        <div class="ch-info"><div class="ch-name-sm">MTV UK</div><div class="ch-num-sm">312</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Timeline -->
+  <div class="timeline-wrap">
+    <!-- Time header -->
+    <div class="time-header">
+      <div class="time-labels">
+        <div class="time-label">18:00</div>
+        <div class="time-label">19:00</div>
+        <div class="time-label" style="color:var(--accent-live);border-color:rgba(244,63,94,0.4)">20:00 ← now</div>
+        <div class="time-label">21:00</div>
+        <div class="time-label">22:00</div>
+        <div class="time-label">23:00</div>
+      </div>
+    </div>
+
+    <!-- Program rows -->
+    <div class="program-rows">
+      <!-- Now line -->
+      <div class="now-line"></div>
+      <div class="now-label-float">20:25</div>
+
+      <!-- Row 1: ESPN -->
+      <div class="program-row">
+        <div class="programs">
+          <!-- 18:00-19:30 = 1.5hr = 1.5*320=480px — PAST -->
+          <div class="prog past c-sport" style="width:476px">
+            <div class="prog-title">Champions League Preview</div>
+            <div class="prog-time">18:00 – 19:30</div>
+            <div class="prog-icons"><span class="prog-catchup">↺ catchup</span></div>
+          </div>
+          <!-- 19:30-20:00 = 0.5hr = 160px — PAST -->
+          <div class="prog past c-sport" style="width:156px">
+            <div class="prog-title">SportCenter</div>
+            <div class="prog-time">19:30 – 20:00</div>
+          </div>
+          <!-- 20:00-21:55 = 1.92hr ≈ 613px — CURRENT -->
+          <div class="prog current c-sport" style="width:609px;position:relative">
+            <div class="prog-title">Premier League: Arsenal vs Chelsea</div>
+            <div class="prog-time">20:00 – 21:55</div>
+            <div class="prog-icons"><span class="prog-new">NEW</span></div>
+            <!-- progress fill -->
+            <div style="position:absolute;bottom:0;left:0;width:33%;height:2px;background:var(--accent-live);border-radius:0 0 0 5px"></div>
+          </div>
+          <!-- 21:55-23:00 -->
+          <div class="prog c-sport" style="width:340px">
+            <div class="prog-title">Match of the Day</div>
+            <div class="prog-time">21:55 – 23:00</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Row 2: BBC One -->
+      <div class="program-row">
+        <div class="programs">
+          <div class="prog past c-ent" style="width:314px">
+            <div class="prog-title">Pointless</div>
+            <div class="prog-time">18:00 – 18:58</div>
+            <div class="prog-icons"><span class="prog-catchup">↺ catchup</span></div>
+          </div>
+          <div class="prog past c-ent" style="width:156px">
+            <div class="prog-title">The One Show</div>
+            <div class="prog-time">19:00 – 19:30</div>
+            <div class="prog-icons"><span class="prog-catchup">↺ catchup</span></div>
+          </div>
+          <div class="prog past c-ent" style="width:156px">
+            <div class="prog-title">EastEnders</div>
+            <div class="prog-time">19:30 – 20:00</div>
+          </div>
+          <div class="prog current c-doc" style="width:448px;position:relative">
+            <div class="prog-title">Planet Earth III</div>
+            <div class="prog-time">20:00 – 21:24</div>
+            <div class="prog-icons"><span class="prog-new">NEW</span></div>
+            <div style="position:absolute;bottom:0;left:0;width:30%;height:2px;background:var(--accent-live);border-radius:0 0 0 5px"></div>
+          </div>
+          <div class="prog c-ent" style="width:288px">
+            <div class="prog-title">The Graham Norton Show</div>
+            <div class="prog-time">21:30 – 22:30</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Row 3: Sky Sports News -->
+      <div class="program-row">
+        <div class="programs">
+          <div class="prog past c-news" style="width:636px">
+            <div class="prog-title">Transfer Centre LIVE!</div>
+            <div class="prog-time">18:00 – 20:00</div>
+            <div class="prog-icons"><span class="prog-catchup">↺ catchup</span></div>
+          </div>
+          <div class="prog current c-news" style="width:614px;position:relative">
+            <div class="prog-title">Transfer Centre LIVE!</div>
+            <div class="prog-time">20:00 – 21:54</div>
+            <div style="position:absolute;bottom:0;left:0;width:22%;height:2px;background:var(--accent-live);border-radius:0 0 0 5px"></div>
+          </div>
+          <div class="prog c-news" style="width:320px">
+            <div class="prog-title">Sky Sports News</div>
+            <div class="prog-time">22:00 – 23:00</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Row 4: CNN -->
+      <div class="program-row">
+        <div class="programs">
+          <div class="prog past c-news" style="width:316px">
+            <div class="prog-title">Amanpour</div>
+            <div class="prog-time">18:00 – 19:00</div>
+          </div>
+          <div class="prog past c-news" style="width:316px">
+            <div class="prog-title">The Lead with Jake Tapper</div>
+            <div class="prog-time">19:00 – 20:00</div>
+          </div>
+          <div class="prog past c-news" style="width:156px">
+            <div class="prog-title">World Sport</div>
+            <div class="prog-time">20:00 – 20:30</div>
+          </div>
+          <div class="prog current c-news" style="width:156px;position:relative">
+            <div class="prog-title">CNN Tonight</div>
+            <div class="prog-time">20:30 – 21:00</div>
+            <div style="position:absolute;bottom:0;left:0;width:70%;height:2px;background:var(--accent-live);border-radius:0 0 0 5px"></div>
+          </div>
+          <div class="prog c-news" style="width:636px">
+            <div class="prog-title">Anderson Cooper 360</div>
+            <div class="prog-time">21:00 – 23:00</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Row 5: Fox Sports -->
+      <div class="program-row">
+        <div class="programs">
+          <div class="prog past c-sport" style="width:316px">
+            <div class="prog-title">NFL Gameday Morning</div>
+            <div class="prog-time">18:00 – 19:00</div>
+            <div class="prog-icons"><span class="prog-catchup">↺ catchup</span></div>
+          </div>
+          <div class="prog past c-sport" style="width:316px">
+            <div class="prog-title">NFL Pregame</div>
+            <div class="prog-time">19:00 – 20:00</div>
+          </div>
+          <div class="prog current c-sport" style="width:1148px;position:relative">
+            <div class="prog-title">NFL Sunday Night Football: Eagles vs Giants</div>
+            <div class="prog-time">19:20 – 23:00</div>
+            <div class="prog-icons"><span class="prog-new">NEW · LIVE</span></div>
+            <div style="position:absolute;bottom:0;left:0;width:12%;height:2px;background:var(--accent-live);border-radius:0 0 0 5px"></div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

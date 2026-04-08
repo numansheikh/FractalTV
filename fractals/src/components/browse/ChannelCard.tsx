@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useSourcesStore } from '@/stores/sources.store'
 import { useUserStore } from '@/stores/user.store'
-import { buildColorMap } from '@/lib/sourceColors'
+import { buildColorMapFromSources } from '@/lib/sourceColors'
 import { ContentItem } from './ContentCard'
 import { api } from '@/lib/api'
 
@@ -13,12 +13,12 @@ interface Props {
 
 export function ChannelCard({ item, onClick }: Props) {
   const { sources } = useSourcesStore()
-  const colorMap = buildColorMap(sources.map((s) => s.id))
+  const colorMap = buildColorMapFromSources(sources)
   const userData = useUserStore((s) => s.data[item.id])
   const setFav = useUserStore((s) => s.setFavorite)
   const [hovered, setHovered] = useState(false)
   const qc = useQueryClient()
-  const primarySourceId = item.primarySourceId ?? item.primary_source_id
+  const primarySourceId = item.primarySourceId ?? item.primary_source_id ?? (item as any).source_ids ?? item.id?.split(':')[0]
   const sourceColor = primarySourceId ? colorMap[primarySourceId] : undefined
   const poster = item.posterUrl ?? item.poster_url
   const isFavorite = userData?.favorite === 1

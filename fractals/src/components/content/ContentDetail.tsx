@@ -4,7 +4,7 @@ import { motion } from 'framer-motion'
 import { api } from '@/lib/api'
 import { ContentItem } from '@/components/browse/ContentCard'
 import { useSourcesStore } from '@/stores/sources.store'
-import { buildColorMap } from '@/lib/sourceColors'
+import { buildColorMapFromSources } from '@/lib/sourceColors'
 
 export interface BreadcrumbNav {
   type?: 'live' | 'movie' | 'series'
@@ -44,7 +44,7 @@ export function ContentDetail({ item, onPlay, onClose, onNavigate, isPlaying }: 
 
   const qc = useQueryClient()
   const { sources } = useSourcesStore()
-  const colorMap = buildColorMap(sources.map((s) => s.id))
+  const colorMap = buildColorMapFromSources(sources)
 
   // ── Favorites / watchlist ──────────────────────────────────────────────
   const { data: userData } = useQuery({
@@ -131,7 +131,7 @@ export function ContentDetail({ item, onPlay, onClose, onNavigate, isPlaying }: 
     return () => clearTimeout(timeout)
   }, [item.id, item.type, hasEnrichedData, full, qc])
 
-  const primarySourceId = c.primarySourceId ?? c.primary_source_id ?? item.primarySourceId ?? item.primary_source_id
+  const primarySourceId = c.primarySourceId ?? c.primary_source_id ?? item.primarySourceId ?? item.primary_source_id ?? (item as any).source_ids ?? item.id?.split(':')[0]
   const sourceColor = primarySourceId ? colorMap[primarySourceId] : undefined
   const primarySource = primarySourceId ? sources.find((s) => s.id === primarySourceId) : undefined
   const containerExt = c.containerExtension ?? c.container_extension

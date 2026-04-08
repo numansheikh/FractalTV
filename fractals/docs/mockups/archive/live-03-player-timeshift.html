@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Fractals — Live Player · Timeshift Timeline</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg-0: #08080c; --bg-1: #0e0e14; --bg-2: #16161e; --bg-3: #1e1e28; --bg-4: #282834;
+  --border-subtle: rgba(255,255,255,0.08); --border-default: rgba(255,255,255,0.14); --border-strong: rgba(255,255,255,0.24);
+  --text-0: #f5f3ff; --text-1: #c4bfe8; --text-2: #7a7590; --text-3: #4a4760;
+  --accent-live: #f43f5e; --accent-film: #60a5fa; --accent-series: #34d399;
+  --accent-interactive: #8b5cf6; --accent-interactive-dim: rgba(139,92,246,0.18);
+  --accent-warning: #fbbf24; --accent-success: #4ade80;
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "SF Mono", "JetBrains Mono", monospace;
+}
+body { font-family: var(--font-ui); background: #000; color: var(--text-0); height: 100vh; overflow: hidden; display: flex; flex-direction: column; position: relative; }
+
+/* Video bg */
+.video-bg { position: absolute; inset: 0; background: linear-gradient(180deg, #060a1a 0%, #0a0614 40%, #040208 100%); z-index: 0; }
+.video-noise { position: absolute; inset: 0; background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E"); opacity: 0.4; z-index: 1; pointer-events: none; }
+/* fake "video content" - a stadium/sports scene suggestion */
+.video-content { position: absolute; inset: 0; z-index: 2; display: flex; align-items: center; justify-content: center; pointer-events: none; }
+.pitch { width: 520px; height: 320px; background: linear-gradient(180deg, #2d5a1b 0%, #1e3d12 50%, #2d5a1b 100%); border-radius: 4px; opacity: 0.35; position: relative; overflow: hidden; }
+.pitch-lines { position: absolute; inset: 0; border: 2px solid rgba(255,255,255,0.2); border-radius: 4px; }
+.pitch-center { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); width: 80px; height: 80px; border: 2px solid rgba(255,255,255,0.15); border-radius: 50%; }
+.pitch-midline { position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; background: rgba(255,255,255,0.15); }
+
+/* Top bar — channel info */
+.top-bar { position: absolute; top: 0; left: 0; right: 0; z-index: 20; padding: 16px 24px; display: flex; align-items: flex-start; gap: 16px; background: linear-gradient(180deg, rgba(0,0,0,0.75) 0%, transparent 100%); }
+.back-btn { width: 36px; height: 36px; border-radius: 8px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.15); display: flex; align-items: center; justify-content: center; color: #fff; cursor: pointer; flex-shrink: 0; }
+.ch-info { flex: 1; }
+.ch-name-large { font-size: 18px; font-weight: 700; color: #fff; }
+.ch-program { font-size: 13px; color: rgba(255,255,255,0.7); margin-top: 2px; }
+.ch-program span { color: rgba(255,255,255,0.45); margin: 0 4px; }
+
+.top-right { display: flex; align-items: center; gap: 8px; }
+.live-badge-lg { display: flex; align-items: center; gap: 5px; background: var(--accent-live); color: #fff; font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 5px; letter-spacing: 0.05em; }
+.live-dot-lg { width: 6px; height: 6px; border-radius: 50%; background: #fff; animation: pulse 1.5s ease-in-out infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+.timeshift-badge { background: rgba(251,191,36,0.15); border: 1px solid rgba(251,191,36,0.3); color: var(--accent-warning); font-size: 11px; font-weight: 600; padding: 4px 10px; border-radius: 5px; }
+
+/* Center controls */
+.center-controls { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); z-index: 20; display: flex; align-items: center; gap: 24px; }
+.ctrl-btn { width: 52px; height: 52px; border-radius: 50%; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); display: flex; align-items: center; justify-content: center; color: #fff; cursor: pointer; backdrop-filter: blur(8px); }
+.ctrl-btn.play { width: 64px; height: 64px; background: rgba(255,255,255,0.15); }
+.ctrl-btn svg { pointer-events: none; }
+.seek-label { position: absolute; top: -20px; left: 50%; transform: translateX(-50%); font-size: 10px; color: rgba(255,255,255,0.6); white-space: nowrap; }
+
+/* Bottom overlay */
+.bottom-overlay { position: absolute; bottom: 0; left: 0; right: 0; z-index: 20; background: linear-gradient(0deg, rgba(0,0,0,0.92) 0%, rgba(0,0,0,0.6) 70%, transparent 100%); padding: 0 24px 20px; }
+
+/* Standard controls row */
+.std-controls { display: flex; align-items: center; gap: 14px; padding: 14px 0 10px; }
+.icon-btn { width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; color: rgba(255,255,255,0.75); cursor: pointer; border: none; background: none; transition: color 0.1s; }
+.icon-btn:hover { color: #fff; }
+.vol-slider { flex: 0 0 80px; height: 3px; -webkit-appearance: none; background: rgba(255,255,255,0.25); border-radius: 2px; cursor: pointer; }
+.vol-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%; background: #fff; }
+.time-display { font-size: 12px; color: rgba(255,255,255,0.7); font-family: var(--font-mono); flex: 1; text-align: center; }
+.time-display .timeshift-indicator { color: var(--accent-warning); margin-left: 6px; }
+
+/* Timeline container */
+.timeline-container { position: relative; }
+
+/* Time ruler */
+.time-ruler { display: flex; margin-bottom: 4px; padding: 0 1px; }
+.ruler-mark { flex: 1; font-size: 9px; color: rgba(255,255,255,0.35); font-family: var(--font-mono); text-align: center; }
+.ruler-mark.now { color: var(--accent-live); font-weight: 600; }
+
+/* The actual timeline track */
+.timeline-track { height: 48px; background: rgba(255,255,255,0.06); border-radius: 8px; position: relative; overflow: hidden; cursor: pointer; border: 1px solid rgba(255,255,255,0.08); }
+
+/* Program segments on timeline */
+.seg { position: absolute; top: 4px; bottom: 4px; border-radius: 4px; overflow: hidden; display: flex; align-items: center; padding: 0 6px; }
+.seg-title { font-size: 10px; font-weight: 600; color: rgba(255,255,255,0.9); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Playhead */
+.playhead { position: absolute; top: -3px; bottom: -3px; width: 3px; background: var(--accent-warning); border-radius: 2px; z-index: 10; pointer-events: none; }
+.playhead::before { content: ''; position: absolute; top: 0; left: -5px; width: 13px; height: 13px; background: var(--accent-warning); border-radius: 50%; box-shadow: 0 0 8px rgba(251,191,36,0.6); }
+.playhead-time { position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); background: var(--accent-warning); color: #000; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 3px; white-space: nowrap; font-family: var(--font-mono); }
+
+/* Live marker */
+.live-marker { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--accent-live); z-index: 8; }
+.live-marker::after { content: 'LIVE'; position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); background: var(--accent-live); color: #fff; font-size: 9px; font-weight: 700; padding: 2px 5px; border-radius: 3px; white-space: nowrap; }
+
+/* Jump-to-live button */
+.jump-live { position: absolute; right: 0; bottom: calc(100% + 8px); display: flex; align-items: center; gap: 5px; background: rgba(244,63,94,0.15); border: 1px solid rgba(244,63,94,0.35); color: var(--accent-live); font-size: 11px; font-weight: 600; padding: 5px 10px; border-radius: 5px; cursor: pointer; backdrop-filter: blur(8px); }
+
+/* EPG tooltip on hover */
+.seg-tooltip { position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%); background: var(--bg-2); border: 1px solid var(--border-strong); border-radius: 6px; padding: 7px 10px; white-space: nowrap; z-index: 20; pointer-events: none; }
+.seg-tooltip .t-title { font-size: 12px; font-weight: 600; color: var(--text-0); }
+.seg-tooltip .t-time { font-size: 10px; color: var(--text-2); margin-top: 2px; font-family: var(--font-mono); }
+.seg-tooltip .t-catchup { font-size: 10px; color: var(--accent-warning); margin-top: 3px; }
+
+/* Keyboard hint */
+.kbd-hints { display: flex; align-items: center; gap: 12px; margin-top: 8px; justify-content: center; }
+.kbd-hint { display: flex; align-items: center; gap: 5px; font-size: 10px; color: rgba(255,255,255,0.4); }
+.kbd { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.15); border-radius: 3px; padding: 1px 6px; font-size: 9px; font-family: var(--font-mono); color: rgba(255,255,255,0.6); }
+</style>
+</head>
+<body>
+
+<div class="video-bg"></div>
+<div class="video-noise"></div>
+<div class="video-content">
+  <div class="pitch">
+    <div class="pitch-lines"></div>
+    <div class="pitch-center"></div>
+    <div class="pitch-midline"></div>
+  </div>
+</div>
+
+<!-- Top bar -->
+<div class="top-bar">
+  <button class="back-btn">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="15 18 9 12 15 6"/></svg>
+  </button>
+  <div class="ch-info">
+    <div class="ch-name-large">ESPN</div>
+    <div class="ch-program">Premier League <span>·</span> Arsenal vs Chelsea <span>·</span> 43' min</div>
+  </div>
+  <div class="top-right">
+    <div class="timeshift-badge">⏪ Watching 34 min ago</div>
+  </div>
+</div>
+
+<!-- Center controls -->
+<div class="center-controls">
+  <button class="ctrl-btn" style="position:relative">
+    <span class="seek-label">−30s</span>
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="19" x2="5" y2="5"/></svg>
+  </button>
+  <button class="ctrl-btn play">
+    <svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
+  </button>
+  <button class="ctrl-btn" style="position:relative">
+    <span class="seek-label">+30s</span>
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg>
+  </button>
+</div>
+
+<!-- Bottom overlay -->
+<div class="bottom-overlay">
+
+  <!-- Standard controls -->
+  <div class="std-controls">
+    <button class="icon-btn">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><polygon points="11,5 6,9 2,9 2,15 6,15 11,19"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round"/></svg>
+    </button>
+    <input type="range" class="vol-slider" value="80">
+    <div style="flex:1"></div>
+    <div class="time-display">
+      19:51:24
+      <span class="timeshift-indicator">← 34 min behind live</span>
+    </div>
+    <div style="flex:1"></div>
+    <button class="icon-btn">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+    </button>
+    <button class="icon-btn">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+    </button>
+  </div>
+
+  <!-- Timeline -->
+  <div class="timeline-container">
+    <!-- Jump to live -->
+    <button class="jump-live">
+      <div class="live-dot-lg" style="width:6px;height:6px;border-radius:50%;background:var(--accent-live)"></div>
+      Jump to Live
+    </button>
+
+    <!-- Time ruler -->
+    <div class="time-ruler">
+      <div class="ruler-mark">18:00</div>
+      <div class="ruler-mark">18:30</div>
+      <div class="ruler-mark">19:00</div>
+      <div class="ruler-mark">19:30</div>
+      <div class="ruler-mark now">20:00</div>
+      <div class="ruler-mark">20:25 →</div>
+    </div>
+
+    <!-- Track -->
+    <div class="timeline-track">
+
+      <!-- Segments — 4.5 hours shown, 18:00 to 22:30, track width = 100% -->
+      <!-- Champions League Preview 18:00-19:30 = 33% of track -->
+      <div class="seg" style="left:0%;width:33%;background:rgba(244,63,94,0.25);opacity:0.5">
+        <span class="seg-title">Champions League Preview</span>
+      </div>
+      <!-- SportCenter 19:30-20:00 = 11% of track -->
+      <div class="seg" style="left:33.3%;width:11%;background:rgba(244,63,94,0.2);opacity:0.5">
+        <span class="seg-title">SportsCenter</span>
+      </div>
+      <!-- Arsenal vs Chelsea 20:00-21:55 = 43% of track — current (bright) -->
+      <div class="seg" style="left:44.4%;width:43%;background:rgba(244,63,94,0.35);border:1px solid rgba(244,63,94,0.5)">
+        <span class="seg-title">Premier League: Arsenal vs Chelsea</span>
+      </div>
+      <!-- Match of the Day 21:55-23:00 = future -->
+      <div class="seg" style="left:87.5%;width:12.5%;background:rgba(255,255,255,0.08)">
+        <span class="seg-title">Match of the Day</span>
+      </div>
+
+      <!-- Playhead — at 19:51, which is ~40% of 4.5hr window (1.85h/4.5h) -->
+      <div class="playhead" style="left:41%">
+        <div class="playhead-time">19:51</div>
+      </div>
+
+      <!-- Live marker — at 20:25, which is ~47% (2.42h/4.5h) -->
+      <div class="live-marker" style="left:53.8%"></div>
+
+    </div>
+
+    <!-- Tooltip (shown over current hovered segment) -->
+    <div class="seg-tooltip" style="left:53%;bottom:calc(100% + 8px)">
+      <div class="t-title">Premier League: Arsenal vs Chelsea</div>
+      <div class="t-time">20:00 – 21:55 · In progress</div>
+      <div class="t-catchup">↺ Click past programs to watch from that point</div>
+    </div>
+
+    <!-- Keyboard hints -->
+    <div class="kbd-hints">
+      <div class="kbd-hint"><kbd class="kbd">←</kbd><kbd class="kbd">→</kbd> seek 10s</div>
+      <div class="kbd-hint"><kbd class="kbd">J</kbd><kbd class="kbd">L</kbd> seek 30s</div>
+      <div class="kbd-hint"><kbd class="kbd">Space</kbd> play/pause</div>
+      <div class="kbd-hint"><kbd class="kbd">End</kbd> jump to live</div>
+      <div class="kbd-hint"><kbd class="kbd">Esc</kbd> exit player</div>
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>

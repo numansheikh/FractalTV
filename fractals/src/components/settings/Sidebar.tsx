@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { FractalsIcon } from '@/components/shared/FractalsIcon'
 import { Source, useSourcesStore } from '@/stores/sources.store'
-import { buildColorMap, SourceColor } from '@/lib/sourceColors'
+import { buildColorMapFromSources, SourceColor } from '@/lib/sourceColors'
 import { api } from '@/lib/api'
 
 interface Props {
@@ -15,7 +15,7 @@ interface Props {
 
 export function Sidebar({ sources, onAddSource, onSyncSource, onRemoveSource, onOpenSettings }: Props) {
   const { selectedSourceIds, toggleSourceFilter, clearSourceFilter } = useSourcesStore()
-  const colorMap = buildColorMap(sources.map((s) => s.id))
+  const colorMap = buildColorMapFromSources(sources)
 
   return (
     <div

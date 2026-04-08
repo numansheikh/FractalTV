@@ -5,7 +5,7 @@ import { api } from '@/lib/api'
 import { useSourcesStore } from '@/stores/sources.store'
 import { useUserStore } from '@/stores/user.store'
 import { useSearchStore } from '@/stores/search.store'
-import { buildColorMap } from '@/lib/sourceColors'
+import { buildColorMapFromSources } from '@/lib/sourceColors'
 import { SlidePanel } from '@/components/layout/SlidePanel'
 import { EpisodeRow } from '@/components/cards/EpisodeRow'
 import { MetadataBlock } from './MetadataBlock'
@@ -25,7 +25,7 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
   const [plotExpanded, setPlotExpanded] = useState(false)
 
   const { sources } = useSourcesStore()
-  const colorMap = buildColorMap(sources.map((s) => s.id))
+  const colorMap = buildColorMapFromSources(sources)
   const userStore = useUserStore()
   const setQuery = useSearchStore((s) => s.setQuery)
 
@@ -54,7 +54,7 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
 
   const c = (enrichedItem as ContentItem | null) ?? item
   const isEnriched = !!(c.enriched)
-  const primarySourceId = c.primarySourceId ?? c.primary_source_id ?? item.primarySourceId ?? item.primary_source_id
+  const primarySourceId = c.primarySourceId ?? c.primary_source_id ?? item.primarySourceId ?? item.primary_source_id ?? (item as any).source_ids ?? item.id?.split(':')[0]
   const sourceColor = primarySourceId ? colorMap[primarySourceId] : undefined
   const primarySource = primarySourceId ? sources.find((s) => s.id === primarySourceId) : undefined
 

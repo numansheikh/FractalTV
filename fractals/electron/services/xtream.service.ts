@@ -353,12 +353,17 @@ export class XtreamService {
     onProgress?: SyncProgressCallback
   ) {
     const insertContent = sqlite.prepare(`
-      INSERT OR REPLACE INTO content
-        (id, primary_source_id, external_id, type, title, category_id, poster_url, catchup_supported, catchup_days, updated_at)
-      VALUES (?, ?, ?, 'live', ?, ?, ?, ?, ?, unixepoch())
+      INSERT INTO content
+        (id, primary_source_id, external_id, type, title, category_id, poster_url, catchup_supported, catchup_days, epg_channel_id, updated_at)
+      VALUES (?, ?, ?, 'live', ?, ?, ?, ?, ?, ?, unixepoch())
+      ON CONFLICT(id) DO UPDATE SET
+        title = excluded.title, category_id = excluded.category_id,
+        poster_url = excluded.poster_url, catchup_supported = excluded.catchup_supported,
+        catchup_days = excluded.catchup_days, epg_channel_id = excluded.epg_channel_id,
+        updated_at = excluded.updated_at
     `)
     const insertSource = sqlite.prepare(`
-      INSERT OR REPLACE INTO content_sources (id, content_id, source_id, external_id, quality)
+      INSERT OR IGNORE INTO content_sources (id, content_id, source_id, external_id, quality)
       VALUES (?, ?, ?, ?, 'HD')
     `)
     const updateFts = sqlite.prepare(`
@@ -367,7 +372,7 @@ export class XtreamService {
     `)
     const insertCC = sqlite.prepare(`
       INSERT OR IGNORE INTO content_categories (content_id, category_id)
-      VALUES (?, ?)
+      SELECT ?, ? WHERE EXISTS (SELECT 1 FROM categories WHERE id = ?)
     `)
 
     const batch = sqlite.transaction((items: XtreamLiveStream[]) => {
@@ -376,14 +381,15 @@ export class XtreamService {
         const contentSourceId = `${sourceId}:live:${stream.stream_id}`
 
         insertContent.run(
-          contentId, sourceId, String(stream.stream_id), stream.name,
+          contentId, sourceId, String(stream.stream_id), stream.name || `Channel ${stream.stream_id}`,
           stream.category_id || null, stream.stream_icon || null,
-          stream.tv_archive ? 1 : 0, stream.tv_archive_duration || 0
+          stream.tv_archive ? 1 : 0, stream.tv_archive_duration || 0,
+          stream.epg_channel_id || null
         )
         insertSource.run(contentSourceId, contentId, sourceId, String(stream.stream_id))
         updateFts.run(contentId, normalize(stream.name))
         if (stream.category_id) {
-          insertCC.run(contentId, `${sourceId}:live:${stream.category_id}`)
+          { const catId = `${sourceId}:live:${stream.category_id}`; insertCC.run(contentId, catId, catId) }
         }
       }
     })
@@ -405,12 +411,16 @@ export class XtreamService {
     onProgress?: SyncProgressCallback
   ) {
     const insertContent = sqlite.prepare(`
-      INSERT OR REPLACE INTO content
+      INSERT INTO content
         (id, primary_source_id, external_id, type, title, category_id, poster_url, rating_tmdb, container_extension, updated_at)
       VALUES (?, ?, ?, 'movie', ?, ?, ?, ?, ?, unixepoch())
+      ON CONFLICT(id) DO UPDATE SET
+        title = excluded.title, category_id = excluded.category_id,
+        poster_url = excluded.poster_url, rating_tmdb = excluded.rating_tmdb,
+        container_extension = excluded.container_extension, updated_at = excluded.updated_at
     `)
     const insertSource = sqlite.prepare(`
-      INSERT OR REPLACE INTO content_sources (id, content_id, source_id, external_id)
+      INSERT OR IGNORE INTO content_sources (id, content_id, source_id, external_id)
       VALUES (?, ?, ?, ?)
     `)
     const updateFts = sqlite.prepare(`
@@ -419,7 +429,7 @@ export class XtreamService {
     `)
     const insertCC = sqlite.prepare(`
       INSERT OR IGNORE INTO content_categories (content_id, category_id)
-      VALUES (?, ?)
+      SELECT ?, ? WHERE EXISTS (SELECT 1 FROM categories WHERE id = ?)
     `)
 
     const batch = sqlite.transaction((items: XtreamVodStream[]) => {
@@ -428,7 +438,7 @@ export class XtreamService {
         const contentSourceId = `${sourceId}:movie:${stream.stream_id}`
 
         insertContent.run(
-          contentId, sourceId, String(stream.stream_id), stream.name,
+          contentId, sourceId, String(stream.stream_id), stream.name || `Movie ${stream.stream_id}`,
           stream.category_id || null, stream.stream_icon || null,
           stream.rating_5based ? stream.rating_5based * 2 : null, // convert 5-based to 10-based
           stream.container_extension || null
@@ -436,7 +446,7 @@ export class XtreamService {
         insertSource.run(contentSourceId, contentId, sourceId, String(stream.stream_id))
         updateFts.run(contentId, normalize(stream.name))
         if (stream.category_id) {
-          insertCC.run(contentId, `${sourceId}:movie:${stream.category_id}`)
+          { const catId = `${sourceId}:movie:${stream.category_id}`; insertCC.run(contentId, catId, catId) }
         }
       }
     })
@@ -456,12 +466,15 @@ export class XtreamService {
     onProgress?: SyncProgressCallback
   ) {
     const insertContent = sqlite.prepare(`
-      INSERT OR REPLACE INTO content
+      INSERT INTO content
         (id, primary_source_id, external_id, type, title, category_id, poster_url, plot, director, cast, rating_tmdb, updated_at)
       VALUES (?, ?, ?, 'series', ?, ?, ?, ?, ?, ?, ?, unixepoch())
+      ON CONFLICT(id) DO UPDATE SET
+        title = excluded.title, category_id = excluded.category_id,
+        poster_url = excluded.poster_url, updated_at = excluded.updated_at
     `)
     const insertSource = sqlite.prepare(`
-      INSERT OR REPLACE INTO content_sources (id, content_id, source_id, external_id)
+      INSERT OR IGNORE INTO content_sources (id, content_id, source_id, external_id)
       VALUES (?, ?, ?, ?)
     `)
     const updateFts = sqlite.prepare(`
@@ -470,7 +483,7 @@ export class XtreamService {
     `)
     const insertCC = sqlite.prepare(`
       INSERT OR IGNORE INTO content_categories (content_id, category_id)
-      VALUES (?, ?)
+      SELECT ?, ? WHERE EXISTS (SELECT 1 FROM categories WHERE id = ?)
     `)
 
     const batch = sqlite.transaction((items: XtreamSeries[]) => {
@@ -479,7 +492,7 @@ export class XtreamService {
         const contentSourceId = `${sourceId}:series:${series.series_id}`
 
         insertContent.run(
-          contentId, sourceId, String(series.series_id), series.name,
+          contentId, sourceId, String(series.series_id), series.name || `Series ${series.series_id}`,
           series.category_id || null, series.cover || null,
           series.plot || null, series.director || null, series.cast || null,
           series.rating_5based ? series.rating_5based * 2 : null
@@ -487,7 +500,7 @@ export class XtreamService {
         insertSource.run(contentSourceId, contentId, sourceId, String(series.series_id))
         updateFts.run(contentId, normalize(series.name), normalize(series.plot), normalize(series.cast), normalize(series.director))
         if (series.category_id) {
-          insertCC.run(contentId, `${sourceId}:series:${series.category_id}`)
+          { const catId = `${sourceId}:series:${series.category_id}`; insertCC.run(contentId, catId, catId) }
         }
       }
     })

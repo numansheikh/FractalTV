@@ -4,7 +4,7 @@ import { ContentItem, BreadcrumbNav } from '@/lib/types'
 import { api } from '@/lib/api'
 import { useSourcesStore } from '@/stores/sources.store'
 import { useSearchStore } from '@/stores/search.store'
-import { buildColorMap } from '@/lib/sourceColors'
+import { buildColorMapFromSources } from '@/lib/sourceColors'
 import { SlidePanel } from '@/components/layout/SlidePanel'
 import { MetadataBlock } from './MetadataBlock'
 import { ActionButtons } from './ActionButtons'
@@ -22,7 +22,7 @@ export function MovieDetail({ item, onPlay, onClose, onNavigate, isPlaying }: Pr
   const [plotExpanded, setPlotExpanded] = useState(false)
 
   const { sources } = useSourcesStore()
-  const colorMap = buildColorMap(sources.map((s) => s.id))
+  const colorMap = buildColorMapFromSources(sources)
   const setQuery = useSearchStore((s) => s.setQuery)
 
   const { data: enrichedItem, refetch } = useQuery({
@@ -33,7 +33,7 @@ export function MovieDetail({ item, onPlay, onClose, onNavigate, isPlaying }: Pr
 
   const c = (enrichedItem as ContentItem | null) ?? item
   const isEnriched = !!(c.enriched)
-  const primarySourceId = c.primarySourceId ?? c.primary_source_id ?? item.primarySourceId ?? item.primary_source_id
+  const primarySourceId = c.primarySourceId ?? c.primary_source_id ?? item.primarySourceId ?? item.primary_source_id ?? (item as any).source_ids ?? item.id?.split(':')[0]
   const sourceColor = primarySourceId ? colorMap[primarySourceId] : undefined
   const primarySource = primarySourceId ? sources.find((s) => s.id === primarySourceId) : undefined
 

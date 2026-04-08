@@ -6,8 +6,11 @@ import { mkdirSync } from 'fs'
 import * as schema from './schema'
 import { normalizeForSearch } from '../lib/normalize'
 
+const DB_NAME = process.env.FRACTALS_DB
+  ? `fractals-${process.env.FRACTALS_DB}.db`
+  : 'fractals.db'
 const DB_DIR = join(app.getPath('userData'), 'data')
-const DB_PATH = join(DB_DIR, 'fractals.db')
+const DB_PATH = join(DB_DIR, DB_NAME)
 
 let _db: ReturnType<typeof drizzle> | null = null
 let _sqlite: Database.Database | null = null
@@ -172,6 +175,7 @@ function createTables(db: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_content_tmdb ON content(tmdb_id);
     CREATE INDEX IF NOT EXISTS idx_content_enriched ON content(enriched);
     CREATE INDEX IF NOT EXISTS idx_content_source ON content(primary_source_id);
+    CREATE INDEX IF NOT EXISTS idx_content_source_type ON content(primary_source_id, type);
     CREATE INDEX IF NOT EXISTS idx_content_category ON content(category_id, primary_source_id);
     CREATE INDEX IF NOT EXISTS idx_content_updated ON content(updated_at);
     CREATE INDEX IF NOT EXISTS idx_categories_name ON categories(name, source_id, external_id);
@@ -199,6 +203,11 @@ function createTables(db: Database.Database) {
   try { db.exec(`ALTER TABLE categories ADD COLUMN position INTEGER NOT NULL DEFAULT 0`) } catch {}
   // fav_sort_order: manual ordering for favorite channels in My Channels home mode
   try { db.exec(`ALTER TABLE user_data ADD COLUMN fav_sort_order INTEGER`) } catch {}
+  // epg_channel_id: tvg-id from Xtream API, used to match EPG entries to channels
+  try { db.exec(`ALTER TABLE content ADD COLUMN epg_channel_id TEXT`) } catch {}
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_content_epg_channel ON content(epg_channel_id)`) } catch {}
+  // last_epg_sync: unix timestamp of last EPG XMLTV fetch per source
+  try { db.exec(`ALTER TABLE sources ADD COLUMN last_epg_sync INTEGER`) } catch {}
 
   // Migration: content IDs changed from `movie:{id}` to `{sourceId}:movie:{id}`
   // Clear content data so re-sync creates fresh rows. Sources/settings preserved.
@@ -223,6 +232,9 @@ function createTables(db: Database.Database) {
   } catch (e) {
     console.error('[DB] Migration FAILED:', e)
   }
+
+  // Reset any sources stuck in 'syncing' from a previous crashed/killed run
+  db.prepare(`UPDATE sources SET status = 'active' WHERE status = 'syncing'`).run()
 
   // Insert default profile if not exists
   db.prepare(`

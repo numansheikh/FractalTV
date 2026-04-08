@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { Source, SyncProgress, useSourcesStore } from '@/stores/sources.store'
 import { useAppStore } from '@/stores/app.store'
-import { buildColorMap } from '@/lib/sourceColors'
+import { getSourceColor, PALETTE_HEX, PALETTE_SIZE } from '@/lib/sourceColors'
 import { api } from '@/lib/api'
 
 interface Props {
@@ -49,9 +49,9 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
   const { sources, syncProgress } = useSourcesStore()
   const progress = syncProgress[source.id] ?? null
 
-  // Build color map from all source ids
-  const colorMap = buildColorMap(sources.map(s => s.id))
-  const color = colorMap[source.id]
+  // Resolve color: use stored colorIndex if set, else auto-assign by position
+  const autoIndex = sources.findIndex(s => s.id === source.id)
+  const color = getSourceColor(source.colorIndex ?? autoIndex)
 
   const [menuOpen, setMenuOpen] = useState(false)
   const [editMode, setEditMode] = useState(false)
@@ -59,11 +59,13 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
   const menuRef = useRef<HTMLDivElement>(null)
 
   // Edit form state
+  const isM3u = source.type === 'm3u'
   const [editForm, setEditForm] = useState({
     name: source.name,
     serverUrl: source.serverUrl ?? '',
     username: source.username ?? '',
     password: '',
+    m3uUrl: source.m3uUrl ?? '',
   })
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
@@ -87,6 +89,11 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
 
   const expInfo = formatExpDate(source.expDate)
 
+  const handleColorPick = (idx: number) => {
+    useSourcesStore.getState().updateSource(source.id, { colorIndex: idx })
+    api.sources.setColor(source.id, idx) // persist in background
+  }
+
   const handleSave = async () => {
     setSaving(true)
     setSaveError('')
@@ -94,9 +101,14 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
       const result = await api.sources.update({
         sourceId: source.id,
         name: editForm.name || undefined,
-        serverUrl: editForm.serverUrl || undefined,
-        username: editForm.username || undefined,
-        password: editForm.password || undefined,
+        ...(isM3u
+          ? { m3uUrl: editForm.m3uUrl || undefined }
+          : {
+              serverUrl: editForm.serverUrl || undefined,
+              username: editForm.username || undefined,
+              password: editForm.password || undefined,
+            }
+        ),
       })
       if ((result as any).success === false) {
         setSaveError((result as any).error ?? 'Failed to save')
@@ -112,9 +124,11 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
 
   const handleToggleDisable = async () => {
     setMenuOpen(false)
-    await api.sources.toggleDisabled(source.id)
-    // If disabling, remove this source from the active filter so content doesn't ghost
-    if (!source.disabled) {
+    const result = await api.sources.toggleDisabled(source.id)
+    const nowDisabled = result?.disabled ?? !source.disabled
+    useSourcesStore.getState().updateSource(source.id, { disabled: nowDisabled })
+    // Remove from active filter when disabling so content doesn't ghost
+    if (nowDisabled) {
       const { selectedSourceIds, toggleSourceFilter } = useAppStore.getState()
       if (selectedSourceIds.includes(source.id)) toggleSourceFilter(source.id)
     }
@@ -221,7 +235,7 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
         fontSize: 11, color: 'var(--text-2)', fontFamily: 'var(--font-mono)',
         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
       }}>
-        {source.serverUrl || '—'}
+        {source.m3uUrl || source.serverUrl || '—'}
       </div>
 
       {/* Stats row */}
@@ -250,23 +264,33 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
       {/* Sync progress */}
       {isSyncing && progress && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginTop: 2 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: 10, color: 'var(--text-1)', fontFamily: 'var(--font-ui)' }}>
-              {PHASE_LABELS[progress.phase]}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 10, color: 'var(--text-1)', fontFamily: 'var(--font-ui)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {progress.message || PHASE_LABELS[progress.phase]}
             </span>
-            <span style={{ fontSize: 10, color: 'var(--text-2)', fontFamily: 'var(--font-mono)' }}>
-              {progress.current.toLocaleString()} / {progress.total.toLocaleString()}
-            </span>
+            {syncPct > 0 && (
+              <span style={{ fontSize: 10, color: 'var(--text-2)', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>
+                {syncPct}%
+              </span>
+            )}
           </div>
           <div style={{
             height: 3, borderRadius: 99, overflow: 'hidden',
             background: 'var(--bg-3)', width: '100%',
           }}>
-            <div style={{
-              height: '100%', background: 'var(--accent-interactive)',
-              width: `${syncPct}%`, transition: 'width 0.3s',
-              borderRadius: 99,
-            }} />
+            {syncPct > 0 ? (
+              <div style={{
+                height: '100%', background: 'var(--accent-interactive)',
+                width: `${syncPct}%`, transition: 'width 0.3s',
+                borderRadius: 99,
+              }} />
+            ) : (
+              <div style={{
+                height: '100%', background: 'var(--accent-interactive)',
+                width: '35%', borderRadius: 99,
+                animation: 'shimmer 1.4s ease-in-out infinite',
+              }} />
+            )}
           </div>
         </div>
       )}
@@ -293,14 +317,29 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
         }}>
           <InlineField label="Name" value={editForm.name}
             onChange={(v) => setEditForm(f => ({ ...f, name: v }))} />
-          <InlineField label="Server URL" value={editForm.serverUrl}
-            onChange={(v) => setEditForm(f => ({ ...f, serverUrl: v }))} />
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-            <InlineField label="Username" value={editForm.username}
-              onChange={(v) => setEditForm(f => ({ ...f, username: v }))} />
-            <InlineField label="Password" value={editForm.password} type="password"
-              placeholder="(unchanged)"
-              onChange={(v) => setEditForm(f => ({ ...f, password: v }))} />
+          {isM3u ? (
+            <InlineField label="M3U URL" value={editForm.m3uUrl}
+              onChange={(v) => setEditForm(f => ({ ...f, m3uUrl: v }))} />
+          ) : (
+            <>
+              <InlineField label="Server URL" value={editForm.serverUrl}
+                onChange={(v) => setEditForm(f => ({ ...f, serverUrl: v }))} />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                <InlineField label="Username" value={editForm.username}
+                  onChange={(v) => setEditForm(f => ({ ...f, username: v }))} />
+                <InlineField label="Password" value={editForm.password} type="password"
+                  placeholder="(unchanged)"
+                  onChange={(v) => setEditForm(f => ({ ...f, password: v }))} />
+              </div>
+            </>
+          )}
+
+          {/* Color picker */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+            <label style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--text-2)', fontFamily: 'var(--font-ui)' }}>
+              Color
+            </label>
+            <ColorPicker selected={source.colorIndex ?? autoIndex} onPick={handleColorPick} />
           </div>
 
           {saveError && (
@@ -402,6 +441,29 @@ function ActionButton({
     >
       {children}
     </button>
+  )
+}
+
+/* ── ColorPicker ────────────────────────────────────────────────── */
+export function ColorPicker({ selected, onPick }: { selected: number; onPick: (idx: number) => void }) {
+  return (
+    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+      {PALETTE_HEX.map((hex, i) => (
+        <div
+          key={i}
+          title={`Color ${i + 1}`}
+          onClick={() => onPick(i)}
+          style={{
+            width: 22, height: 22, borderRadius: '50%',
+            background: hex, cursor: 'pointer', flexShrink: 0,
+            outline: selected === i ? `3px solid ${hex}` : '3px solid transparent',
+            outlineOffset: 2,
+            opacity: selected === i ? 1 : 0.7,
+            transition: 'outline 0.1s, opacity 0.1s',
+          }}
+        />
+      ))}
+    </div>
   )
 }
 

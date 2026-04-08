@@ -6,7 +6,7 @@ import { PosterCard } from '@/components/cards/PosterCard'
 import { ChannelCard } from '@/components/cards/ChannelCard'
 import { useSourcesStore } from '@/stores/sources.store'
 import { useUserStore } from '@/stores/user.store'
-import { buildColorMap } from '@/lib/sourceColors'
+import { buildColorMapFromSources } from '@/lib/sourceColors'
 import { api } from '@/lib/api'
 
 interface Props {
@@ -46,7 +46,7 @@ function ChannelListRow({ item, onClick }: ChannelListRowProps) {
   const nameSpanRef = useRef<HTMLSpanElement>(null)
 
   const sources = useSourcesStore((s) => s.sources)
-  const colorMap = buildColorMap(sources.map((s) => s.id))
+  const colorMap = buildColorMapFromSources(sources)
 
   // Favorite state
   const isFav = !!useUserStore((s) => s.data[item.id]?.favorite)
@@ -68,7 +68,7 @@ function ChannelListRow({ item, onClick }: ChannelListRowProps) {
     qc.invalidateQueries({ queryKey: ['library', 'favorites'] })
   }
 
-  const primarySourceId = item.primarySourceId ?? item.primary_source_id
+  const primarySourceId = item.primarySourceId ?? item.primary_source_id ?? (item as any).source_ids ?? item.id?.split(':')[0]
   const sourceColor = primarySourceId ? colorMap[primarySourceId] : undefined
   const sourceName = primarySourceId ? sources.find((s) => s.id === primarySourceId)?.name : undefined
   const showSourceBadge = sources.length > 1 && sourceName

@@ -16,6 +16,10 @@ export interface Source {
   expDate?: string | null        // Unix timestamp string or null
   maxConnections?: number | null
   subscriptionType?: string | null
+  // M3U-specific
+  m3uUrl?: string
+  // UI color — index into the 16-color palette (user-assigned or auto by position)
+  colorIndex?: number
 }
 
 export interface SyncProgress {

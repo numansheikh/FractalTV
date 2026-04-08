@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Fractals — EPG Guide v2 · Sheet Overlay</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg-0: #08080c; --bg-1: #0e0e14; --bg-2: #16161e; --bg-3: #1e1e28; --bg-4: #282834;
+  --border-subtle: rgba(255,255,255,0.06); --border-default: rgba(255,255,255,0.12); --border-strong: rgba(255,255,255,0.22);
+  --text-0: #f5f3ff; --text-1: #c4bfe8; --text-2: #7a7590; --text-3: #4a4760;
+  --accent-live: #f43f5e; --accent-interactive: #8b5cf6;
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "SF Mono", "JetBrains Mono", monospace;
+  --ch-col: 164px;
+  --hour-px: 280px;
+  --row-h: 52px;
+  --header-h: 44px;
+  --timebar-h: 32px;
+}
+body { font-family: var(--font-ui); background: #1a1a24; color: var(--text-0); height: 100vh; overflow: hidden; display: flex; align-items: flex-end; }
+
+/* ── Simulated app behind the overlay ── */
+.app-bg {
+  position: fixed; inset: 0;
+  display: flex;
+  background: var(--bg-0);
+}
+.app-sidebar {
+  width: 200px; background: var(--bg-1); border-right: 1px solid var(--border-subtle);
+  display: flex; flex-direction: column; gap: 0;
+}
+.app-sidebar-item {
+  padding: 10px 14px; font-size: 12px; color: var(--text-2); border-bottom: 1px solid var(--border-subtle);
+}
+.app-sidebar-item.active { color: var(--text-0); background: var(--bg-2); }
+.app-video {
+  flex: 1; background: #000; display: flex; align-items: center; justify-content: center;
+  color: var(--text-3); font-size: 13px;
+}
+
+/* ── Sheet overlay ── */
+.sheet-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.55);
+  backdrop-filter: blur(2px);
+}
+.sheet {
+  position: fixed; left: 0; right: 0; bottom: 0;
+  height: 72vh;
+  background: var(--bg-1);
+  border-top: 1px solid var(--border-default);
+  border-radius: 14px 14px 0 0;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 -8px 40px rgba(0,0,0,0.6);
+}
+
+/* drag handle */
+.sheet-handle {
+  width: 36px; height: 4px; border-radius: 2px;
+  background: rgba(255,255,255,0.15);
+  margin: 10px auto 0;
+  flex-shrink: 0;
+}
+
+/* top bar */
+.sheet-header {
+  height: var(--header-h);
+  display: flex; align-items: center; gap: 10px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+.sheet-title { font-size: 13px; font-weight: 600; color: var(--text-0); }
+.sheet-date { font-size: 11px; color: var(--text-2); font-family: var(--font-mono); }
+.spacer { flex: 1; }
+.nav-btn {
+  width: 28px; height: 28px; border-radius: 7px;
+  background: var(--bg-2); border: 1px solid var(--border-default);
+  color: var(--text-1); font-size: 14px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.1s;
+}
+.nav-btn:hover { background: var(--bg-3); }
+.now-btn {
+  height: 28px; padding: 0 12px; border-radius: 7px;
+  background: rgba(244,63,94,0.12); border: 1px solid rgba(244,63,94,0.25);
+  color: var(--accent-live); font-size: 11px; font-weight: 600; cursor: pointer;
+  display: flex; align-items: center; gap: 5px;
+}
+.live-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent-live); animation: pulse 1.4s ease-in-out infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+.close-btn {
+  width: 28px; height: 28px; border-radius: 50%;
+  background: var(--bg-3); border: none;
+  color: var(--text-2); font-size: 16px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  margin-left: 4px;
+}
+.close-btn:hover { background: var(--bg-4); color: var(--text-0); }
+
+/* ── Grid area ── */
+.grid-wrap {
+  flex: 1; display: flex; overflow: hidden;
+}
+
+/* left channel column */
+.ch-col {
+  width: var(--ch-col); flex-shrink: 0;
+  border-right: 1px solid var(--border-subtle);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.ch-col-header {
+  height: var(--timebar-h); flex-shrink: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex; align-items: center; padding: 0 12px;
+}
+.ch-filter {
+  width: 100%; background: var(--bg-2); border: 1px solid var(--border-default);
+  border-radius: 5px; padding: 4px 8px; font-size: 11px;
+  color: var(--text-0); outline: none; font-family: var(--font-ui);
+}
+.ch-list { flex: 1; overflow-y: auto; overflow-x: hidden; }
+.ch-list::-webkit-scrollbar { width: 3px; }
+.ch-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+.ch-row {
+  height: var(--row-h); display: flex; align-items: center; gap: 8px;
+  padding: 0 10px; border-bottom: 1px solid var(--border-subtle);
+  cursor: pointer; transition: background 0.1s;
+  flex-shrink: 0;
+}
+.ch-row:hover { background: var(--bg-2); }
+.ch-row.active { background: rgba(139,92,246,0.1); }
+.ch-logo {
+  width: 28px; height: 28px; border-radius: 5px;
+  object-fit: contain; flex-shrink: 0;
+  background: var(--bg-3);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 8px; color: var(--text-3); overflow: hidden;
+}
+.ch-logo img { width: 100%; height: 100%; object-fit: contain; border-radius: 5px; }
+.ch-info { flex: 1; min-width: 0; }
+.ch-name { font-size: 11px; font-weight: 500; color: var(--text-0); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ch-now { font-size: 10px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+.src-dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
+.fav-star { font-size: 10px; color: #fbbf24; flex-shrink: 0; }
+
+/* right timeline */
+.timeline-wrap {
+  flex: 1; overflow: hidden; display: flex; flex-direction: column; position: relative;
+}
+
+/* time header */
+.time-header {
+  height: var(--timebar-h); flex-shrink: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  position: relative; overflow: hidden;
+}
+.time-header-inner {
+  position: absolute; top: 0; left: 0; height: 100%;
+  width: calc(var(--hour-px) * 8); /* 8 hours displayed */
+  display: flex;
+}
+.time-slot {
+  width: var(--hour-px); flex-shrink: 0;
+  display: flex; align-items: center; padding-left: 8px;
+  font-size: 10px; color: var(--text-2); font-family: var(--font-mono);
+  border-right: 1px solid var(--border-subtle);
+}
+.time-slot-half {
+  position: absolute; top: 50%; height: 8px; width: 1px;
+  background: var(--border-subtle);
+  transform: translateY(-50%);
+}
+
+/* programme rows */
+.prog-scroll {
+  flex: 1; overflow: auto;
+  position: relative;
+}
+.prog-scroll::-webkit-scrollbar { width: 3px; height: 4px; }
+.prog-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+.prog-row {
+  height: var(--row-h); position: relative;
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+.prog-inner {
+  position: absolute; top: 0; left: 0; height: 100%;
+  width: calc(var(--hour-px) * 8);
+}
+
+/* programme block */
+.prog {
+  position: absolute; top: 4px; bottom: 4px;
+  border-radius: 5px; padding: 0 8px;
+  display: flex; flex-direction: column; justify-content: center;
+  cursor: pointer; transition: filter 0.1s;
+  overflow: hidden;
+  border: 1px solid transparent;
+}
+.prog:hover { filter: brightness(1.2); border-color: rgba(255,255,255,0.15); }
+.prog.current { border-color: rgba(255,255,255,0.25); }
+.prog.past { opacity: 0.45; }
+.prog-title { font-size: 11px; font-weight: 500; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.prog-time { font-size: 9px; color: rgba(255,255,255,0.55); font-family: var(--font-mono); margin-top: 2px; white-space: nowrap; }
+
+/* colour palette for channels */
+.c1 { background: rgba(139,92,246,0.22); }
+.c2 { background: rgba(59,130,246,0.22); }
+.c3 { background: rgba(16,185,129,0.22); }
+.c4 { background: rgba(245,158,11,0.22); }
+.c5 { background: rgba(239,68,68,0.22); }
+.c6 { background: rgba(236,72,153,0.22); }
+
+/* now line */
+.now-line {
+  position: absolute; top: 0; bottom: 0;
+  width: 2px; background: var(--accent-live);
+  z-index: 10; pointer-events: none;
+  box-shadow: 0 0 8px rgba(244,63,94,0.6);
+}
+.now-line::before {
+  content: ''; position: absolute; top: -1px; left: -4px;
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--accent-live);
+}
+
+/* tooltip */
+.tooltip {
+  position: absolute; z-index: 50;
+  background: var(--bg-0); border: 1px solid var(--border-default);
+  border-radius: 8px; padding: 10px 12px;
+  max-width: 240px; min-width: 180px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  pointer-events: none;
+}
+.tooltip-title { font-size: 12px; font-weight: 600; color: var(--text-0); margin-bottom: 4px; }
+.tooltip-time { font-size: 10px; color: var(--text-2); font-family: var(--font-mono); margin-bottom: 6px; }
+.tooltip-desc { font-size: 11px; color: var(--text-1); line-height: 1.5; }
+</style>
+</head>
+<body>
+
+<!-- App behind -->
+<div class="app-bg">
+  <div class="app-sidebar">
+    <div class="app-sidebar-item">📺 Live TV</div>
+    <div class="app-sidebar-item active">UK: Sky Kids HEVC HD</div>
+    <div class="app-sidebar-item">UK: Euronews ◉</div>
+    <div class="app-sidebar-item">PK: HUM TV</div>
+  </div>
+  <div class="app-video">video playing</div>
+</div>
+
+<!-- Backdrop -->
+<div class="sheet-backdrop"></div>
+
+<!-- Sheet -->
+<div class="sheet">
+  <div class="sheet-handle"></div>
+
+  <div class="sheet-header">
+    <span class="sheet-title">EPG Guide</span>
+    <span class="sheet-date">Mon 7 Apr</span>
+    <div class="spacer"></div>
+    <button class="nav-btn">‹</button>
+    <button class="nav-btn">›</button>
+    <button class="now-btn"><span class="live-dot"></span> Now</button>
+    <button class="close-btn">×</button>
+  </div>
+
+  <div class="grid-wrap">
+    <!-- Channel column -->
+    <div class="ch-col">
+      <div class="ch-col-header">
+        <input class="ch-filter" placeholder="Filter…" value="">
+      </div>
+      <div class="ch-list" id="chList"></div>
+    </div>
+
+    <!-- Timeline -->
+    <div class="timeline-wrap">
+      <div class="time-header">
+        <div class="time-header-inner" id="timeHeader"></div>
+      </div>
+      <div class="prog-scroll" id="progScroll">
+        <div style="position:relative">
+          <div class="now-line" id="nowLine"></div>
+          <div id="progRows"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Tooltip -->
+<div class="tooltip" id="tooltip" style="display:none">
+  <div class="tooltip-title" id="ttTitle"></div>
+  <div class="tooltip-time" id="ttTime"></div>
+  <div class="tooltip-desc" id="ttDesc"></div>
+</div>
+
+<script>
+const HOUR_PX = 280
+const ROW_H = 52
+const now = new Date()
+// Set to a nice demo time: 10:45
+now.setHours(10, 45, 0, 0)
+
+const windowStart = new Date(now)
+windowStart.setHours(now.getHours() - 2, 0, 0, 0)
+
+const channels = [
+  { name: 'UK: Sky Kids HEVC HD', src: '#f43f5e', fav: true,  now: 'In The Night Garden Specials' },
+  { name: 'UK: Euronews ◉',       src: '#8b5cf6', fav: true,  now: 'The European Debrief' },
+  { name: 'UK: Nick Jr',          src: '#3b82f6', fav: false, now: 'PAW Patrol' },
+  { name: 'UK: Tiny Pop',         src: '#10b981', fav: false, now: 'Masha And The Bear' },
+  { name: 'VIP: France 24 Eng',   src: '#f59e0b', fav: false, now: 'LIVE: Sport' },
+  { name: 'DE: Comedy Central',   src: '#ec4899', fav: false, now: "Malcolm mittendrin" },
+  { name: 'UK: Sky Kids 4K',      src: '#f43f5e', fav: false, now: 'My Friend Maisy' },
+  { name: 'PK: HUM TV',           src: '#8b5cf6', fav: false, now: 'Drama Serial' },
+  { name: 'UK: RT Documentary',   src: '#3b82f6', fav: false, now: 'Out of Cycle' },
+  { name: 'IT: Rai Yoyo HD',      src: '#10b981', fav: false, now: 'Gigantosaurus' },
+]
+
+const colorClasses = ['c1','c2','c3','c4','c5','c6']
+
+// Programme data per channel (offsets in minutes from windowStart)
+const progData = [
+  [ // Sky Kids
+    { offset: 0,   dur: 30, title: 'Kipper',                    desc: 'Kipper and Pig go on an adventure.' },
+    { offset: 30,  dur: 30, title: 'Sarah & Duck',              desc: 'Sarah and Duck discover a rainbow.' },
+    { offset: 60,  dur: 45, title: 'In The Night Garden',       desc: 'The Haahoos hop aboard the ZonkyZoney.', current: true },
+    { offset: 105, dur: 15, title: 'Teletubbies',               desc: 'Tinky Winky, Dipsy, Laa-Laa and Po.' },
+    { offset: 120, dur: 30, title: 'Bluey',                     desc: "Bluey and Bingo play with Dad." },
+    { offset: 150, dur: 30, title: 'Hey Duggee',                desc: 'The Squirrel Club earns a new badge.' },
+    { offset: 180, dur: 60, title: 'Isadora Moon',              desc: '' },
+    { offset: 240, dur: 30, title: 'Peppa Pig',                 desc: '' },
+    { offset: 270, dur: 30, title: 'Ben & Holly',               desc: '' },
+    { offset: 300, dur: 60, title: 'My Little Pony',            desc: '' },
+    { offset: 360, dur: 30, title: 'Octonauts',                 desc: '' },
+    { offset: 390, dur: 30, title: 'Fireman Sam',               desc: '' },
+    { offset: 420, dur: 30, title: 'Thomas & Friends',          desc: '' },
+    { offset: 450, dur: 30, title: 'CBeebies Bedtime Stories',  desc: '' },
+  ],
+  [ // Euronews
+    { offset: 0,   dur: 60, title: 'Global Conversation',  desc: 'Expert analysis of world events.' },
+    { offset: 60,  dur: 30, title: 'The European Debrief', desc: 'Today\'s top European stories.', current: true },
+    { offset: 90,  dur: 30, title: 'Focus',                desc: 'In-depth look at global issues.' },
+    { offset: 120, dur: 60, title: 'Euronews Live',        desc: '' },
+    { offset: 180, dur: 30, title: 'Real Economy',         desc: '' },
+    { offset: 210, dur: 30, title: 'Business Arabia',      desc: '' },
+    { offset: 240, dur: 60, title: 'Euronews Live',        desc: '' },
+    { offset: 300, dur: 30, title: 'Witness',              desc: '' },
+    { offset: 330, dur: 90, title: 'Euronews Live',        desc: '' },
+    { offset: 420, dur: 60, title: 'Tomorrow\'s Leaders',  desc: '' },
+  ],
+  [ // Nick Jr
+    { offset: 0,   dur: 30, title: 'Dora the Explorer',   desc: '' },
+    { offset: 30,  dur: 60, title: 'PAW Patrol',          desc: 'The pups rescue a runaway train.', current: true },
+    { offset: 90,  dur: 30, title: 'Peppa Pig',           desc: '' },
+    { offset: 120, dur: 30, title: 'Blaze',               desc: '' },
+    { offset: 150, dur: 60, title: 'PAW Patrol',          desc: '' },
+    { offset: 210, dur: 30, title: 'Bubble Guppies',      desc: '' },
+    { offset: 240, dur: 60, title: 'Blaze',               desc: '' },
+    { offset: 300, dur: 30, title: 'Dora',                desc: '' },
+    { offset: 330, dur: 30, title: 'Peppa Pig',           desc: '' },
+    { offset: 360, dur: 60, title: 'PAW Patrol',          desc: '' },
+    { offset: 420, dur: 60, title: 'Shimmer & Shine',     desc: '' },
+  ],
+  [ // Tiny Pop
+    { offset: 0,   dur: 30, title: 'Little Charley Bear',  desc: '' },
+    { offset: 30,  dur: 60, title: 'Masha And The Bear',   desc: 'Masha and the Bear go fishing.', current: true },
+    { offset: 90,  dur: 30, title: 'Bananas in Pyjamas',   desc: '' },
+    { offset: 120, dur: 60, title: 'Fireman Sam',          desc: '' },
+    { offset: 180, dur: 30, title: 'Bob The Builder',      desc: '' },
+    { offset: 210, dur: 30, title: 'Postman Pat',          desc: '' },
+    { offset: 240, dur: 60, title: 'Masha And The Bear',   desc: '' },
+    { offset: 300, dur: 30, title: 'Little Charley Bear',  desc: '' },
+    { offset: 330, dur: 90, title: 'Bananas in Pyjamas',   desc: '' },
+    { offset: 420, dur: 60, title: 'Fireman Sam',          desc: '' },
+  ],
+  [ // France 24
+    { offset: 0,   dur: 30, title: 'News',              desc: '' },
+    { offset: 30,  dur: 30, title: 'Sports',            desc: '', current: true },
+    { offset: 60,  dur: 30, title: 'Eye on Africa',     desc: '' },
+    { offset: 90,  dur: 30, title: 'News',              desc: '' },
+    { offset: 120, dur: 30, title: 'Tech 24',           desc: '' },
+    { offset: 150, dur: 30, title: 'News',              desc: '' },
+    { offset: 180, dur: 30, title: 'Access Asia',       desc: '' },
+    { offset: 210, dur: 30, title: 'News',              desc: '' },
+    { offset: 240, dur: 60, title: 'Reporters',         desc: '' },
+    { offset: 300, dur: 60, title: 'News',              desc: '' },
+    { offset: 360, dur: 60, title: 'America 24',        desc: '' },
+    { offset: 420, dur: 60, title: 'News',              desc: '' },
+  ],
+  [ // Comedy Central
+    { offset: 0,   dur: 60,  title: 'It\'s Always Sunny',    desc: '' },
+    { offset: 60,  dur: 60,  title: 'Malcolm mittendrin',    desc: 'Hal teaches Malcolm to drive.', current: true },
+    { offset: 120, dur: 30,  title: 'South Park',            desc: '' },
+    { offset: 150, dur: 30,  title: 'South Park',            desc: '' },
+    { offset: 180, dur: 60,  title: 'Futurama',              desc: '' },
+    { offset: 240, dur: 30,  title: 'Family Guy',            desc: '' },
+    { offset: 270, dur: 30,  title: 'Family Guy',            desc: '' },
+    { offset: 300, dur: 60,  title: 'American Dad',          desc: '' },
+    { offset: 360, dur: 120, title: 'Stand-Up Special',      desc: '' },
+  ],
+  [ // Sky Kids 4K
+    { offset: 0,   dur: 30,  title: 'Octonauts',          desc: '' },
+    { offset: 30,  dur: 30,  title: 'My Friend Maisy',    desc: 'Maisy goes to the countryside.', current: true },
+    { offset: 60,  dur: 30,  title: 'Teletubbies',        desc: '' },
+    { offset: 90,  dur: 30,  title: 'Bluey',              desc: '' },
+    { offset: 120, dur: 60,  title: 'Hey Duggee',         desc: '' },
+    { offset: 180, dur: 30,  title: 'Peppa Pig',          desc: '' },
+    { offset: 210, dur: 30,  title: 'Ben & Holly',        desc: '' },
+    { offset: 240, dur: 60,  title: 'Isadora Moon',       desc: '' },
+    { offset: 300, dur: 120, title: 'CBeebies Specials',  desc: '' },
+    { offset: 420, dur: 60,  title: 'Goodnight Stories',  desc: '' },
+  ],
+  [ // PK: HUM TV
+    { offset: 0,   dur: 60,  title: 'Morning Show',     desc: '' },
+    { offset: 60,  dur: 30,  title: 'News',             desc: '', current: true },
+    { offset: 90,  dur: 90,  title: 'Drama Serial',     desc: '' },
+    { offset: 180, dur: 60,  title: 'Cooking Show',     desc: '' },
+    { offset: 240, dur: 120, title: 'Mehendi Wala Ghar',desc: '' },
+    { offset: 360, dur: 60,  title: 'News',             desc: '' },
+    { offset: 420, dur: 60,  title: 'Drama Special',    desc: '' },
+  ],
+  [ // RT Documentary
+    { offset: 0,   dur: 60,  title: 'Watching the Hawks', desc: '' },
+    { offset: 60,  dur: 60,  title: 'Out of Cycle',       desc: 'Investigation into off-cycle finance.', current: true },
+    { offset: 120, dur: 60,  title: 'Documentary Film',   desc: '' },
+    { offset: 180, dur: 60,  title: 'The Truthseeker',    desc: '' },
+    { offset: 240, dur: 120, title: 'Feature Documentary', desc: '' },
+    { offset: 360, dur: 60,  title: 'Watching the Hawks', desc: '' },
+    { offset: 420, dur: 60,  title: 'CrossTalk',          desc: '' },
+  ],
+  [ // Rai Yoyo
+    { offset: 0,   dur: 30,  title: 'Masha e Orso',     desc: '' },
+    { offset: 30,  dur: 30,  title: 'Gigantosaurus',    desc: 'I dinosauri si avventurano.', current: true },
+    { offset: 60,  dur: 30,  title: 'Peppa Pig',        desc: '' },
+    { offset: 90,  dur: 30,  title: 'Bluey',            desc: '' },
+    { offset: 120, dur: 60,  title: 'PJ Masks',         desc: '' },
+    { offset: 180, dur: 30,  title: 'Spongebob',        desc: '' },
+    { offset: 210, dur: 30,  title: 'Masha e Orso',     desc: '' },
+    { offset: 240, dur: 60,  title: 'Gigantosaurus',    desc: '' },
+    { offset: 300, dur: 60,  title: 'Rai Yoyo Notte',   desc: '' },
+    { offset: 360, dur: 120, title: 'Film Animazione',  desc: '' },
+  ],
+]
+
+function fmtTime(date) {
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
+}
+
+// Build channel list
+const chList = document.getElementById('chList')
+channels.forEach((ch, i) => {
+  const el = document.createElement('div')
+  el.className = 'ch-row' + (i === 0 ? ' active' : '')
+  el.innerHTML = `
+    <div class="ch-logo" style="background:${ch.src}22; border: 1px solid ${ch.src}33">
+      <span style="font-size:9px;color:${ch.src};font-weight:700">${ch.name.split(':')[0]}</span>
+    </div>
+    <div class="ch-info">
+      <div class="ch-name">${ch.name.split(': ')[1] || ch.name}</div>
+      <div class="ch-now">${ch.now}</div>
+    </div>
+    ${ch.fav ? '<span class="fav-star">★</span>' : ''}
+    <div class="src-dot" style="background:${ch.src}"></div>
+  `
+  chList.appendChild(el)
+})
+
+// Build time header
+const timeHeader = document.getElementById('timeHeader')
+for (let h = 0; h < 8; h++) {
+  const slotTime = new Date(windowStart.getTime() + h * 3600000)
+  const slot = document.createElement('div')
+  slot.className = 'time-slot'
+  slot.style.width = HOUR_PX + 'px'
+  slot.textContent = fmtTime(slotTime)
+  // half-hour mark
+  const half = document.createElement('div')
+  half.className = 'time-slot-half'
+  half.style.left = (HOUR_PX / 2) + 'px'
+  slot.appendChild(half)
+  timeHeader.appendChild(slot)
+}
+
+// Build programme rows
+const progRows = document.getElementById('progRows')
+progData.forEach((progs, ci) => {
+  const row = document.createElement('div')
+  row.className = 'prog-row'
+  const inner = document.createElement('div')
+  inner.className = 'prog-inner'
+  inner.style.width = (HOUR_PX * 8) + 'px'
+
+  progs.forEach(p => {
+    const left = (p.offset / 60) * HOUR_PX
+    const width = (p.dur / 60) * HOUR_PX - 3
+    if (left + width < 0 || left > HOUR_PX * 8) return
+
+    const block = document.createElement('div')
+    block.className = 'prog ' + colorClasses[ci % colorClasses.length]
+    if (p.current) block.classList.add('current')
+    if (p.offset + p.dur < (now - windowStart) / 60000) block.classList.add('past')
+    block.style.left = left + 'px'
+    block.style.width = width + 'px'
+
+    const startT = new Date(windowStart.getTime() + p.offset * 60000)
+    const endT = new Date(windowStart.getTime() + (p.offset + p.dur) * 60000)
+
+    block.innerHTML = `
+      <div class="prog-title">${p.title}</div>
+      ${p.dur >= 30 ? `<div class="prog-time">${fmtTime(startT)} – ${fmtTime(endT)}</div>` : ''}
+    `
+
+    // Tooltip
+    block.addEventListener('mouseenter', (e) => {
+      const tt = document.getElementById('tooltip')
+      document.getElementById('ttTitle').textContent = p.title
+      document.getElementById('ttTime').textContent = fmtTime(startT) + ' – ' + fmtTime(endT) + ' · ' + p.dur + 'min'
+      document.getElementById('ttDesc').textContent = p.desc || 'No description available.'
+      const rect = block.getBoundingClientRect()
+      tt.style.display = 'block'
+      tt.style.top = (rect.top - 90) + 'px'
+      tt.style.left = Math.min(rect.left, window.innerWidth - 260) + 'px'
+    })
+    block.addEventListener('mouseleave', () => {
+      document.getElementById('tooltip').style.display = 'none'
+    })
+
+    inner.appendChild(block)
+  })
+
+  row.appendChild(inner)
+  progRows.appendChild(row)
+})
+
+// Now line
+const nowOffsetMin = (now - windowStart) / 60000
+const nowLeft = (nowOffsetMin / 60) * HOUR_PX
+document.getElementById('nowLine').style.left = nowLeft + 'px'
+
+// Scroll timeline to show now with some left context
+const progScroll = document.getElementById('progScroll')
+progScroll.scrollLeft = nowLeft - 120
+document.querySelector('.time-header').scrollLeft = nowLeft - 120
+
+// Sync scroll
+progScroll.addEventListener('scroll', () => {
+  document.querySelector('.time-header').scrollLeft = progScroll.scrollLeft
+})
+// Also sync ch-list vertical scroll with prog-rows
+progScroll.addEventListener('scroll', () => {
+  chList.scrollTop = progScroll.scrollTop
+})
+chList.addEventListener('scroll', () => {
+  progScroll.scrollTop = chList.scrollTop
+})
+</script>
+</body>
+</html>

@@ -11,10 +11,15 @@ export const api = {
       ipcRenderer.invoke('sources:add-xtream', args),
     testXtream: (args: { serverUrl: string; username: string; password: string }) =>
       ipcRenderer.invoke('sources:test-xtream', args),
+    addM3u: (args: { name: string; m3uUrl: string }) =>
+      ipcRenderer.invoke('sources:add-m3u', args),
+    testM3u: (args: { m3uUrl: string }) =>
+      ipcRenderer.invoke('sources:test-m3u', args),
     remove: (sourceId: string) => ipcRenderer.invoke('sources:remove', sourceId),
-    update: (args: { sourceId: string; name?: string; serverUrl?: string; username?: string; password?: string }) =>
+    update: (args: { sourceId: string; name?: string; serverUrl?: string; username?: string; password?: string; m3uUrl?: string }) =>
       ipcRenderer.invoke('sources:update', args),
     toggleDisabled: (sourceId: string) => ipcRenderer.invoke('sources:toggle-disabled', sourceId),
+    setColor: (sourceId: string, colorIndex: number) => ipcRenderer.invoke('sources:set-color', sourceId, colorIndex),
     sync: (sourceId: string) => ipcRenderer.invoke('sources:sync', sourceId),
     accountInfo: (sourceId: string) => ipcRenderer.invoke('sources:account-info', sourceId),
     startupCheck: () => ipcRenderer.invoke('sources:startup-check'),
@@ -38,6 +43,8 @@ export const api = {
     get: (contentId: string) => ipcRenderer.invoke('content:get', contentId),
     getStreamUrl: (args: { contentId: string; sourceId?: string }) =>
       ipcRenderer.invoke('content:get-stream-url', args),
+    getCatchupUrl: (args: { contentId: string; startTime: number; duration: number }) =>
+      ipcRenderer.invoke('content:get-catchup-url', args),
     browse: (args: { type?: 'live' | 'movie' | 'series'; categoryName?: string; sourceIds?: string[]; sortBy?: string; sortDir?: string; limit?: number; offset?: number }) =>
       ipcRenderer.invoke('content:browse', args),
   },
@@ -89,6 +96,30 @@ export const api = {
     enrichManual: (args: { contentId: string; title: string; year?: number }) => ipcRenderer.invoke('enrichment:enrich-manual', args),
     searchTmdb: (args: { title: string; year?: number; type: 'movie' | 'series' }) => ipcRenderer.invoke('enrichment:search-tmdb', args),
     enrichById: (args: { contentId: string; tmdbId: number }) => ipcRenderer.invoke('enrichment:enrich-by-id', args),
+  },
+
+  // EPG
+  epg: {
+    sync: (sourceId: string) => ipcRenderer.invoke('epg:sync', sourceId),
+    nowNext: (contentId: string) => ipcRenderer.invoke('epg:now-next', contentId),
+    guide: (args: { contentIds: string[]; startTime?: number; endTime?: number }) =>
+      ipcRenderer.invoke('epg:guide', args),
+    onProgress: (cb: (data: { sourceId: string; message: string }) => void) => {
+      ipcRenderer.on('epg:progress', (_e, data) => cb(data))
+      return () => ipcRenderer.removeAllListeners('epg:progress')
+    },
+  },
+
+  // Dialog
+  dialog: {
+    openFile: (args?: { filters?: { name: string; extensions: string[] }[] }) =>
+      ipcRenderer.invoke('dialog:open-file', args),
+  },
+
+  // Window
+  window: {
+    toggleFullscreen: () => ipcRenderer.invoke('window:toggle-fullscreen'),
+    isFullscreen: () => ipcRenderer.invoke('window:is-fullscreen'),
   },
 
   // Debug

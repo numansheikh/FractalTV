@@ -45,14 +45,14 @@
    Dark defaults — light theme overrides below.
 ════════════════════════════════════════════════════════════════ */
 :root {
-  --color-src-1: #a855f7;   /* vivid violet  ~280° */
-  --color-src-2: #eab308;   /* vivid gold     ~48° */
-  --color-src-3: #f97316;   /* vivid orange   ~24° */
-  --color-src-4: #e879f9;   /* vivid fuchsia ~294° */
-  --color-src-5: #f472b6;   /* hot pink      ~328° */
-  --color-src-6: #fb923c;   /* warm amber     ~32° */
-  --color-src-7: #c084fc;   /* soft lavender ~278° */
-  --color-src-8: #fde047;   /* bright lemon   ~53° */
+  --color-src-1: #00A3E0;   /* sky blue    */
+  --color-src-2: #E69F00;   /* amber       */
+  --color-src-3: #A8D600;   /* lime green  */
+  --color-src-4: #FF4F4F;   /* red         */
+  --color-src-5: #F6EB61;   /* yellow      */
+  --color-src-6: #6B32A8;   /* purple (lightened from #4B0082 for dark-bg legibility) */
+  --color-src-7: #CC79A7;   /* pink/mauve  */
+  --color-src-8: #00B2A9;   /* teal        */
 }
 
 /* ════════════════════════════════════════════════════════════════
@@ -86,9 +86,6 @@
   --color-movie:         #60a5fa;
   --color-series:        #34d399;
 
-  --color-nav-bg:        #0c0c18;
-  --color-nav-text:      #f5f3ff;
-
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
 }
@@ -121,23 +118,20 @@
   --color-movie:         #1d4ed8;
   --color-series:        #047857;
 
-  --color-nav-bg:        #5b21b6;
-  --color-nav-text:      #ffffff;
-
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
 }
 
-/* ── Source palette overrides for Fractals Day — deeper saturation ── */
+/* ── Source palette overrides for Fractals Day — slightly deeper for light bg ── */
 [data-theme="fractals-day"] {
-  --color-src-1: #6d28d9;   /* deep violet  ~270° */
-  --color-src-2: #a16207;   /* warm gold     ~43° */
-  --color-src-3: #c2410c;   /* burnt orange  ~22° */
-  --color-src-4: #86198f;   /* deep fuchsia ~295° */
-  --color-src-5: #9d174d;   /* deep rose    ~330° */
-  --color-src-6: #b45309;   /* dark amber    ~32° */
-  --color-src-7: #4c1d95;   /* dark purple  ~270° */
-  --color-src-8: #92400e;   /* dark ochre    ~30° */
+  --color-src-1: #0080b3;   /* sky blue    */
+  --color-src-2: #b87800;   /* amber       */
+  --color-src-3: #6a8700;   /* lime green  */
+  --color-src-4: #d93030;   /* red         */
+  --color-src-5: #c4b800;   /* yellow      */
+  --color-src-6: #4B0082;   /* purple      */
+  --color-src-7: #a8527e;   /* pink/mauve  */
+  --color-src-8: #008c85;   /* teal        */
 }
 
 /* ════════════════════════════════════════════════════════════════
@@ -293,11 +287,6 @@ input::placeholder {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 30%, transparent);
 }
 
-/* Nav search bar sits on a colored --color-nav-bg; needs white-tinted styling */
-.nav-search-input::placeholder {
-  color: rgba(255, 255, 255, 0.55);
-  opacity: 1;
-}
 
 @keyframes spin {
   to { transform: rotate(360deg); }
@@ -317,3 +306,6 @@ input::placeholder {
   from { opacity: 0; transform: translateY(12px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+
+/* ArtPlayer: hide the floating live-edge button (top-right), keep the controls bar badge */
+.art-live-edge { display: none !important; }

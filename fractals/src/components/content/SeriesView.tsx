@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { api } from '@/lib/api'
 import { ContentItem } from '@/components/browse/ContentCard'
 import { useSourcesStore } from '@/stores/sources.store'
-import { buildColorMap } from '@/lib/sourceColors'
+import { buildColorMapFromSources } from '@/lib/sourceColors'
 import { BreadcrumbNav } from './ContentDetail'
 
 interface Props {
@@ -41,7 +41,7 @@ export function SeriesView({ item, onPlay, onBack, onNavigate }: Props) {
   })
 
   const { sources } = useSourcesStore()
-  const colorMap = buildColorMap(sources.map((s) => s.id))
+  const colorMap = buildColorMapFromSources(sources)
 
   const c = (full as any) ?? item
   const backdrop = c.backdropUrl ?? c.backdrop_url

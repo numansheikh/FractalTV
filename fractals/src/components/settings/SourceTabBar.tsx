@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Source, SyncProgress, useSourcesStore } from '@/stores/sources.store'
-import { buildColorMap, SourceColor } from '@/lib/sourceColors'
+import { buildColorMapFromSources, SourceColor } from '@/lib/sourceColors'
 import { api } from '@/lib/api'
 
 interface Props {
@@ -48,7 +48,7 @@ function expiryLabel(days: number | null): string {
 
 export function SourceTabBar({ sources, onAddSource, onSyncSource, onRemoveSource, inline }: Props) {
   const { selectedSourceIds, toggleSourceFilter, clearSourceFilter } = useSourcesStore()
-  const colorMap = buildColorMap(sources.map((s) => s.id))
+  const colorMap = buildColorMapFromSources(sources)
   const allSelected = selectedSourceIds.length === 0
   const totalItems = sources.filter(s => !s.disabled).reduce((n, s) => n + s.itemCount, 0)
 
@@ -253,14 +253,12 @@ function SourceTab({ source, colorObj, selected, onSelect, onSync, onRemove }: {
 
 function SyncProgressPill({ progress, color }: { progress: SyncProgress; color: string }) {
   const pct = progress.total > 0 ? Math.round((progress.current / progress.total) * 100) : null
-  const label = PHASE_LABEL[progress.phase] ?? progress.phase
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 90 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 110 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
-        <span style={{ fontSize: 10, color: 'var(--color-text-secondary)', whiteSpace: 'nowrap' }}>
-          {label}{progress.current > 0 ? ` ${progress.current.toLocaleString()}` : '…'}
-          {progress.total > 0 && progress.current > 0 && `/${progress.total.toLocaleString()}`}
+        <span style={{ fontSize: 10, color: 'var(--color-text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 130 }}>
+          {progress.message || (PHASE_LABEL[progress.phase] ?? progress.phase)}
         </span>
         {pct !== null && (
           <span style={{ fontSize: 9, color: 'var(--color-text-muted)', fontFamily: 'monospace', flexShrink: 0 }}>

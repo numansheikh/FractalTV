@@ -40,6 +40,10 @@ const VIEW_TYPE: Record<ActiveView, 'live' | 'movie' | 'series' | undefined> = {
 
 const BROWSE_VIEWS: ActiveView[] = ['live', 'films', 'series']
 
+const SEARCH_INIT = 21   // N+1: fetch one extra to detect "has more"
+const SEARCH_FULL = 9999 // effectively unlimited
+const SEARCH_INITIAL_CAP = 20 // max displayed before "Show all"
+
 interface Props {
   sort: string
   onSelectContent: (item: ContentItem) => void
@@ -64,7 +68,7 @@ function navBtnStyle(disabled: boolean): React.CSSProperties {
 }
 
 export function ContentArea({ sort, onSelectContent, onAddSource }: Props) {
-  const { activeView, typeFilter, categoryFilter, selectedSourceIds, viewMode, pageSize } = useAppStore()
+  const { activeView, typeFilter, categoryFilter, selectedSourceIds, viewMode, pageSize, setChannelSurfContext } = useAppStore()
   const { query } = useSearchStore()
   const { loadBulk } = useUserStore()
   const { sources } = useSourcesStore()
@@ -97,7 +101,7 @@ export function ContentArea({ sort, onSelectContent, onAddSource }: Props) {
   })
   const favData = selectedSourceIds.length > 0
     ? allFavData.filter((item) => {
-        const srcId = (item as any).primarySourceId ?? (item as any).primary_source_id
+        const srcId = (item as any).primarySourceId ?? (item as any).primary_source_id ?? (item as any).source_ids ?? (item as any).id?.split(':')[0]
         return srcId ? selectedSourceIds.includes(srcId) : true
       })
     : allFavData
@@ -119,21 +123,45 @@ export function ContentArea({ sort, onSelectContent, onAddSource }: Props) {
 
   const isLoading = isFavoritesFilter ? favLoading : browseLoading
 
-  // Search query
-  const { data: searchResults } = useQuery({
-    queryKey: ['search', query, contentType, categoryFilter, selectedSourceIds],
-    queryFn: () => api.search.query({
-      query, type: contentType,
-      categoryName: categoryFilter && categoryFilter !== '__favorites__' ? categoryFilter : undefined,
-      sourceIds: selectedSourceIds.length ? selectedSourceIds : undefined,
-      limit: 60,
-    }),
+  // Per-type search limits — initial N+1 to detect "has more", full when expanded
+  const [liveSearchLimit,   setLiveSearchLimit]   = useState(SEARCH_INIT)
+  const [movieSearchLimit,  setMovieSearchLimit]  = useState(SEARCH_INIT)
+  const [seriesSearchLimit, setSeriesSearchLimit] = useState(SEARCH_INIT)
+  useEffect(() => {
+    setLiveSearchLimit(SEARCH_INIT)
+    setMovieSearchLimit(SEARCH_INIT)
+    setSeriesSearchLimit(SEARCH_INIT)
+  }, [query])
+
+  const searchBase = {
+    query,
+    categoryName: categoryFilter && categoryFilter !== '__favorites__' ? categoryFilter : undefined,
+    sourceIds: selectedSourceIds.length ? selectedSourceIds : undefined,
+  }
+  const { data: liveSearchResults   = [] } = useQuery({
+    queryKey: ['search', query, 'live',   categoryFilter, selectedSourceIds, liveSearchLimit],
+    queryFn: () => api.search.query({ ...searchBase, type: 'live',   limit: liveSearchLimit }),
+    enabled: !!query && (!contentType || contentType === 'live'),
     staleTime: 10_000,
-    enabled: !!query,
   })
+  const { data: movieSearchResults  = [] } = useQuery({
+    queryKey: ['search', query, 'movie',  categoryFilter, selectedSourceIds, movieSearchLimit],
+    queryFn: () => api.search.query({ ...searchBase, type: 'movie',  limit: movieSearchLimit }),
+    enabled: !!query && (!contentType || contentType === 'movie'),
+    staleTime: 10_000,
+  })
+  const { data: seriesSearchResults = [] } = useQuery({
+    queryKey: ['search', query, 'series', categoryFilter, selectedSourceIds, seriesSearchLimit],
+    queryFn: () => api.search.query({ ...searchBase, type: 'series', limit: seriesSearchLimit }),
+    enabled: !!query && (!contentType || contentType === 'series'),
+    staleTime: 10_000,
+  })
+  const allSearchResults = query
+    ? ([...liveSearchResults, ...movieSearchResults, ...seriesSearchResults] as ContentItem[])
+    : []
 
   const items: ContentItem[] = query
-    ? ((searchResults ?? []) as ContentItem[])
+    ? allSearchResults
     : isFavoritesFilter
       ? favData
       : ((browseData?.items ?? []) as ContentItem[])
@@ -144,6 +172,29 @@ export function ContentArea({ sort, onSelectContent, onAddSource }: Props) {
   }, [items, loadBulk])
 
   const isEmpty = !isLoading && items.length === 0
+
+  // Wrap select — live items set surf context from whatever list is currently displayed
+  const handleSelect = useCallback((item: ContentItem) => {
+    if (item.type === 'live') {
+      if (query) {
+        // Search mode: use capped search results
+        const liveForSurf = (liveSearchResults as ContentItem[]).slice(
+          0, liveSearchLimit > SEARCH_INIT ? liveSearchResults.length : SEARCH_INITIAL_CAP
+        )
+        const idx = liveForSurf.findIndex((i: ContentItem) => i.id === item.id)
+        setChannelSurfContext(liveForSurf, idx)
+      } else {
+        // Browse/favorites mode: use current displayed items as surf list
+        const currentItems = isFavoritesFilter
+          ? (favData as ContentItem[])
+          : ((browseData?.items ?? []) as ContentItem[])
+        const liveItems = currentItems.filter((i) => i.type === 'live')
+        const idx = liveItems.findIndex((i: ContentItem) => i.id === item.id)
+        setChannelSurfContext(liveItems, idx >= 0 ? idx : 0)
+      }
+    }
+    onSelectContent(item)
+  }, [query, liveSearchResults, liveSearchLimit, isFavoritesFilter, favData, browseData, onSelectContent, setChannelSurfContext])
 
   // Library view
   if (activeView === 'library') {
@@ -158,20 +209,25 @@ export function ContentArea({ sort, onSelectContent, onAddSource }: Props) {
     )
   }
 
-  // Home view — search-first layout
-  if (activeView === 'home' && !query) {
+  // Home view — always render HomeView; it handles search inline so the bottom bar never unmounts
+  if (activeView === 'home') {
     return <HomeView onSelectContent={onSelectContent} />
   }
 
-  // Search results (from any view)
+  // Search results (from non-home views)
   if (query) {
     return (
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
         <FilterBar itemCount={total > 0 ? total : undefined} />
         <div style={{ flex: 1, overflowY: 'auto' }}>
           {ready && SearchResults
-            ? <SearchResults items={items} onSelect={onSelectContent} />
-            : <FallbackGrid items={items} onSelect={onSelectContent} />
+            ? <SearchResults
+                live={{   results: liveSearchResults   as ContentItem[], isExpanded: liveSearchLimit   > SEARCH_INIT, onShowAll: () => setLiveSearchLimit(SEARCH_FULL),   onShowLess: () => setLiveSearchLimit(SEARCH_INIT)   }}
+                movies={{  results: movieSearchResults  as ContentItem[], isExpanded: movieSearchLimit  > SEARCH_INIT, onShowAll: () => setMovieSearchLimit(SEARCH_FULL),  onShowLess: () => setMovieSearchLimit(SEARCH_INIT)  }}
+                series={{  results: seriesSearchResults as ContentItem[], isExpanded: seriesSearchLimit > SEARCH_INIT, onShowAll: () => setSeriesSearchLimit(SEARCH_FULL), onShowLess: () => setSeriesSearchLimit(SEARCH_INIT) }}
+                onSelect={handleSelect}
+              />
+            : <FallbackGrid items={items} onSelect={handleSelect} />
           }
         </div>
       </div>
@@ -223,8 +279,8 @@ export function ContentArea({ sort, onSelectContent, onAddSource }: Props) {
             <>
               <div style={{ flex: 1, minHeight: 0 }}>
                 {ready && VirtualGrid
-                  ? <VirtualGrid items={items} onSelect={onSelectContent} viewMode={activeView === 'live' ? viewMode : 'grid'} />
-                  : <FallbackGrid items={items} onSelect={onSelectContent} />
+                  ? <VirtualGrid items={items} onSelect={handleSelect} viewMode={activeView === 'live' ? viewMode : 'grid'} />
+                  : <FallbackGrid items={items} onSelect={handleSelect} />
                 }
               </div>
               {/* Pagination bar — only when total exceeds threshold */}

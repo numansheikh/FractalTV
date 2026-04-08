@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { ContentItem } from '@/lib/types'
 import { useSourcesStore } from '@/stores/sources.store'
 import { useUserStore } from '@/stores/user.store'
-import { buildColorMap } from '@/lib/sourceColors'
+import { useContextMenuStore } from '@/stores/contextMenu.store'
+import { buildColorMapFromSources } from '@/lib/sourceColors'
 import { PosterPlaceholder } from './PosterPlaceholder'
 import { CardActions } from './CardActions'
 
@@ -16,13 +17,14 @@ export function PosterCard({ item, onClick }: Props) {
   const [imgError, setImgError] = useState(false)
 
   const sources = useSourcesStore((s) => s.sources)
-  const colorMap = buildColorMap(sources.map((s) => s.id))
+  const colorMap = buildColorMapFromSources(sources)
   const userData = useUserStore((s) => s.data[item.id])
+  const showCtxMenu = useContextMenuStore((s) => s.show)
 
   const poster = item.posterUrl ?? item.poster_url
   const hasPoster = poster && !imgError
   const rating = item.ratingTmdb ?? item.rating_tmdb ?? item.ratingImdb ?? item.rating_imdb
-  const primarySourceId = item.primarySourceId ?? item.primary_source_id
+  const primarySourceId = item.primarySourceId ?? item.primary_source_id ?? (item as any).source_ids ?? item.id?.split(':')[0]
   const sourceColor = primarySourceId ? colorMap[primarySourceId] : undefined
   const sourceName = primarySourceId ? sources.find((s) => s.id === primarySourceId)?.name : undefined
   const showSourceBadge = sources.length > 1 && sourceName
@@ -37,13 +39,18 @@ export function PosterCard({ item, onClick }: Props) {
   return (
     <div
       onClick={() => onClick(item)}
+      onContextMenu={(e) => { e.preventDefault(); showCtxMenu(e.clientX, e.clientY, item) }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
         background: 'var(--bg-2)',
         borderRadius: 6,
-        border: `1px solid ${hovered ? 'var(--border-default)' : 'var(--border-subtle)'}`,
-        borderLeft: showSourceBadge && sourceColor ? `3px solid ${sourceColor.accent}` : undefined,
+        borderTop: `1px solid ${hovered ? 'var(--border-default)' : 'var(--border-subtle)'}`,
+        borderRight: `1px solid ${hovered ? 'var(--border-default)' : 'var(--border-subtle)'}`,
+        borderBottom: `1px solid ${hovered ? 'var(--border-default)' : 'var(--border-subtle)'}`,
+        borderLeft: showSourceBadge && sourceColor
+          ? `3px solid ${sourceColor.accent}`
+          : `1px solid ${hovered ? 'var(--border-default)' : 'var(--border-subtle)'}`,
         overflow: 'hidden',
         cursor: 'pointer',
         position: 'relative',

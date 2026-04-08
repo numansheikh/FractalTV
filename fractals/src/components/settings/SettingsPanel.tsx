@@ -370,7 +370,7 @@ function PlayerTab({ playerPref, setPlayerPref, mpvPath, setMpvPath, vlcPath, se
   mpvPath: string; setMpvPath: (v: string) => void
   vlcPath: string; setVlcPath: (v: string) => void
 }) {
-  const { minWatchSeconds, setMinWatchSeconds } = useAppStore()
+  const { minWatchSeconds, setMinWatchSeconds, controlsMode, setControlsMode } = useAppStore()
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -434,6 +434,44 @@ function PlayerTab({ playerPref, setPlayerPref, mpvPath, setMpvPath, vlcPath, se
               </button>
             ))}
           </div>
+        </div>
+      </section>
+
+      <section>
+        <SectionLabel>Player controls</SectionLabel>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <p style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.5, margin: 0 }}>
+            When to show playback controls in fullscreen. Applies to the built-in player only.
+          </p>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {([
+              { value: 'never',  label: 'Never' },
+              { value: 'auto-2', label: 'Auto 2s' },
+              { value: 'auto-3', label: 'Auto 3s' },
+              { value: 'auto-5', label: 'Auto 5s' },
+              { value: 'always', label: 'Always' },
+            ] as const).map(({ value, label }) => (
+              <button
+                key={value}
+                onClick={() => setControlsMode(value)}
+                style={{
+                  flex: 1, padding: '7px 0', borderRadius: 7, fontSize: 11, fontWeight: 500,
+                  fontFamily: 'var(--font-ui)', minWidth: 60,
+                  border: `1px solid ${controlsMode === value ? 'var(--accent-interactive)' : 'var(--border-default)'}`,
+                  background: controlsMode === value ? 'var(--accent-interactive-dim)' : 'transparent',
+                  color: controlsMode === value ? 'var(--accent-interactive)' : 'var(--text-1)',
+                  cursor: 'pointer', transition: 'all 0.1s',
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {controlsMode === 'never' && (
+            <p style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.5, margin: 0 }}>
+              Controls hidden. Keyboard shortcuts still work. Use <kbd style={{ background: 'var(--bg-3)', border: '1px solid var(--border-default)', borderRadius: 3, padding: '0 4px', fontSize: 10, fontFamily: 'var(--font-mono)' }}>Esc</kbd> to close.
+            </p>
+          )}
         </div>
       </section>
 
@@ -566,7 +604,6 @@ function DataTab() {
           homeMode: 'discover',
           hasSeenChannelsModePrompt: false,
           minWatchSeconds: 5,
-          recentSearches: [],
         })
         setMsg('Preferences reset to defaults.')
         setBusy(false)

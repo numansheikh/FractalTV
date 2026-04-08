@@ -8,6 +8,7 @@ import { NavRail } from '@/components/layout/NavRail'
 import { CommandBar } from '@/components/layout/CommandBar'
 import { ContentArea } from '@/components/layout/ContentArea'
 import { ErrorBoundary } from '@/components/shared/ErrorBoundary'
+import { ContextMenu } from '@/components/shared/ContextMenu'
 import { ContentItem } from '@/lib/types'
 
 // Detail + player panels loaded lazily (agents write them)
@@ -16,6 +17,7 @@ const SeriesDetail = lazy(() => import('@/components/detail/SeriesDetail').then(
 const PlayerOverlay = lazy(() => import('@/components/player/PlayerOverlay').then((m) => ({ default: m.PlayerOverlay })))
 const SettingsPanel = lazy(() => import('@/components/settings/SettingsPanel').then((m) => ({ default: m.SettingsPanel })))
 const SourcesPanel = lazy(() => import('@/components/sources/SourcesPanel').then((m) => ({ default: m.SourcesPanel })))
+const LiveSplitView = lazy(() => import('@/components/live/LiveSplitView').then((m) => ({ default: m.LiveSplitView })))
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, retry: 1 } },
@@ -36,9 +38,10 @@ function AppShell() {
   const { query } = useSearchStore()
   const {
     activeView, selectedContent, playingContent, showSettings, showSources,
+    splitViewChannel, setSplitViewChannel,
     setSelectedContent, setPlayingContent, setShowSettings, setShowSources,
-    setView, setTypeFilter, setCategoryFilter, clearSourceFilter, toggleSourceFilter,
-    sort, setSort,
+    setView, setCategoryFilter, clearSourceFilter, toggleSourceFilter,
+    sort, setSort, surfChannel,
   } = useAppStore()
 
   // Load sources + auto-sync new ones
@@ -60,8 +63,25 @@ function AppShell() {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === ',') { e.preventDefault(); setShowSettings(true); return }
       if ((e.metaKey || e.ctrlKey) && e.key === 'r') { e.preventDefault(); window.location.reload(); return }
+
+      // Escape — universal "back" chain (bubble phase, so overlays win via capture+stopImmediatePropagation)
+      // Works even when an input is focused (intentional — clears search query)
+      if (e.key === 'Escape') {
+        const s = useSearchStore.getState()
+        const a = useAppStore.getState()
+        // 1. Clear search query
+        if (s.query) { s.setQuery(''); return }
+        // 2. Clear active category filter (back to All)
+        if (a.categoryFilter !== null) { a.setCategoryFilter(null); return }
+        // 3. Clear source filter
+        if (a.selectedSourceIds.length > 0) { a.clearSourceFilter(); return }
+        // 4. Navigate to Home
+        if (a.activeView !== 'home') { a.setView('home'); return }
+        return
+      }
+
       if (isTyping()) return
-      if ((e.metaKey || e.ctrlKey) && e.key === '1') { e.preventDefault(); setView('home') }
+      if ((e.metaKey || e.ctrlKey) && e.key === '1') { e.preventDefault(); setView('home'); useSearchStore.getState().setQuery('') }
       if ((e.metaKey || e.ctrlKey) && e.key === '2') { e.preventDefault(); setView('live') }
       if ((e.metaKey || e.ctrlKey) && e.key === '3') { e.preventDefault(); setView('films') }
       if ((e.metaKey || e.ctrlKey) && e.key === '4') { e.preventDefault(); setView('series') }
@@ -134,7 +154,7 @@ function AppShell() {
 
   const handleSelectContent = (item: ContentItem) => {
     if (item.type === 'live') {
-      setPlayingContent(item)
+      setSplitViewChannel(item)
     } else {
       setSelectedContent(item)
     }
@@ -142,8 +162,13 @@ function AppShell() {
 
   const handleBreadcrumbNav = (nav: { type?: 'live' | 'movie' | 'series'; sourceId?: string; category?: string }) => {
     setSelectedContent(null)
-    if (nav.type) setTypeFilter(nav.type)
-    if (nav.category) setCategoryFilter(nav.category)
+    useSearchStore.getState().setQuery('')  // clear search so browse view shows, not search results
+    if (nav.category) clearSourceFilter()  // category navigation = clean browse, no leftover source filter
+    if (nav.type) {
+      const viewMap = { live: 'live', movie: 'films', series: 'series' } as const
+      setView(viewMap[nav.type]) // also resets categoryFilter to null
+    }
+    if (nav.category) setCategoryFilter(nav.category) // set after setView
     if (nav.sourceId) { clearSourceFilter(); toggleSourceFilter(nav.sourceId) }
   }
 
@@ -168,7 +193,7 @@ function AppShell() {
 
       {/* Main column */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
-        {(activeView !== 'home' || !!query) && <CommandBar sort={sort} onSortChange={setSort} />}
+        <CommandBar sort={sort} onSortChange={setSort} />
         <ContentArea
           sort={sort}
           onSelectContent={handleSelectContent}
@@ -198,11 +223,21 @@ function AppShell() {
             isPlaying={!!playingContent}
           />
         )}
+        {/* Live split view */}
+        {splitViewChannel && !playingContent && (
+          <LiveSplitView
+            channel={splitViewChannel}
+            onFullscreen={(ch) => setPlayingContent(ch)}
+            onSwitchChannel={(ch) => setSplitViewChannel(ch)}
+            onClose={() => setSplitViewChannel(null)}
+          />
+        )}
         {/* Player */}
         {playingContent && (
           <PlayerOverlay
             content={playingContent}
             onClose={() => setPlayingContent(null)}
+            onSurfChannel={surfChannel}
           />
         )}
         {/* Settings */}
@@ -219,6 +254,7 @@ function AppShell() {
           />
         )}
       </Suspense>
+      <ContextMenu />
     </div>
   )
 }

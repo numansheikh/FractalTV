@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { ContentItem } from '@/lib/types'
 import { useSourcesStore } from '@/stores/sources.store'
 import { useUserStore } from '@/stores/user.store'
-import { buildColorMap } from '@/lib/sourceColors'
+import { useContextMenuStore } from '@/stores/contextMenu.store'
+import { buildColorMapFromSources } from '@/lib/sourceColors'
 import { CardActions } from './CardActions'
 
 interface Props {
@@ -15,12 +16,13 @@ export function ChannelCard({ item, onClick }: Props) {
   const [imgError, setImgError] = useState(false)
 
   const sources = useSourcesStore((s) => s.sources)
-  const colorMap = buildColorMap(sources.map((s) => s.id))
+  const colorMap = buildColorMapFromSources(sources)
   const userData = useUserStore((s) => s.data[item.id])
+  const showCtxMenu = useContextMenuStore((s) => s.show)
 
   const poster = item.posterUrl ?? item.poster_url
   const hasPoster = poster && !imgError
-  const primarySourceId = item.primarySourceId ?? item.primary_source_id
+  const primarySourceId = item.primarySourceId ?? item.primary_source_id ?? (item as any).source_ids ?? item.id?.split(':')[0]
   const sourceColor = primarySourceId ? colorMap[primarySourceId] : undefined
   const showSourceBar = sources.length > 1 && !!sourceColor
   const isFavorite = userData?.favorite === 1
@@ -36,6 +38,7 @@ export function ChannelCard({ item, onClick }: Props) {
   return (
     <div
       onClick={() => onClick(item)}
+      onContextMenu={(e) => { e.preventDefault(); showCtxMenu(e.clientX, e.clientY, item) }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       title={item.title}
@@ -46,8 +49,12 @@ export function ChannelCard({ item, onClick }: Props) {
         overflow: 'hidden',
         display: 'flex',
         flexDirection: 'column',
-        border: `1px solid ${hovered ? 'var(--border-strong)' : 'var(--border-subtle)'}`,
-        borderLeft: showSourceBar ? `3px solid ${sourceColor!.accent}` : undefined,
+        borderTop: `1px solid ${hovered ? 'var(--border-strong)' : 'var(--border-subtle)'}`,
+        borderRight: `1px solid ${hovered ? 'var(--border-strong)' : 'var(--border-subtle)'}`,
+        borderBottom: `1px solid ${hovered ? 'var(--border-strong)' : 'var(--border-subtle)'}`,
+        borderLeft: showSourceBar
+          ? `3px solid ${sourceColor!.accent}`
+          : `1px solid ${hovered ? 'var(--border-strong)' : 'var(--border-subtle)'}`,
         transition: 'border-color 0.12s',
         userSelect: 'none',
         position: 'relative',

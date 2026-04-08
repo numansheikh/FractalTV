@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow, app } from 'electron'
+import { ipcMain, BrowserWindow, app, dialog } from 'electron'
 import { spawn } from 'child_process'
 import { existsSync } from 'fs'
 import { join } from 'path'
@@ -7,8 +7,23 @@ import { getDb, getSqlite, getSetting, setSetting, rebuildFtsIfNeeded } from '..
 import { sources } from '../database/schema'
 import { eq } from 'drizzle-orm'
 import { xtreamService, SyncProgress } from '../services/xtream.service'
+import { m3uService } from '../services/m3u.service'
 import { tmdbService } from '../services/tmdb.service'
+import { syncEpg, getNowNext } from '../services/epg.service'
 import { normalizeForSearch } from '../lib/normalize'
+
+const EPG_REFRESH_INTERVAL_HOURS = 24
+
+function runEpgSync(sqlite: ReturnType<typeof getSqlite>, win: BrowserWindow | null, sourceId: string, src: any) {
+  syncEpg(sourceId, src.server_url, src.username, src.password,
+    (msg) => win?.webContents.send('epg:progress', { sourceId, message: msg })
+  ).then((r) => {
+    if (r.inserted > 0) {
+      sqlite.prepare(`UPDATE sources SET last_epg_sync = unixepoch() WHERE id = ?`).run(sourceId)
+      win?.webContents.send('epg:progress', { sourceId, message: `EPG: ${r.inserted.toLocaleString()} entries loaded` })
+    }
+  }).catch(() => {}) // EPG failure is non-fatal
+}
 
 export function registerHandlers() {
 
@@ -22,6 +37,17 @@ export function registerHandlers() {
   // ── Ping (health check) ──────────────────────────────────────────────────
   ipcMain.handle('ping', () => 'pong')
 
+  // ── File dialog ──────────────────────────────────────────────────────────
+  ipcMain.handle('dialog:open-file', async (event, args: { filters?: { name: string; extensions: string[] }[] }) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const result = await dialog.showOpenDialog(win!, {
+      properties: ['openFile'],
+      filters: args?.filters ?? [{ name: 'All Files', extensions: ['*'] }],
+    })
+    if (result.canceled || result.filePaths.length === 0) return { canceled: true }
+    return { canceled: false, filePath: result.filePaths[0] }
+  })
+
   // ── DevTools ─────────────────────────────────────────────────────────────
   ipcMain.handle('devtools:toggle', (event) => {
     event.sender.toggleDevTools()
@@ -31,7 +57,18 @@ export function registerHandlers() {
 
   ipcMain.handle('sources:list', async () => {
     const db = getDb()
-    return db.select().from(sources).all()
+    const sqlite = getSqlite()
+    const rows = await db.select().from(sources).all()
+    return rows.map((s) => {
+      const val = sqlite.prepare(`SELECT value FROM settings WHERE key = ?`).get(`source_color_${s.id}`) as any
+      return { ...s, colorIndex: val ? parseInt(val.value) : undefined }
+    })
+  })
+
+  ipcMain.handle('sources:set-color', (_event, sourceId: string, colorIndex: number) => {
+    const sqlite = getSqlite()
+    sqlite.prepare(`INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)`).run(`source_color_${sourceId}`, String(colorIndex))
+    return { ok: true }
   })
 
   // Total content count across all enabled sources
@@ -61,8 +98,16 @@ export function registerHandlers() {
     return xtreamService.testConnection(args.serverUrl, args.username, args.password)
   })
 
+  ipcMain.handle('sources:test-m3u', async (_event, args: { m3uUrl: string }) => {
+    return m3uService.testConnection(args.m3uUrl)
+  })
+
+  ipcMain.handle('sources:add-m3u', async (_event, args: { name: string; m3uUrl: string }) => {
+    return m3uService.addSource(args.name, args.m3uUrl)
+  })
+
   ipcMain.handle('sources:remove', async (_event, sourceId: string) => {
-    const dbPath = join(app.getPath('userData'), 'data', 'fractals.db')
+    const dbPath = join(app.getPath('userData'), 'data', process.env.FRACTALS_DB ? `fractals-${process.env.FRACTALS_DB}.db` : 'fractals.db')
     const workerPath = join(__dirname, 'delete.worker.js')
 
     return new Promise((resolve) => {
@@ -115,6 +160,20 @@ export function registerHandlers() {
         win?.webContents.send('source:health', { sourceId: source.id, ok: false, error: String(err) })
       }
     }
+
+    // Refresh stale EPG in background — any source whose EPG hasn't been fetched
+    // or was last fetched more than EPG_REFRESH_INTERVAL_HOURS ago
+    const staleThreshold = Math.floor(Date.now() / 1000) - EPG_REFRESH_INTERVAL_HOURS * 3600
+    const staleSources = sqlite.prepare(`
+      SELECT * FROM sources
+      WHERE disabled = 0 AND server_url IS NOT NULL
+        AND (last_epg_sync IS NULL OR last_epg_sync < ?)
+    `).all(staleThreshold) as any[]
+
+    for (const src of staleSources) {
+      runEpgSync(sqlite, win, src.id, src)
+    }
+
     return { done: true }
   })
 
@@ -124,6 +183,7 @@ export function registerHandlers() {
     serverUrl?: string
     username?: string
     password?: string
+    m3uUrl?: string
   }) => {
     const sqlite = getSqlite()
     const sets: string[] = []
@@ -132,6 +192,7 @@ export function registerHandlers() {
     if (args.serverUrl !== undefined) { sets.push('server_url = ?'); params.push(args.serverUrl.replace(/\/$/, '')) }
     if (args.username !== undefined) { sets.push('username = ?'); params.push(args.username) }
     if (args.password !== undefined) { sets.push('password = ?'); params.push(args.password) }
+    if (args.m3uUrl !== undefined) { sets.push('m3u_url = ?'); params.push(args.m3uUrl) }
     if (sets.length === 0) return { success: false, error: 'Nothing to update' }
     params.push(args.sourceId)
     sqlite.prepare(`UPDATE sources SET ${sets.join(', ')} WHERE id = ?`).run(...params)
@@ -149,27 +210,25 @@ export function registerHandlers() {
     const win = BrowserWindow.fromWebContents(event.sender)
     const sqlite = getSqlite()
 
-    // Get source credentials
+    // Get source info
     const source = sqlite.prepare('SELECT * FROM sources WHERE id = ?').get(sourceId) as any
-    if (!source?.server_url) return { success: false, error: 'Source not found' }
-
-    // Resolve worker path — built alongside main.js by electron-vite
-    const workerPath = join(__dirname, 'sync.worker.js')
+    if (!source) return { success: false, error: 'Source not found' }
 
     // DB path — same as what connection.ts uses
-    const dbPath = join(app.getPath('userData'), 'data', 'fractals.db')
+    const dbPath = join(app.getPath('userData'), 'data', process.env.FRACTALS_DB ? `fractals-${process.env.FRACTALS_DB}.db` : 'fractals.db')
+
+    // Pick worker + workerData based on source type
+    const isM3u = source.type === 'm3u'
+    const workerPath = join(__dirname, isM3u ? 'm3u-sync.worker.js' : 'sync.worker.js')
+    const wData = isM3u
+      ? { sourceId, dbPath, m3uUrl: source.m3u_url, sourceName: source.name }
+      : { sourceId, dbPath, serverUrl: source.server_url, username: source.username, password: source.password, sourceName: source.name }
+
+    if (!isM3u && !source.server_url) return { success: false, error: 'Source not found' }
+    if (isM3u && !source.m3u_url) return { success: false, error: 'M3U URL not found' }
 
     return new Promise((resolve) => {
-      const worker = new Worker(workerPath, {
-        workerData: {
-          sourceId,
-          dbPath,
-          serverUrl: source.server_url,
-          username: source.username,
-          password: source.password,
-          sourceName: source.name,
-        },
-      })
+      const worker = new Worker(workerPath, { workerData: wData })
 
       worker.on('message', (msg: any) => {
         if (msg.type === 'progress') {
@@ -189,6 +248,11 @@ export function registerHandlers() {
             message: `Synced ${msg.catCount} categories, ${msg.totalItems.toLocaleString()} items`,
           })
           resolve({ success: true })
+          // Kick off EPG sync in background after content sync
+          const src = sqlite.prepare('SELECT * FROM sources WHERE id = ?').get(sourceId) as any
+          if (src?.server_url) {
+            runEpgSync(sqlite, win, sourceId, src)
+          }
         } else if (msg.type === 'error') {
           win?.webContents.send('sync:progress', {
             sourceId,
@@ -218,6 +282,137 @@ export function registerHandlers() {
         }
       })
     })
+  })
+
+  // ── EPG ──────────────────────────────────────────────────────────────────
+
+  ipcMain.handle('epg:sync', async (event, sourceId: string) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const sqlite = getSqlite()
+    const source = sqlite.prepare('SELECT * FROM sources WHERE id = ?').get(sourceId) as any
+    if (!source?.server_url) return { success: false, error: 'Source not found' }
+
+    const result = await syncEpg(
+      sourceId,
+      source.server_url,
+      source.username,
+      source.password,
+      (msg) => win?.webContents.send('epg:progress', { sourceId, message: msg })
+    )
+
+    return result.error ? { success: false, ...result } : { success: true, ...result }
+  })
+
+  ipcMain.handle('epg:now-next', (_event, contentId: string) => {
+    return getNowNext(contentId)
+  })
+
+  ipcMain.handle('epg:guide', (_event, args: { contentIds: string[]; startTime?: number; endTime?: number }) => {
+    const sqlite = getSqlite()
+    const now = Math.floor(Date.now() / 1000)
+    const startTime = args.startTime ?? (now - 4 * 3600)
+    const endTime = args.endTime ?? (now + 20 * 3600)
+
+    if (!args.contentIds?.length) return { channels: [], programmes: {}, windowStart: startTime, windowEnd: endTime }
+
+    const placeholders = args.contentIds.map(() => '?').join(',')
+    const rows = sqlite.prepare(`
+      SELECT c.id, c.title, c.poster_url, c.epg_channel_id, c.primary_source_id,
+             c.catchup_supported, c.catchup_days,
+             cs.external_id
+      FROM content c
+      LEFT JOIN content_sources cs ON cs.content_id = c.id AND cs.source_id = c.primary_source_id
+      WHERE c.id IN (${placeholders}) AND c.type = 'live'
+    `).all(...args.contentIds) as any[]
+
+    const programmes: Record<string, any[]> = {}
+
+    // Build mapping: epg_channel_id+source_id → content id(s)
+    const epgKeyToContentIds: Record<string, string[]> = {}
+    const epgChannelIds: string[] = []
+    const epgSourceIds: string[] = []
+    for (const ch of rows) {
+      if (!ch.epg_channel_id) {
+        programmes[ch.id] = []
+        continue
+      }
+      const key = `${ch.epg_channel_id}|${ch.primary_source_id}`
+      if (!epgKeyToContentIds[key]) {
+        epgKeyToContentIds[key] = []
+        epgChannelIds.push(ch.epg_channel_id)
+        epgSourceIds.push(ch.primary_source_id)
+      }
+      epgKeyToContentIds[key].push(ch.id)
+    }
+
+    // Single batched query for all EPG data
+    if (epgChannelIds.length > 0) {
+      const pairs = epgChannelIds.map((_, i) => `(channel_external_id = ? AND source_id = ?)`).join(' OR ')
+      const pairParams: any[] = []
+      for (let i = 0; i < epgChannelIds.length; i++) {
+        pairParams.push(epgChannelIds[i], epgSourceIds[i])
+      }
+      const epgRows = sqlite.prepare(`
+        SELECT channel_external_id, source_id, id, title, description, start_time, end_time, category
+        FROM epg
+        WHERE (${pairs}) AND end_time > ? AND start_time < ?
+        ORDER BY channel_external_id, start_time ASC
+      `).all(...pairParams, startTime, endTime) as any[]
+
+      // Group by content id
+      for (const r of epgRows) {
+        const key = `${r.channel_external_id}|${r.source_id}`
+        const contentIds = epgKeyToContentIds[key]
+        if (!contentIds) continue
+        const prog = { id: r.id, title: r.title, description: r.description, startTime: r.start_time, endTime: r.end_time, category: r.category }
+        for (const cid of contentIds) {
+          if (!programmes[cid]) programmes[cid] = []
+          programmes[cid].push(prog)
+        }
+      }
+    }
+
+    // Ensure all channels have an entry (even if empty)
+    for (const ch of rows) {
+      if (!programmes[ch.id]) programmes[ch.id] = []
+    }
+
+    return {
+      channels: rows.map((ch) => ({
+        contentId: ch.id,
+        title: ch.title,
+        posterUrl: ch.poster_url,
+        sourceId: ch.primary_source_id,
+        catchupSupported: !!ch.catchup_supported,
+        catchupDays: ch.catchup_days ?? 0,
+        externalId: ch.external_id,
+      })),
+      programmes,
+      windowStart: startTime,
+      windowEnd: endTime,
+    }
+  })
+
+  ipcMain.handle('content:get-catchup-url', async (_event, args: { contentId: string; startTime: number; duration: number }) => {
+    const sqlite = getSqlite()
+    const item = sqlite.prepare('SELECT * FROM content WHERE id = ?').get(args.contentId) as any
+    if (!item) return { error: 'Content not found' }
+
+    const sourceRow = sqlite.prepare('SELECT * FROM content_sources WHERE content_id = ? ORDER BY priority DESC LIMIT 1').get(args.contentId) as any
+    if (!sourceRow) return { error: 'No source found' }
+
+    const db = getDb()
+    const [source] = await db.select().from(sources).where(eq(sources.id, sourceRow.source_id))
+    if (!source?.serverUrl || !source.username || !source.password) return { error: 'Source credentials missing' }
+
+    const url = xtreamService.buildCatchupUrl(
+      source.serverUrl, source.username, source.password,
+      sourceRow.external_id,
+      new Date(args.startTime * 1000),
+      args.duration
+    )
+
+    return { url }
   })
 
   // ── Search ───────────────────────────────────────────────────────────────
@@ -251,7 +446,10 @@ export function registerHandlers() {
 
     if (!query || query.trim().length === 0) {
       const sql = `
-        SELECT DISTINCT c.*, c.primary_source_id as source_ids
+        SELECT DISTINCT c.*, c.primary_source_id as source_ids,
+          CASE WHEN c.epg_channel_id IS NOT NULL AND EXISTS (
+            SELECT 1 FROM epg e WHERE e.channel_external_id = c.epg_channel_id AND e.source_id = c.primary_source_id LIMIT 1
+          ) THEN 1 ELSE 0 END as has_epg_data
         FROM content c
         ${catJoin}
         WHERE 1=1
@@ -319,7 +517,10 @@ export function registerHandlers() {
       const likeParams = words.map(w => `%${w}%`)
       const runLike = (limit: number, excludeIds?: Set<string>): any[] => {
         const likeSql = `
-          SELECT DISTINCT c.*, c.primary_source_id as source_ids
+          SELECT DISTINCT c.*, c.primary_source_id as source_ids,
+          CASE WHEN c.epg_channel_id IS NOT NULL AND EXISTS (
+            SELECT 1 FROM epg e WHERE e.channel_external_id = c.epg_channel_id AND e.source_id = c.primary_source_id LIMIT 1
+          ) THEN 1 ELSE 0 END as has_epg_data
           FROM content c
           ${catJoin}
           WHERE ${likeConditions}
@@ -344,7 +545,10 @@ export function registerHandlers() {
       const runFts = (limit: number, excludeIds?: Set<string>): any[] => {
         try {
           const ftsSql = `
-            SELECT DISTINCT c.*, fts.rank, c.primary_source_id as source_ids
+            SELECT DISTINCT c.*, fts.rank, c.primary_source_id as source_ids,
+            CASE WHEN c.epg_channel_id IS NOT NULL AND EXISTS (
+              SELECT 1 FROM epg e WHERE e.channel_external_id = c.epg_channel_id AND e.source_id = c.primary_source_id LIMIT 1
+            ) THEN 1 ELSE 0 END as has_epg_data
             FROM content_fts fts
             JOIN content c ON c.id = fts.content_id
             ${catJoin}
@@ -416,6 +620,13 @@ export function registerHandlers() {
     if (!sourceRow) return { error: 'No stream source found' }
 
     const [source] = await db.select().from(sources).where(eq(sources.id, sourceRow.source_id))
+
+    // M3U sources: URL stored on content_sources row
+    if (source?.type === 'm3u') {
+      if (!sourceRow.stream_url) return { error: 'Stream URL missing for M3U content' }
+      return { url: sourceRow.stream_url, sourceId: source.id }
+    }
+
     if (!source?.serverUrl || !source.username || !source.password) return { error: 'Source credentials missing' }
 
     const streamType = item.type === 'live' ? 'live' : item.type === 'series' ? 'series' : 'movie'
@@ -526,9 +737,13 @@ export function registerHandlers() {
     const typeFilter = args?.type ? `AND c.type = ?` : ''
     const params: any[] = args?.type ? [args.type] : []
     return sqlite.prepare(`
-      SELECT c.*, c.primary_source_id as source_ids
+      SELECT c.*, c.primary_source_id as source_ids,
+        CASE WHEN c.epg_channel_id IS NOT NULL AND EXISTS (
+          SELECT 1 FROM epg e WHERE e.channel_external_id = c.epg_channel_id AND e.source_id = c.primary_source_id LIMIT 1
+        ) THEN 1 ELSE 0 END as has_epg_data
       FROM user_data ud
       JOIN content c ON c.id = ud.content_id
+      JOIN sources s ON s.id = c.primary_source_id AND s.disabled = 0
       WHERE ud.favorite = 1 AND ud.profile_id = 'default'
       ${typeFilter}
       ORDER BY COALESCE(ud.fav_sort_order, 999999) ASC, ud.last_watched_at DESC
@@ -557,6 +772,7 @@ export function registerHandlers() {
       SELECT c.*, c.primary_source_id as source_ids
       FROM user_data ud
       JOIN content c ON c.id = ud.content_id
+      JOIN sources s ON s.id = c.primary_source_id AND s.disabled = 0
       WHERE ud.watchlist = 1 AND ud.profile_id = 'default'
       ${typeFilter}
       ORDER BY ud.last_watched_at DESC
@@ -571,6 +787,7 @@ export function registerHandlers() {
       SELECT c.*, c.primary_source_id as source_ids, ud.last_position, ud.last_watched_at
       FROM user_data ud
       JOIN content c ON c.id = ud.content_id
+      JOIN sources s ON s.id = c.primary_source_id AND s.disabled = 0
       WHERE ud.last_position > 0 AND ud.completed = 0
         AND c.type = 'movie'
         AND ud.profile_id = 'default'
@@ -612,6 +829,7 @@ export function registerHandlers() {
         r.last_watched_at
       FROM ranked_episodes r
       JOIN content c ON c.id = r.parent_id
+      JOIN sources s ON s.id = c.primary_source_id AND s.disabled = 0
       WHERE r.rn = 1
       ORDER BY r.last_watched_at DESC
       LIMIT 20
@@ -631,14 +849,61 @@ export function registerHandlers() {
   ipcMain.handle('user:history', async (_event, args?: { limit?: number }) => {
     const sqlite = getSqlite()
     const limit = args?.limit ?? 50
-    return sqlite.prepare(`
+
+    // Non-episode history (movies, live, series watched directly)
+    const directRows = sqlite.prepare(`
       SELECT c.*, c.primary_source_id as source_ids, ud.last_position, ud.last_watched_at
       FROM user_data ud
       JOIN content c ON c.id = ud.content_id
       WHERE ud.last_watched_at IS NOT NULL AND ud.profile_id = 'default'
+        AND c.type != 'episode'
       ORDER BY ud.last_watched_at DESC
       LIMIT ?
-    `).all(limit)
+    `).all(limit) as any[]
+
+    // Episode history → transform to parent series with resume info (most recent episode per series)
+    const episodeRows = sqlite.prepare(`
+      WITH ranked_episodes AS (
+        SELECT
+          ep.parent_id,
+          ep.id             AS resume_episode_id,
+          ep.season_number  AS resume_season_number,
+          ep.episode_number AS resume_episode_number,
+          ep.title          AS resume_episode_title,
+          ud.last_position,
+          ud.last_watched_at,
+          ROW_NUMBER() OVER (
+            PARTITION BY ep.parent_id
+            ORDER BY ud.last_watched_at DESC
+          ) AS rn
+        FROM user_data ud
+        JOIN content ep ON ep.id = ud.content_id
+        WHERE ud.last_watched_at IS NOT NULL
+          AND ep.type = 'episode'
+          AND ep.parent_id IS NOT NULL
+          AND ud.profile_id = 'default'
+      )
+      SELECT
+        c.*, c.primary_source_id AS source_ids,
+        r.resume_episode_id,
+        r.resume_season_number,
+        r.resume_episode_number,
+        r.resume_episode_title,
+        r.last_position,
+        r.last_watched_at
+      FROM ranked_episodes r
+      JOIN content c ON c.id = r.parent_id
+      WHERE r.rn = 1
+      ORDER BY r.last_watched_at DESC
+      LIMIT ?
+    `).all(limit) as any[]
+
+    // Merge and sort by recency, deduplicate by content id
+    const seen = new Set<string>()
+    return [...directRows, ...episodeRows]
+      .sort((a, b) => (b.last_watched_at ?? 0) - (a.last_watched_at ?? 0))
+      .filter(r => { if (seen.has(r.id)) return false; seen.add(r.id); return true })
+      .slice(0, limit)
   })
 
   ipcMain.handle('user:bulk-get-data', async (_event, contentIds: string[]) => {
@@ -842,7 +1107,7 @@ export function registerHandlers() {
     const typeParams: any[] = type ? [type] : []
 
     const countSql = `
-      SELECT COUNT(DISTINCT c.id) as n
+      SELECT COUNT(*) as n
       FROM content c
       ${catJoin}
       WHERE c.primary_source_id IN (${inList})
@@ -851,7 +1116,10 @@ export function registerHandlers() {
     const total = (sqlite.prepare(countSql).get(...catParams, ...filterIds, ...typeParams) as any).n
 
     const itemSql = `
-      SELECT DISTINCT c.*, c.primary_source_id as source_ids
+      SELECT DISTINCT c.*, c.primary_source_id as source_ids,
+        CASE WHEN c.epg_channel_id IS NOT NULL AND EXISTS (
+          SELECT 1 FROM epg e WHERE e.channel_external_id = c.epg_channel_id AND e.source_id = c.primary_source_id LIMIT 1
+        ) THEN 1 ELSE 0 END as has_epg_data
       FROM content c
       ${catJoin}
       WHERE c.primary_source_id IN (${inList})
@@ -1053,6 +1321,17 @@ export function registerHandlers() {
     })
 
     return { success: true, message: `Enriching ${ids.length} items…` }
+  })
+
+  ipcMain.handle('window:toggle-fullscreen', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) return
+    win.setFullScreen(!win.isFullScreen())
+  })
+
+  ipcMain.handle('window:is-fullscreen', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    return win?.isFullScreen() ?? false
   })
 }
 

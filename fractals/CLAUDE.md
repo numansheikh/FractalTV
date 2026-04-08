@@ -338,34 +338,37 @@ These are defined in `:root` as dark defaults, then **bridged** via `[data-theme
 - Not a social app — no sharing, no public profiles, no cloud sync (for now)
 - Not a content provider — ships with zero content, user brings their own sources
 
-## Implementation status (as of 2026-04-06) — v0.2.0
+## Implementation status (as of 2026-04-07) — v0.2.0+
 
-**Complete:** Phases 1–6 (scaffold, DB + Xtream sync, TMDB enrichment, FTS5 search, browse/search UI, video player). Phase 12 user data (favorites, watchlist, ratings, history, continue watching — fully wired).
-**Partial:** Phase 10 settings (appearance, player, enrichment done; profiles + EPG config pending).
-**Not started:** Phase 7 (EPG/catchup), Phase 8 (semantic search), Phase 9 (M3U), Phase 11 (Capacitor/mobile).
+**Phase 0 — Complete.** All v0.2.0 core: scaffold, DB + Xtream sync, TMDB enrichment, FTS5 search, browse/search UI, video player, EPG (XMLTV parser, EPG strip, Full EPG Guide panel), settings (appearance, player, enrichment), user data (favorites, watchlist, ratings, history, continue watching — fully wired).
+**Phase 1 — Polish & Complete Core (in progress).** Timeshift timeline in fullscreen player (1.1, done), right-click context menu (1.2, done), M3U/M3U8 import (1.3, done), bug fixes (1.4, ongoing).
+**Phase 2 — Rich Discovery (not started).** Metadata navigation + semantic search merged — normalized genre/cast/language tables, embedding worker, faceted browse, clickable metadata pills.
+**Phase 3 — Multi-platform (not started).** Capacitor for Android/iOS/TV, Tizen.
 
 ### v0.2.0 — completed features
 
 **Layout**
 - Three-zone layout: NavRail (48px, left) + content area + right-side slide panels
 - `AppShell.tsx` orchestrates the shell; `NavRail.tsx` for icon-only navigation
-- CommandBar (44px, top) with search + sort + source dots — hidden on Home when no query
+- CommandBar (44px, top) always visible on all screens. Shows search + sort + source dots on browse views; shows only source dots on Home.
 - `BrowseSidebar.tsx` (168px, left of grid) shown on live/films/series views; bg-1 to contrast with bg-2 cards
 
 **Home screen — two modes**
-- `HomeView.tsx` — search bar pinned to the bottom, source dots at bottom-right (flex-wrap, 2 per row)
+- `HomeView.tsx` — search bar in minimal hero area above content rows, mode toggle (Discover/My Channels) beside it
 - **Discover mode** — "Favorite Channels" + "Continue Watching" (movies, series) + "Watch Later" (watchlist) horizontal rows; hidden when empty
 - **My Channels mode** — drag-to-reorder grid of favorite channels only
-- Mode persisted in `app.store` (`homeMode`). Toggled via Settings → Appearance
+- Mode persisted in `app.store` (`homeMode`). Toggle in hero bar.
 - First-favorite prompt: shown once when user adds their first channel favorite while in Discover mode
 - Empty channels mode: dedicated empty state with "Browse channels" + "Switch to Discover" actions
 
 **Favorites / watchlist system**
-- `__favorites__` sentinel value for `categoryFilter` — default when entering any browse view
-- Favorites chip never shown in FilterBar (it's the default state, not a filter)
-- `BrowseSidebar` pinned section: "Favorites" (heart icon, default) + "All" above scrolling category list
+- `null` categoryFilter = "All" (default on cold start and when switching views)
+- `__favorites__` sentinel = Favorites sub-view
+- `BrowseSidebar` pinned section: "All" (default, top) + "Favorites" (heart icon, below) above scrolling category list
 - ContentArea empty state is context-aware: no sources / no favorites / empty category / no search results
 - Search query guards against sending `__favorites__` as categoryName to the DB
+- Session restore: `activeView` and `categoryFilter` persisted — app reopens exactly where left off
+- Disabled sources hidden from favorites, watchlist, and continue-watching queries (JOIN sources + disabled=0)
 
 **Drag-to-reorder My Channels**
 - `@dnd-kit/core` + `@dnd-kit/sortable` — PointerSensor (6px activation), KeyboardSensor
@@ -374,7 +377,7 @@ These are defined in `:root` as dark defaults, then **bridged** via `[data-theme
 - `user:reorder-favorites` IPC persists new order in a transaction
 - Local `orderedIds` state for optimistic UI; rollback on API error
 
-**User data (Phase 12 — complete)**
+**User data (complete)**
 - Favorites, watchlist, ratings, history, positions, continue watching — all IPC-wired
 - Optimistic updates with rollback on all mutations
 - Library view: Favorites / Watchlist / History / Continue Watching tabs
@@ -399,6 +402,28 @@ These are defined in `:root` as dark defaults, then **bridged** via `[data-theme
 - V2 token system (`--bg-0..4`, `--text-0..3`, `--border-*`, `--accent-*`) used everywhere
 - Sidebar uses `--bg-1` (panel level), cards use `--bg-2` — maintains visual separation
 
+### post-v0.2.0 — additional completed work
+
+**EPG Full Guide panel (Phase 0)**
+- `EpgGuide.tsx` — bottom sheet (73vh), timeline grid (Guide B style), sliding detail panel
+- `epg:guide` IPC fetches programmes for all channel IDs in a 24h window
+- `content:get-catchup-url` IPC builds timeshift URL via `xtreamService.buildCatchupUrl`
+- Guide → Watch: live/future calls `onSwitchChannel`; past programmes with catchup call `onFullscreen` with `_catchupUrl` pre-set on the ContentItem
+- "Full Guide" button in `EpgStrip` (inside `LiveSplitView`) opens the guide sheet
+
+**NavRail visible in split view (task 2.1)**
+- `LiveSplitView` container uses `position: fixed; left: 48px` so the 48px NavRail stays exposed and clickable
+
+**Per-type search with N+1 detection (task 2.2)**
+- `ContentArea` runs three independent queries (`live`, `movie`, `series`) each with limit 21 (N+1 pattern)
+- "Show all →" per section re-fetches with limit 9999; "Show less ←" resets to 21
+- `SEARCH_INIT = 21`, `SEARCH_FULL = 9999`, `SEARCH_INITIAL_CAP = 20` constants in `ContentArea.tsx`
+- `SearchResults.tsx` receives three typed `TypeBucket` props and renders them as separate sections
+
+**Category chip + sidebar improvements**
+- Category breadcrumb chip in detail panels (and EPG guide) navigates to that category: calls `handleBreadcrumbNav` in `App.tsx`, which clears the search query, clears the source filter, sets the active view, then sets `categoryFilter`
+- `BrowseSidebar` auto-scrolls the active category item to center (`scrollIntoView({ block: 'center' })`) when `categoryFilter` changes externally (e.g. navigating from a detail panel or EPG)
+
 ## Key architecture decisions (implemented)
 
 - **Worker threads for heavy operations** — Sync and delete run in `electron/workers/` via `worker_threads`, each opening its own better-sqlite3 connection (WAL mode allows concurrent access). Prevents main process blocking on 200k+ row operations.
@@ -415,33 +440,29 @@ These are defined in `:root` as dark defaults, then **bridged** via `[data-theme
 
 - **Layered Escape handling** — All overlay Escape handlers use `addEventListener('keydown', handler, true)` (capture phase) + `e.stopImmediatePropagation()`. Player defers ContentDetail Escape via `isPlaying` prop. Prevents Escape from leaking to lower layers (e.g., clearing SearchBar query).
 
-- **Source identity colors** — Each source gets a distinct hue from a palette ordered for maximum visual distance. Dots show source color (not generic green/red status). Red only for error/expired.
+- **Source identity colors** — Each source gets a distinct hue from a palette ordered for maximum visual distance. Dots show source color (not generic green/red status). Red only for error/expired. Source color bars shown on all card types (ChannelCard, PosterCard, list rows).
+
+- **Source ID quad fallback** — Always resolve `primarySourceId` as: `item.primarySourceId ?? item.primary_source_id ?? (item as any).source_ids ?? item.id?.split(':')[0]`. Some channels have `primary_source_id = NULL` in the DB; the content ID (`{sourceId}:{type}:{streamId}`) is the reliable last resort.
 
 ## Known limitations & open work
 
 - **International character search (partial)** — European diacritics handled via `any-ascii`. Arabic, Hebrew, Cyrillic, CJK not yet transliterated.
 
-- **M3U/M3U8 playlist support not yet implemented** — Only Xtream Codes accounts. Phase 9.
+- **M3U/M3U8 import implemented** — Parser, sync worker, IPC handlers, and UI all wired. AddSourceForm supports both Xtream and M3U tabs. Stream URLs stored directly on content rows; `get-stream-url` handler returns them for M3U sources without Xtream credential construction.
 
-- **Semantic / embedding search not yet wired** — Schema and extension in place; worker not built. Phase 8.
+- **Semantic / embedding search not yet wired** — Schema and extension in place; worker not built. Phase 2.
 
-- **EPG / program guide not yet implemented** — Schema exists; no XMLTV parser, no catchup. Phase 7.
+- **EPG timeshift timeline not yet implemented** — XMLTV parser, EPG strip, and Full Guide panel are done. Timeshift bottom bar in fullscreen player (Phase 1, task 1.1) is still pending.
 
 - **Episodes not indexed in FTS5** — `series:get-info` upserts episodes into `content` but not `content_fts`. Episode titles not searchable by keyword. Low priority (users search series not episodes).
 
 - **Continue Watching not browsable in live/films/series views** — Works on Home and Library only.
 
-- **Capacitor / mobile not yet implemented** — Phase 11.
+- **Capacitor / mobile not yet implemented** — Phase 3.
 
 ## Known UI bugs (open — not yet fixed)
 
-- **Home search bar coexists with CommandBar** — Home has its own bottom search bar; CommandBar appears at top when typing. Two inputs share `useSearchStore.query`, no functional conflict but visually redundant.
-
-- **Left source bar on PosterCard may conflict with hover border** — `borderLeft: 3px` + `border: 1px` shorthand resets border-left width. Relies on V8 insertion order. Consider a pseudo-element stripe instead.
-
-- **`--color-nav-bg` / `--color-nav-text` defined in themes but never consumed** — NavRail uses `--bg-1`. Dead CSS.
-
-- **`addRecentSearch` / `removeRecentSearch` actions dead** — Recent searches UI was removed. Store actions and persisted array remain unused.
+- **`SearchBar.tsx` is a dead component** — Not rendered anywhere; superseded by `CommandBar.tsx`. Safe to delete but left in place.
 
 ## Data quirks to be aware of
 

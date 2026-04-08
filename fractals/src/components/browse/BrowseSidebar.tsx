@@ -1,8 +1,8 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useAppStore } from '@/stores/app.store'
 import { useSourcesStore } from '@/stores/sources.store'
-import { buildColorMap } from '@/lib/sourceColors'
+import { buildColorMapFromSources } from '@/lib/sourceColors'
 import { api } from '@/lib/api'
 import { ActiveView } from '@/lib/types'
 
@@ -29,7 +29,7 @@ export function BrowseSidebar() {
   const [sort, setSort] = useState<SortMode>('count')
   const [showSort, setShowSort] = useState(false)
 
-  const colorMap = buildColorMap(sources.map((s) => s.id))
+  const colorMap = buildColorMapFromSources(sources)
   const showSourceBar = sources.filter((s) => !s.disabled).length > 1
 
   const { data: categories = [] } = useQuery({
@@ -51,6 +51,14 @@ export function BrowseSidebar() {
   }, [cats, filter, sort])
 
   const totalCount = cats.reduce((s: number, c: any) => s + (c.item_count ?? 0), 0)
+
+  // Scroll active category into view when categoryFilter is set externally (e.g. from category chip)
+  const activeItemRef = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    if (categoryFilter && categoryFilter !== '__favorites__') {
+      activeItemRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    }
+  }, [categoryFilter])
 
   if (!type) return null
 
@@ -167,6 +175,14 @@ export function BrowseSidebar() {
       {!filter && (
         <div style={{ flexShrink: 0 }}>
           <SidebarItem
+            label={`All ${activeView === 'films' ? 'Movies' : activeView === 'series' ? 'Series' : 'Channels'}`}
+            count={totalCount}
+            active={categoryFilter === null}
+            accent={accent}
+            sourceColor={undefined}
+            onClick={() => setCategoryFilter(null)}
+          />
+          <SidebarItem
             label="Favorites"
             active={categoryFilter === '__favorites__'}
             accent={accent}
@@ -179,14 +195,6 @@ export function BrowseSidebar() {
               </svg>
             }
             onClick={() => setCategoryFilter('__favorites__')}
-          />
-          <SidebarItem
-            label={`All ${activeView === 'films' ? 'Movies' : activeView === 'series' ? 'Series' : 'Channels'}`}
-            count={totalCount}
-            active={categoryFilter === null}
-            accent={accent}
-            sourceColor={undefined}
-            onClick={() => setCategoryFilter(null)}
           />
           <div style={{ height: 1, background: 'var(--border-subtle)', margin: '2px 0' }} />
         </div>
@@ -207,6 +215,7 @@ export function BrowseSidebar() {
               accent={accent}
               sourceColor={srcColor}
               onClick={() => setCategoryFilter(cat.name)}
+              buttonRef={categoryFilter === cat.name ? activeItemRef : undefined}
             />
           )
         })}
@@ -219,12 +228,14 @@ export function BrowseSidebar() {
   )
 }
 
-function SidebarItem({ label, count, active, accent, sourceColor, icon, onClick }: {
+function SidebarItem({ label, count, active, accent, sourceColor, icon, onClick, buttonRef }: {
   label: string; count?: number; active: boolean; accent: string
   sourceColor?: string; icon?: React.ReactNode; onClick: () => void
+  buttonRef?: React.RefObject<HTMLButtonElement | null>
 }) {
   return (
     <button
+      ref={buttonRef}
       onClick={onClick}
       style={{
         width: '100%', textAlign: 'left',

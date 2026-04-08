@@ -1,5 +1,6 @@
 import { ActiveView } from '@/lib/types'
 import { useAppStore } from '@/stores/app.store'
+import { useSearchStore } from '@/stores/search.store'
 
 const NAV_ITEMS: { id: ActiveView; label: string; shortcut: string; icon: React.ReactNode }[] = [
   { id: 'home',    label: 'Home',    shortcut: '⌘1', icon: <HomeIcon /> },
@@ -24,6 +25,7 @@ interface Props {
 
 export function NavRail({ onOpenSources, onOpenSettings }: Props) {
   const { activeView, setView } = useAppStore()
+  const { setQuery } = useSearchStore()
 
   return (
     <div style={{
@@ -35,6 +37,8 @@ export function NavRail({ onOpenSources, onOpenSettings }: Props) {
       alignItems: 'center',
       background: 'var(--bg-1)',
       borderRight: '1px solid var(--border-subtle)',
+      position: 'relative',
+      zIndex: 50,
       paddingTop: 8,
       paddingBottom: 8,
       gap: 2,
@@ -49,21 +53,23 @@ export function NavRail({ onOpenSources, onOpenSettings }: Props) {
             shortcut={item.shortcut}
             isActive={isActive}
             activeColor={ACCENT[item.id]}
-            onClick={() => setView(item.id)}
+            onClick={() => {
+              setView(item.id)
+              if (item.id === 'home') setQuery('')
+              // Close split view when navigating away from live
+              if (item.id !== 'live') useAppStore.getState().setSplitViewChannel(null)
+            }}
           >
             <span style={{ color }}>{item.icon}</span>
           </RailButton>
         )
       })}
 
-      {/* Divider */}
-      <div style={{ width: 24, height: 1, background: 'var(--border-default)', margin: '6px 0' }} />
+      <div style={{ flex: 1 }} />
 
       <RailButton label="Sources" shortcut="" isActive={false} activeColor="var(--accent-interactive)" onClick={onOpenSources}>
         <span style={{ color: 'var(--text-2)' }}><LayersIcon /></span>
       </RailButton>
-
-      <div style={{ flex: 1 }} />
 
       <RailButton label="Settings" shortcut="⌘," isActive={false} activeColor="var(--accent-interactive)" onClick={onOpenSettings}>
         <span style={{ color: 'var(--text-2)' }}><GearIcon /></span>

@@ -29,6 +29,8 @@ export interface ContentItem {
   _username?: string
   _password?: string
   _extension?: string
+  // Catchup/timeshift — bypasses normal stream URL resolution
+  _catchupUrl?: string
 
   // Continue-watching fields — present when returned from user:continue-watching
   last_position?: number

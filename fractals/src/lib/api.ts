@@ -14,14 +14,23 @@ export const api = {
     testXtream: (args: { serverUrl: string; username: string; password: string }) =>
       isElectron ? window.api.sources.testXtream(args) : Promise.resolve({ success: false }),
 
+    addM3u: (args: { name: string; m3uUrl: string }): Promise<{ id: string; error?: string }> =>
+      isElectron ? (window.api as any).sources.addM3u(args) : Promise.resolve({ id: '', error: 'Not in Electron' }),
+
+    testM3u: (args: { m3uUrl: string }): Promise<{ count: number; error?: string }> =>
+      isElectron ? (window.api as any).sources.testM3u(args) : Promise.resolve({ count: 0, error: 'Not in Electron' }),
+
     remove: (sourceId: string) =>
       isElectron ? window.api.sources.remove(sourceId) : Promise.resolve({ success: false }),
 
-    update: (args: { sourceId: string; name?: string; serverUrl?: string; username?: string; password?: string }) =>
+    update: (args: { sourceId: string; name?: string; serverUrl?: string; username?: string; password?: string; m3uUrl?: string }) =>
       isElectron ? (window.api as any).sources.update(args) : Promise.resolve({ success: false }),
 
     toggleDisabled: (sourceId: string) =>
       isElectron ? window.api.sources.toggleDisabled(sourceId) : Promise.resolve({ disabled: false }),
+
+    setColor: (sourceId: string, colorIndex: number) =>
+      isElectron ? (window.api as any).sources.setColor(sourceId, colorIndex) : Promise.resolve({ ok: true }),
 
     sync: (sourceId: string) =>
       isElectron ? window.api.sources.sync(sourceId) : Promise.resolve({ success: false }),
@@ -52,6 +61,9 @@ export const api = {
 
     getStreamUrl: (args: { contentId: string; sourceId?: string }) =>
       isElectron ? window.api.content.getStreamUrl(args) : Promise.resolve({ error: 'Not in Electron' }),
+
+    getCatchupUrl: (args: { contentId: string; startTime: number; duration: number }): Promise<{ url?: string; error?: string }> =>
+      isElectron ? (window.api as any).content.getCatchupUrl(args) : Promise.resolve({ error: 'Not in Electron' }),
 
     browse: (args: { type?: 'live' | 'movie' | 'series'; categoryName?: string; sourceIds?: string[]; sortBy?: string; sortDir?: string; limit?: number; offset?: number }) =>
       isElectron ? window.api.content.browse(args) : Promise.resolve({ items: [], total: 0 }),
@@ -127,6 +139,20 @@ export const api = {
       isElectron ? (window.api as any).enrichment.enrichById(args) : Promise.resolve({ success: false }),
   },
 
+  epg: {
+    sync: (sourceId: string) =>
+      isElectron ? (window.api as any).epg.sync(sourceId) : Promise.resolve({ success: false }),
+    nowNext: (contentId: string): Promise<{ now: any; next: any }> =>
+      isElectron ? (window.api as any).epg.nowNext(contentId) : Promise.resolve({ now: null, next: null }),
+    guide: (args: { contentIds: string[]; startTime?: number; endTime?: number }): Promise<{
+      channels: { contentId: string; title: string; posterUrl?: string; sourceId: string; catchupSupported: boolean; catchupDays: number; externalId: string }[]
+      programmes: Record<string, { id: string; title: string; description?: string; startTime: number; endTime: number; category?: string }[]>
+      windowStart: number
+      windowEnd: number
+    }> =>
+      isElectron ? (window.api as any).epg.guide(args) : Promise.resolve({ channels: [], programmes: {}, windowStart: 0, windowEnd: 0 }),
+  },
+
   series: {
     getInfo: (contentId: string) =>
       isElectron ? (window.api as any).series.getInfo(contentId) : Promise.resolve({ seasons: {} }),
@@ -135,6 +161,11 @@ export const api = {
   settings: {
     get: (key: string): Promise<string | null> =>
       isElectron ? (window.api as any).settings.get(key) : Promise.resolve(null),
+  },
+
+  dialog: {
+    openFile: (args?: { filters?: { name: string; extensions: string[] }[] }): Promise<{ canceled: boolean; filePath?: string }> =>
+      isElectron ? (window.api as any).dialog.openFile(args) : Promise.resolve({ canceled: true }),
   },
 
   on: (channel: string, callback: (...args: unknown[]) => void) => {
