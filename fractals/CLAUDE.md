@@ -338,10 +338,10 @@ These are defined in `:root` as dark defaults, then **bridged** via `[data-theme
 - Not a social app — no sharing, no public profiles, no cloud sync (for now)
 - Not a content provider — ships with zero content, user brings their own sources
 
-## Implementation status (as of 2026-04-07) — v0.2.0+
+## Implementation status (as of 2026-04-08) — v0.2.1
 
 **Phase 0 — Complete.** All v0.2.0 core: scaffold, DB + Xtream sync, TMDB enrichment, FTS5 search, browse/search UI, video player, EPG (XMLTV parser, EPG strip, Full EPG Guide panel), settings (appearance, player, enrichment), user data (favorites, watchlist, ratings, history, continue watching — fully wired).
-**Phase 1 — Polish & Complete Core (in progress).** Timeshift timeline in fullscreen player (1.1, done), right-click context menu (1.2, done), M3U/M3U8 import (1.3, done), bug fixes (1.4, ongoing).
+**Phase 1 — Polish & Complete Core.** ✅ UX refinement complete (commit 8346275d): (1.1) Pagination — "Show all" navigates to view, (1.2) Escape behavior — verified working (capture phase + fallback chain), (1.3) Library search — client-side live search filters all tabs with dynamic counts. Remaining: timeshift timeline (1.4).
 **Phase 2 — Rich Discovery (not started).** Metadata navigation + semantic search merged — normalized genre/cast/language tables, embedding worker, faceted browse, clickable metadata pills.
 **Phase 3 — Multi-platform (not started).** Capacitor for Android/iOS/TV, Tizen.
 
@@ -414,15 +414,14 @@ These are defined in `:root` as dark defaults, then **bridged** via `[data-theme
 **NavRail visible in split view (task 2.1)**
 - `LiveSplitView` container uses `position: fixed; left: 48px` so the 48px NavRail stays exposed and clickable
 
-**Per-type search with N+1 detection (task 2.2)**
-- `ContentArea` runs three independent queries (`live`, `movie`, `series`) each with limit 21 (N+1 pattern)
-- "Show all →" per section re-fetches with limit 9999; "Show less ←" resets to 21
-- `SEARCH_INIT = 21`, `SEARCH_FULL = 9999`, `SEARCH_INITIAL_CAP = 20` constants in `ContentArea.tsx`
-- `SearchResults.tsx` receives three typed `TypeBucket` props and renders them as separate sections
-
 **Category chip + sidebar improvements**
 - Category breadcrumb chip in detail panels (and EPG guide) navigates to that category: calls `handleBreadcrumbNav` in `App.tsx`, which clears the search query, clears the source filter, sets the active view, then sets `categoryFilter`
 - `BrowseSidebar` auto-scrolls the active category item to center (`scrollIntoView({ block: 'center' })`) when `categoryFilter` changes externally (e.g. navigating from a detail panel or EPG)
+
+**UX refinement — Phase 1 fixes (commit 8346275d)**
+- **Fix 1: Pagination navigation** — "Show all →" in search results now navigates to view (Films/Live/Series) + clears search, instead of expanding inline. Clean separation between search preview (20 items) and full browsable view.
+- **Fix 2: Escape behavior** — Verified working: capture phase + stopImmediatePropagation on all overlays (Player, ContentDetail, etc.) prevents Escape from leaking. App.tsx fallback chain: clear search → clear category → clear source → home. Hierarchical, state-preserving.
+- **Fix 3: Library search** — Client-side live search input in Library view filters all tabs (Continue Watching, Favorites, Watchlist, History) by title instantly. Shows dynamic match counts per tab (e.g. "Favorites 3/24"). Search persists across tab switches.
 
 ## Key architecture decisions (implemented)
 
@@ -452,7 +451,7 @@ These are defined in `:root` as dark defaults, then **bridged** via `[data-theme
 
 - **Semantic / embedding search not yet wired** — Schema and extension in place; worker not built. Phase 2.
 
-- **EPG timeshift timeline not yet implemented** — XMLTV parser, EPG strip, and Full Guide panel are done. Timeshift bottom bar in fullscreen player (Phase 1, task 1.1) is still pending.
+- **EPG timeshift timeline not yet implemented** — XMLTV parser, EPG strip, and Full Guide panel are done. Timeshift bottom bar in fullscreen player (Phase 1, task 1.4) is still pending.
 
 - **Episodes not indexed in FTS5** — `series:get-info` upserts episodes into `content` but not `content_fts`. Episode titles not searchable by keyword. Low priority (users search series not episodes).
 
