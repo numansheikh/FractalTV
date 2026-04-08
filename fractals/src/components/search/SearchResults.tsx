@@ -5,9 +5,7 @@ import { ChannelCard } from '@/components/cards/ChannelCard'
 
 interface TypeBucket {
   results: ContentItem[]
-  isExpanded: boolean
   onShowAll: () => void
-  onShowLess: () => void
 }
 
 interface Props {
@@ -40,15 +38,14 @@ export function SearchResults({ live, movies, series, onSelect }: Props) {
     >
       {SECTIONS.map(({ key, label, accentColor, isChannel }) => {
         const bucket = buckets[key]
-        const { results, isExpanded, onShowAll, onShowLess } = bucket
+        const { results, onShowAll } = bucket
 
         if (results.length === 0) return null
 
         // N+1 trick: if we got more than INITIAL_CAP rows, there are more to fetch
-        const hasMore = !isExpanded && results.length > INITIAL_CAP
-        const visible = isExpanded ? results : results.slice(0, INITIAL_CAP)
-        const countLabel = isExpanded ? `(${results.length})` : hasMore ? `(${INITIAL_CAP}+)` : `(${results.length})`
-        const showToggle = hasMore || isExpanded
+        const hasMore = results.length > INITIAL_CAP
+        const visible = results.slice(0, INITIAL_CAP)
+        const countLabel = hasMore ? `(${INITIAL_CAP}+)` : `(${results.length})`
 
         const gridStyle: React.CSSProperties = {
           display: 'grid',
@@ -95,9 +92,9 @@ export function SearchResults({ live, movies, series, onSelect }: Props) {
 
               <div style={{ flex: 1 }} />
 
-              {showToggle && (
+              {hasMore && (
                 <button
-                  onClick={isExpanded ? onShowLess : onShowAll}
+                  onClick={onShowAll}
                   style={{
                     background: 'none',
                     border: 'none',
@@ -112,7 +109,7 @@ export function SearchResults({ live, movies, series, onSelect }: Props) {
                   onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.opacity = '1')}
                   onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.opacity = '0.85')}
                 >
-                  {isExpanded ? 'Show less ←' : 'Show all →'}
+                  Show all →
                 </button>
               )}
             </div>

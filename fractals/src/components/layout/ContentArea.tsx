@@ -123,7 +123,7 @@ export function ContentArea({ sort, onSelectContent, onAddSource }: Props) {
 
   const isLoading = isFavoritesFilter ? favLoading : browseLoading
 
-  // Per-type search limits — initial N+1 to detect "has more", full when expanded
+  // Per-type search limits — initial N+1 to detect "has more"
   const [liveSearchLimit,   setLiveSearchLimit]   = useState(SEARCH_INIT)
   const [movieSearchLimit,  setMovieSearchLimit]  = useState(SEARCH_INIT)
   const [seriesSearchLimit, setSeriesSearchLimit] = useState(SEARCH_INIT)
@@ -132,6 +132,22 @@ export function ContentArea({ sort, onSelectContent, onAddSource }: Props) {
     setMovieSearchLimit(SEARCH_INIT)
     setSeriesSearchLimit(SEARCH_INIT)
   }, [query])
+
+  // Navigation callbacks for "Show all" — navigate to view + clear search
+  const { setView } = useAppStore()
+  const { setQuery } = useSearchStore()
+  const handleShowAllLive = useCallback(() => {
+    setView('live')
+    setQuery('')
+  }, [setView, setQuery])
+  const handleShowAllMovies = useCallback(() => {
+    setView('films')
+    setQuery('')
+  }, [setView, setQuery])
+  const handleShowAllSeries = useCallback(() => {
+    setView('series')
+    setQuery('')
+  }, [setView, setQuery])
 
   const searchBase = {
     query,
@@ -222,9 +238,9 @@ export function ContentArea({ sort, onSelectContent, onAddSource }: Props) {
         <div style={{ flex: 1, overflowY: 'auto' }}>
           {ready && SearchResults
             ? <SearchResults
-                live={{   results: liveSearchResults   as ContentItem[], isExpanded: liveSearchLimit   > SEARCH_INIT, onShowAll: () => setLiveSearchLimit(SEARCH_FULL),   onShowLess: () => setLiveSearchLimit(SEARCH_INIT)   }}
-                movies={{  results: movieSearchResults  as ContentItem[], isExpanded: movieSearchLimit  > SEARCH_INIT, onShowAll: () => setMovieSearchLimit(SEARCH_FULL),  onShowLess: () => setMovieSearchLimit(SEARCH_INIT)  }}
-                series={{  results: seriesSearchResults as ContentItem[], isExpanded: seriesSearchLimit > SEARCH_INIT, onShowAll: () => setSeriesSearchLimit(SEARCH_FULL), onShowLess: () => setSeriesSearchLimit(SEARCH_INIT) }}
+                live={{   results: liveSearchResults   as ContentItem[], onShowAll: handleShowAllLive   }}
+                movies={{  results: movieSearchResults  as ContentItem[], onShowAll: handleShowAllMovies  }}
+                series={{  results: seriesSearchResults as ContentItem[], onShowAll: handleShowAllSeries }}
                 onSelect={handleSelect}
               />
             : <FallbackGrid items={items} onSelect={handleSelect} />

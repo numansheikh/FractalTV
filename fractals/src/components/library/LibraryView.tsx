@@ -363,11 +363,18 @@ function filterItems(items: ContentItem[], filter: TypeFilter): ContentItem[] {
   return items.filter((i) => i.type === filter)
 }
 
+function filterBySearch(items: ContentItem[], query: string): ContentItem[] {
+  if (!query.trim()) return items
+  const q = query.toLowerCase()
+  return items.filter((i) => (i.title || '').toLowerCase().includes(q))
+}
+
 // ─── Main component ──────────────────────────────────────────────────
 export function LibraryView({ onSelectContent }: Props) {
   const loadBulk = useUserStore((s) => s.loadBulk)
   const qc = useQueryClient()
 
+  const [searchQuery, setSearchQuery] = useState('')
   const [favoritesFilter, setFavoritesFilter] = useState<TypeFilter>('all')
   const [watchlistFilter, setWatchlistFilter] = useState<TypeFilter>('all')
   // History filter excluded (mixed, no live) — kept as 'all' only
@@ -472,9 +479,13 @@ export function LibraryView({ onSelectContent }: Props) {
     qc.invalidateQueries({ queryKey: ['library', 'history'] })
   }
 
-  const displayedFavorites = favorites
-  const displayedWatchlist = filterItems(watchlist, watchlistFilter)
-  const displayedHistory = filterItems(history, historyFilter)
+  const displayedContinueWatching = filterBySearch(continueWatching, searchQuery)
+  const displayedFavorites = filterBySearch(favorites, searchQuery)
+  const displayedWatchlist = filterBySearch(filterItems(watchlist, watchlistFilter), searchQuery)
+  const displayedHistory = filterBySearch(filterItems(history, historyFilter), searchQuery)
+
+  const isSearching = searchQuery.trim().length > 0
+  const totalMatches = displayedContinueWatching.length + displayedFavorites.length + displayedWatchlist.length + displayedHistory.length
 
   return (
     <div style={{
@@ -487,8 +498,53 @@ export function LibraryView({ onSelectContent }: Props) {
       fontFamily: 'var(--font-ui)',
     }}>
 
+      {/* ── Search bar ── */}
+      <div style={{ marginBottom: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent-interactive)" strokeWidth="2.5"><circle cx="11" cy="11" r="8" /><path d="M21 21l-4.35-4.35" /></svg>
+          <input
+            type="text"
+            placeholder="Search favorites…"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.currentTarget.value)}
+            style={{
+              flex: 1,
+              border: '1px solid var(--border-subtle)',
+              borderRadius: 6,
+              padding: '6px 8px',
+              fontSize: 12,
+              fontFamily: 'var(--font-ui)',
+              background: 'var(--bg-1)',
+              color: 'var(--text-0)',
+              outline: 'none',
+            }}
+            onFocus={(e) => {
+              e.currentTarget.style.borderColor = 'var(--accent-interactive)'
+              e.currentTarget.style.background = '#F5F3FF'
+            }}
+            onBlur={(e) => {
+              e.currentTarget.style.borderColor = 'var(--border-subtle)'
+              e.currentTarget.style.background = 'var(--bg-1)'
+            }}
+          />
+          {isSearching && (
+            <span style={{
+              fontSize: 11,
+              fontWeight: 600,
+              padding: '2px 8px',
+              borderRadius: 4,
+              background: 'var(--accent-interactive)',
+              color: '#fff',
+              whiteSpace: 'nowrap',
+            }}>
+              {totalMatches} match{totalMatches !== 1 ? 'es' : ''}
+            </span>
+          )}
+        </div>
+      </div>
+
       {/* ── Continue Watching ── */}
-      {continueWatching.length > 0 && (
+      {displayedContinueWatching.length > 0 && (
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
             <span style={{
@@ -506,27 +562,51 @@ export function LibraryView({ onSelectContent }: Props) {
               fontFamily: 'var(--font-mono)',
               userSelect: 'none',
             }}>
-              {continueWatching.length}
+              {isSearching ? `${displayedContinueWatching.length}/${continueWatching.length}` : continueWatching.length}
             </span>
           </div>
           <ContinueWatchingRow
-            items={continueWatching}
+            items={displayedContinueWatching}
             onSelect={onSelectContent}
             onRemove={handleRemoveContinue}
           />
         </div>
       )}
 
-      {continueWatching.length > 0 && <Divider />}
+      {displayedContinueWatching.length > 0 && <Divider />}
 
       {/* ── Favorites ── */}
       <div>
-        <SectionHeader
-          title="Favorites"
-          count={displayedFavorites.length}
-          typeFilter={favoritesFilter}
-          onTypeChange={setFavoritesFilter}
-        />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+          <span style={{
+            fontSize: 13,
+            fontWeight: 600,
+            color: 'var(--text-0)',
+            fontFamily: 'var(--font-ui)',
+            userSelect: 'none',
+          }}>
+            Favorites
+          </span>
+          <span style={{
+            fontSize: 11,
+            color: 'var(--text-2)',
+            fontFamily: 'var(--font-mono)',
+            userSelect: 'none',
+          }}>
+            {isSearching ? `${displayedFavorites.length}/${favorites.length}` : favorites.length}
+          </span>
+          <div style={{ flex: 1 }} />
+          <div style={{ display: 'flex', gap: 4 }}>
+            {TYPE_PILLS.map((p) => (
+              <TypePill
+                key={p.value}
+                label={p.label}
+                active={favoritesFilter === p.value}
+                onClick={() => setFavoritesFilter(p.value)}
+              />
+            ))}
+          </div>
+        </div>
         {displayedFavorites.length === 0
           ? <EmptyText />
           : <HistoryCardRow items={displayedFavorites} onSelect={onSelectContent} onRemove={handleRemoveFavorite} />
@@ -553,7 +633,7 @@ export function LibraryView({ onSelectContent }: Props) {
             fontFamily: 'var(--font-mono)',
             userSelect: 'none',
           }}>
-            {displayedWatchlist.length}
+            {isSearching ? `${displayedWatchlist.length}/${watchlist.length}` : watchlist.length}
           </span>
           <div style={{ flex: 1 }} />
           <div style={{ display: 'flex', gap: 4 }}>
@@ -593,7 +673,7 @@ export function LibraryView({ onSelectContent }: Props) {
             fontFamily: 'var(--font-mono)',
             userSelect: 'none',
           }}>
-            {displayedHistory.length}
+            {isSearching ? `${displayedHistory.length}/${history.length}` : history.length}
           </span>
         </div>
         {displayedHistory.length === 0
