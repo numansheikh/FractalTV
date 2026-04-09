@@ -119,12 +119,13 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
         ...item,
         // Use {sourceId}:episode:{streamId} — must match what's upserted into content during series:get-info
         id: `${primarySourceId}:episode:${episodeForPlay.id}`,
-        title: `S${currentSeason ?? 1}E${episodeForPlay.episode_num} · ${episodeForPlay.title ?? ''}`,
+        title: `S${String(currentSeason ?? 1).padStart(2,'0')}E${String(episodeForPlay.episode_num).padStart(2,'0')} · ${episodeForPlay.title ?? ''}`,
         _streamId: String(episodeForPlay.id),
         _serverUrl: serverUrl,
         _username: username,
         _password: password,
         _extension: episodeForPlay.container_extension,
+        _parent: { id: item.id, title: item.title, type: 'series' },
       }
     : undefined
 
@@ -284,12 +285,13 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
                     const epItem: ContentItem = {
                       ...item,
                       id: `${primarySourceId}:episode:${ep.id}`,
-                      title: `S${currentSeason}E${ep.episode_num} · ${ep.title ?? ''}`,
+                      title: `S${String(currentSeason).padStart(2,'0')}E${String(ep.episode_num).padStart(2,'0')} · ${ep.title ?? ''}`,
                       _streamId: String(ep.id),
                       _serverUrl: serverUrl,
                       _username: username,
                       _password: password,
                       _extension: ep.container_extension,
+                      _parent: { id: item.id, title: item.title, type: 'series' },
                     }
                     onPlay(epItem)
                   }}

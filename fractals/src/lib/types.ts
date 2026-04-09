@@ -32,6 +32,12 @@ export interface ContentItem {
   // Catchup/timeshift — bypasses normal stream URL resolution
   _catchupUrl?: string
 
+  // Category name — populated from full content record
+  category_name?: string
+
+  // Parent series info — set on episode items so player can navigate back
+  _parent?: { id: string; title: string; type: 'series' }
+
   // Set when returned from channels:favorites (new schema)
   canonical_id?: string
 

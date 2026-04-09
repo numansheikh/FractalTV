@@ -10,11 +10,12 @@ import { ContentArea } from '@/components/layout/ContentArea'
 import { ErrorBoundary } from '@/components/shared/ErrorBoundary'
 import { ContextMenu } from '@/components/shared/ContextMenu'
 import { ContentItem } from '@/lib/types'
+// PlayerOverlay is NOT lazy — must be persistent (never unmounts) for mini-player
+import { PlayerOverlay } from '@/components/player/PlayerOverlay'
 
-// Detail + player panels loaded lazily (agents write them)
+// Detail + overlay panels loaded lazily
 const MovieDetail = lazy(() => import('@/components/detail/MovieDetail').then((m) => ({ default: m.MovieDetail })))
 const SeriesDetail = lazy(() => import('@/components/detail/SeriesDetail').then((m) => ({ default: m.SeriesDetail })))
-const PlayerOverlay = lazy(() => import('@/components/player/PlayerOverlay').then((m) => ({ default: m.PlayerOverlay })))
 const SettingsPanel = lazy(() => import('@/components/settings/SettingsPanel').then((m) => ({ default: m.SettingsPanel })))
 const SourcesPanel = lazy(() => import('@/components/sources/SourcesPanel').then((m) => ({ default: m.SourcesPanel })))
 const LiveSplitView = lazy(() => import('@/components/live/LiveSplitView').then((m) => ({ default: m.LiveSplitView })))
@@ -42,6 +43,7 @@ function AppShell() {
     setSelectedContent, setPlayingContent, setShowSettings, setShowSources,
     setView, setCategoryFilter, clearSourceFilter, toggleSourceFilter,
     sort, setSort, surfChannel,
+    playerMode, setPlayerMode,
   } = useAppStore()
 
   // Load sources + auto-sync new ones
@@ -162,6 +164,30 @@ function AppShell() {
     }
   }
 
+  const handlePlay = (item: ContentItem) => {
+    setPlayingContent(item)
+    setPlayerMode('fullscreen')
+  }
+
+  const handlePlayerClose = () => {
+    setPlayingContent(null)
+    setPlayerMode('hidden')
+  }
+
+  const handlePlayerChipClick = (item: ContentItem) => {
+    setPlayerMode('mini')
+    const parent = (item as any)._parent
+    if (parent) {
+      // Episode — open series detail panel
+      setSelectedContent({ ...item, id: parent.id, title: parent.title, type: 'series' } as ContentItem)
+    } else {
+      // Film — navigate to category
+      const cat = (item as any).category_name
+      setView('films')
+      if (cat) setCategoryFilter(cat.split(',')[0])
+    }
+  }
+
   const handleBreadcrumbNav = (nav: { type?: 'live' | 'movie' | 'series'; sourceId?: string; category?: string }) => {
     setSelectedContent(null)
     useSearchStore.getState().setQuery('')  // clear search so browse view shows, not search results
@@ -203,14 +229,25 @@ function AppShell() {
         />
       </div>
 
+      {/* Player — always mounted for persistent stream (mini-player support) */}
+      <PlayerOverlay
+        content={playingContent}
+        mode={playerMode}
+        onClose={handlePlayerClose}
+        onMinimize={() => setPlayerMode('mini')}
+        onExpand={() => setPlayerMode('fullscreen')}
+        onSurfChannel={surfChannel}
+        onChipClick={handlePlayerChipClick}
+      />
+
       {/* Overlay panels — rendered via Suspense/lazy */}
       <Suspense fallback={null}>
         {/* Movie detail */}
         {selectedContent && !isSeries && (
           <MovieDetail
             item={selectedContent}
-            onPlay={setPlayingContent}
-            onClose={() => { setSelectedContent(null); setPlayingContent(null) }}
+            onPlay={handlePlay}
+            onClose={() => { setSelectedContent(null) }}
             onNavigate={handleBreadcrumbNav}
             isPlaying={!!playingContent}
           />
@@ -219,27 +256,19 @@ function AppShell() {
         {selectedContent && isSeries && (
           <SeriesDetail
             item={selectedContent}
-            onPlay={setPlayingContent}
-            onClose={() => { setSelectedContent(null); setPlayingContent(null) }}
+            onPlay={handlePlay}
+            onClose={() => { setSelectedContent(null) }}
             onNavigate={handleBreadcrumbNav}
             isPlaying={!!playingContent}
           />
         )}
         {/* Live split view */}
-        {splitViewChannel && !playingContent && (
+        {splitViewChannel && playerMode === 'hidden' && (
           <LiveSplitView
             channel={splitViewChannel}
-            onFullscreen={(ch) => setPlayingContent(ch)}
+            onFullscreen={(ch) => handlePlay(ch)}
             onSwitchChannel={(ch) => setSplitViewChannel(ch)}
             onClose={() => setSplitViewChannel(null)}
-          />
-        )}
-        {/* Player */}
-        {playingContent && (
-          <PlayerOverlay
-            content={playingContent}
-            onClose={() => setPlayingContent(null)}
-            onSurfChannel={surfChannel}
           />
         )}
         {/* Settings */}

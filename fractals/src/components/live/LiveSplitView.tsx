@@ -18,7 +18,7 @@ interface Props {
 }
 
 export function LiveSplitView({ channel, onFullscreen, onSwitchChannel, onClose }: Props) {
-  const { channelSurfList, selectedSourceIds, toggleSourceFilter, setView, setCategoryFilter } = useAppStore()
+  const { channelSurfList, surfContextAction, selectedSourceIds, toggleSourceFilter, setView, setCategoryFilter, setHomeMode } = useAppStore()
   const { sources } = useSourcesStore()
   const colorMap = buildColorMapFromSources(sources)
   const qc = useQueryClient()
@@ -49,8 +49,11 @@ export function LiveSplitView({ channel, onFullscreen, onSwitchChannel, onClose 
 
   // Scroll active channel into view on mount (instant) and on channel change (smooth)
   useEffect(() => {
-    activeChannelRef.current?.scrollIntoView({ block: 'center', behavior: isFirstMount.current ? 'instant' : 'smooth' })
+    const behavior = isFirstMount.current ? 'instant' : 'smooth'
     isFirstMount.current = false
+    requestAnimationFrame(() => {
+      activeChannelRef.current?.scrollIntoView({ block: 'center', behavior })
+    })
   }, [channel.id])
 
   // Keyboard shortcuts (capture phase, before App.tsx bubble handler)
@@ -122,6 +125,33 @@ export function LiveSplitView({ channel, onFullscreen, onSwitchChannel, onClose 
           <ChevronLeftIcon />
         </button>
         <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-0)' }}>Live TV</span>
+        {(() => {
+          const pillLabel = surfContextAction === 'home-discover' ? 'Favorites'
+            : surfContextAction === 'home-channels' ? 'Live TV'
+            : surfContextAction === 'browse-favorites' ? 'Favorites'
+            : categoryName ?? null
+          if (!pillLabel) return null
+          const handlePillClick = () => {
+            if (surfContextAction === 'home-discover') {
+              setView('home'); setHomeMode('discover'); onClose()
+            } else if (surfContextAction === 'home-channels') {
+              setView('home'); setHomeMode('channels'); onClose()
+            } else if (surfContextAction === 'browse-favorites') {
+              setView('live'); setCategoryFilter('__favorites__'); onClose()
+            } else if (categoryName) {
+              handleBrowseCategory()
+            }
+          }
+          return (
+            <button onClick={handlePillClick} style={{
+              fontSize: 11, color: 'var(--text-1)', background: 'var(--bg-3)',
+              borderRadius: 6, padding: '2px 7px', border: 'none', cursor: 'pointer',
+              fontFamily: 'var(--font-ui)',
+            }}>
+              {pillLabel}
+            </button>
+          )
+        })()}
         <div style={{ flex: 1 }} />
         {/* Source filter dots — same as CommandBar */}
         {sources.filter((s) => !s.disabled).length > 1 && (
