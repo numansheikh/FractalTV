@@ -190,6 +190,13 @@ export const api = {
       isElectron ? (window.api as any).dialog.openFile(args) : Promise.resolve({ canceled: true }),
   },
 
+  window: {
+    toggleFullscreen: (): Promise<void> =>
+      isElectron ? (window.api as any).window.toggleFullscreen() : Promise.resolve(),
+    isFullscreen: (): Promise<boolean> =>
+      isElectron ? (window.api as any).window.isFullscreen() : Promise.resolve(false),
+  },
+
   on: (channel: string, callback: (...args: unknown[]) => void) => {
     if (isElectron) return window.api.on(channel, callback)
     return () => {}

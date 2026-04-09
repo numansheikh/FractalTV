@@ -41,6 +41,9 @@ interface AppState {
   minWatchSeconds: number
   controlsMode: 'never' | 'auto-2' | 'auto-3' | 'auto-5' | 'always'
 
+  // Player mode (persistent mount — controlled separately from playingContent)
+  playerMode: 'hidden' | 'fullscreen' | 'mini'
+
   // Actions
   setView: (view: ActiveView) => void
   goBack: () => void
@@ -64,6 +67,7 @@ interface AppState {
   setHasSeenChannelsModePrompt: (v: boolean) => void
   setMinWatchSeconds: (n: number) => void
   setControlsMode: (m: 'never' | 'auto-2' | 'auto-3' | 'auto-5' | 'always') => void
+  setPlayerMode: (m: 'hidden' | 'fullscreen' | 'mini') => void
 }
 
 export const useAppStore = create<AppState>()(
@@ -89,6 +93,7 @@ export const useAppStore = create<AppState>()(
       homeStripSize: 10,
       minWatchSeconds: 5,
       controlsMode: 'auto-3',
+      playerMode: 'hidden',
 
       setView: (activeView) => set((s) => ({ activeView, previousView: s.activeView, categoryFilter: null })),
       goBack: () => set((s) => ({ activeView: s.previousView ?? 'home', previousView: null, categoryFilter: null })),
@@ -127,6 +132,7 @@ export const useAppStore = create<AppState>()(
       setHasSeenChannelsModePrompt: (hasSeenChannelsModePrompt) => set({ hasSeenChannelsModePrompt }),
       setMinWatchSeconds: (minWatchSeconds) => set({ minWatchSeconds }),
       setControlsMode: (controlsMode) => set({ controlsMode }),
+      setPlayerMode: (playerMode) => set({ playerMode }),
     }),
     {
       name: 'fractals-app',
