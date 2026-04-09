@@ -19,8 +19,8 @@
   /* Text */
   --text-0: #f8f8f8;
   --text-1: #aaaaaa;
-  --text-2: #666666;
-  --text-3: #444444;
+  --text-2: #8888aa;
+  --text-3: #606077;
 
   /* Semantic accents — full saturation */
   --accent-live: #ff3355;
@@ -76,7 +76,7 @@
 
   --color-text-primary:  #f8f8f8;
   --color-text-secondary:#aaaaaa;
-  --color-text-muted:    #666666;
+  --color-text-muted:    #8888aa;
 
   --color-success:       #00dd77;
   --color-warning:       #ffaa00;
@@ -108,7 +108,7 @@
 
   --color-text-primary:  #0a0a0a;
   --color-text-secondary:#444444;
-  --color-text-muted:    #888888;
+  --color-text-muted:    #666666;
 
   --color-success:       #00cc66;
   --color-warning:       #ff9900;
@@ -175,7 +175,7 @@
   --text-0: var(--color-text-primary);
   --text-1: var(--color-text-secondary);
   --text-2: var(--color-text-muted);
-  --text-3: rgba(0,0,0,0.30);
+  --text-3: rgba(0,0,0,0.45);
   /* Borders — visible on white */
   --border-subtle: rgba(0,0,0,0.08);
   --border-default: rgba(0,0,0,0.14);

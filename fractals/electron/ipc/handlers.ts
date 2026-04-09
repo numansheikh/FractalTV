@@ -1177,6 +1177,16 @@ export function registerHandlers() {
 
   // ── User data management ──────────────────────────────────────────────────
 
+  ipcMain.handle('user:clear-continue', async (_event, contentId: string) => {
+    const sqlite = getSqlite()
+    sqlite.prepare(`
+      UPDATE user_data
+      SET last_position = 0, completed = 1
+      WHERE content_id = ?
+    `).run(contentId)
+    return { success: true }
+  })
+
   ipcMain.handle('user:clear-item-history', async (_event, contentId: string) => {
     const sqlite = getSqlite()
     sqlite.prepare(`

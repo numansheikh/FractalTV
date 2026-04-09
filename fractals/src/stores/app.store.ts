@@ -82,7 +82,7 @@ export const useAppStore = create<AppState>()(
       categoryFilter: null,
       selectedSourceIds: [],
       viewMode: 'grid',
-      pageSize: 500,
+      pageSize: 60,
       sort: 'updated:desc',
       homeMode: 'discover',
       hasSeenChannelsModePrompt: false,

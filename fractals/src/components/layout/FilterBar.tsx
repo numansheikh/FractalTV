@@ -35,7 +35,7 @@ export function FilterBar({ itemCount }: { itemCount?: number }) {
         <FilterPill
           label={activeCategory}
           color="var(--text-1)"
-          onRemove={() => setCategoryFilter('__favorites__')}
+          onRemove={() => setCategoryFilter(null)}
         />
       )}
       {selectedSourceIds.length > 0 && (

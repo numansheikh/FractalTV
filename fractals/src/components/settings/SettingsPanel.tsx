@@ -8,7 +8,7 @@ import { SlidePanel } from '@/components/layout/SlidePanel'
 import { api } from '@/lib/api'
 import {
   useTheme,
-  THEME_LABELS, THEME_SWATCHES,
+  THEME_LABELS, THEME_SWATCHES, LIGHT_THEMES,
   FONT_LABELS, FONT_NOTES,
   type ThemeId, type FontId,
 } from '@/hooks/useTheme'
@@ -18,14 +18,14 @@ interface Props {
 }
 
 type PlayerPref = 'artplayer' | 'mpv' | 'vlc'
-type Tab = 'appearance' | 'player' | 'enrichment' | 'data' | 'about'
+type Tab = 'appearance' | 'interface' | 'player' | 'data' | 'about'
 
 const ALL_FONTS: FontId[] = ['DM Sans', 'Inter', 'Rubik', 'IBM Plex Sans', 'Plus Jakarta Sans', 'Outfit', 'Nunito']
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'appearance', label: 'Appearance' },
+  { id: 'interface',  label: 'Interface' },
   { id: 'player',     label: 'Player' },
-  { id: 'enrichment', label: 'Enrichment' },
   { id: 'data',       label: 'Data' },
   { id: 'about',      label: 'About' },
 ]
@@ -117,6 +117,11 @@ export function SettingsPanel({ onClose }: Props) {
               <AppearanceTab theme={theme} font={font} setTheme={setTheme} setFont={setFont} />
             </TabPane>
           )}
+          {activeTab === 'interface' && (
+            <TabPane key="interface">
+              <InterfaceTab />
+            </TabPane>
+          )}
           {activeTab === 'player' && (
             <TabPane key="player">
               <PlayerTab
@@ -126,9 +131,9 @@ export function SettingsPanel({ onClose }: Props) {
               />
             </TabPane>
           )}
-          {activeTab === 'enrichment' && (
-            <TabPane key="enrichment">
-              <EnrichmentTab
+          {activeTab === 'data' && (
+            <TabPane key="data">
+              <DataTab
                 tmdbKey={tmdbKey} setTmdbKey={setTmdbKey}
                 enrichStatus={enrichStatus}
                 enrichProgress={enrichProgress}
@@ -137,11 +142,6 @@ export function SettingsPanel({ onClose }: Props) {
                 isPending={startEnrichment.isPending}
                 onStart={() => { setEnrichMsg(null); setEnrichProgress(null); startEnrichment.mutate() }}
               />
-            </TabPane>
-          )}
-          {activeTab === 'data' && (
-            <TabPane key="data">
-              <DataTab />
             </TabPane>
           )}
           {activeTab === 'about' && (
@@ -177,17 +177,17 @@ function CloseButton({ onClick }: { onClick: () => void }) {
       style={{
         width: 28, height: 28, borderRadius: 6, border: 'none',
         background: 'transparent', display: 'flex', alignItems: 'center',
-        justifyContent: 'center', color: 'var(--text-2)', cursor: 'pointer',
+        justifyContent: 'center', color: 'var(--text-1)', cursor: 'pointer',
         transition: 'background 0.1s, color 0.1s',
         flexShrink: 0,
       }}
       onMouseEnter={(e) => {
         e.currentTarget.style.background = 'var(--bg-3)'
-        e.currentTarget.style.color = 'var(--text-1)'
+        e.currentTarget.style.color = 'var(--text-0)'
       }}
       onMouseLeave={(e) => {
         e.currentTarget.style.background = 'transparent'
-        e.currentTarget.style.color = 'var(--text-2)'
+        e.currentTarget.style.color = 'var(--text-1)'
       }}
     >
       <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round">
@@ -211,13 +211,13 @@ function TabButton({ label, active, onClick }: { label: string; active: boolean;
         border: 'none',
         borderBottom: `2px solid ${active ? 'var(--accent-interactive)' : 'transparent'}`,
         background: 'transparent',
-        color: active ? 'var(--accent-interactive)' : 'var(--text-2)',
+        color: active ? 'var(--accent-interactive)' : 'var(--text-1)',
         cursor: 'pointer',
         transition: 'color 0.12s, border-color 0.12s',
         marginBottom: -1,
       }}
-      onMouseEnter={(e) => { if (!active) e.currentTarget.style.color = 'var(--text-1)' }}
-      onMouseLeave={(e) => { if (!active) e.currentTarget.style.color = 'var(--text-2)' }}
+      onMouseEnter={(e) => { if (!active) e.currentTarget.style.color = 'var(--text-0)' }}
+      onMouseLeave={(e) => { if (!active) e.currentTarget.style.color = 'var(--text-1)' }}
     >
       {label}
     </button>
@@ -229,20 +229,8 @@ function AppearanceTab({ theme, font, setTheme, setFont }: {
   theme: ThemeId; font: FontId
   setTheme: (t: ThemeId) => void; setFont: (f: FontId) => void
 }) {
-  const { pageSize, setPageSize, homeMode, setHomeMode, homeStripSize, setHomeStripSize } = useAppStore()
-  const [searchLive, setSearchLive] = useState(() => Number(localStorage.getItem('fractals-search-live-limit')) || 20)
-  const [searchMovies, setSearchMovies] = useState(() => Number(localStorage.getItem('fractals-search-movie-limit')) || 45)
-  const [searchSeries, setSearchSeries] = useState(() => Number(localStorage.getItem('fractals-search-series-limit')) || 35)
-
-  const saveSearchLimit = (key: string, val: number, setter: (v: number) => void) => {
-    const clamped = Math.max(10, Math.min(200, val))
-    setter(clamped)
-    localStorage.setItem(key, String(clamped))
-  }
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
-
       <section>
         <SectionLabel>Theme</SectionLabel>
         <div style={{ display: 'flex', gap: 8 }}>
@@ -284,7 +272,33 @@ function AppearanceTab({ theme, font, setTheme, setFont }: {
           ))}
         </div>
       </section>
+    </div>
+  )
+}
 
+/* ── Interface tab ────────────────────────────────────────────── */
+function InterfaceTab() {
+  const { pageSize, setPageSize, homeMode, setHomeMode, homeStripSize, setHomeStripSize } = useAppStore()
+  const snap = (v: number, opts: number[]) => opts.reduce((a, b) => Math.abs(b - v) < Math.abs(a - v) ? b : a)
+  const pageOpts = [25, 50, 100, 200, 500]
+  const stripOpts = [5, 6, 7, 8, 9, 10, 12, 15]
+  const searchOpts = [10, 20, 50, 100, 200]
+  useEffect(() => {
+    if (!pageOpts.includes(pageSize)) setPageSize(snap(pageSize, pageOpts))
+    if (!stripOpts.includes(homeStripSize)) setHomeStripSize(snap(homeStripSize, stripOpts))
+  }, [])
+  const [searchLive, setSearchLive] = useState(() => snap(Number(localStorage.getItem('fractals-search-live-limit')) || 20, searchOpts))
+  const [searchMovies, setSearchMovies] = useState(() => snap(Number(localStorage.getItem('fractals-search-movie-limit')) || 20, searchOpts))
+  const [searchSeries, setSearchSeries] = useState(() => snap(Number(localStorage.getItem('fractals-search-series-limit')) || 20, searchOpts))
+
+  const saveSearchLimit = (key: string, val: number, setter: (v: number) => void) => {
+    const clamped = Math.max(10, Math.min(200, val))
+    setter(clamped)
+    localStorage.setItem(key, String(clamped))
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
       <section>
         <SectionLabel>Home Screen</SectionLabel>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -317,51 +331,65 @@ function AppearanceTab({ theme, font, setTheme, setFont }: {
               )
             })}
           </div>
-          <PagingInput label="Strip width (cards per row)" value={homeStripSize} min={5} max={16} step={1}
-            onChange={(v) => setHomeStripSize(Math.max(5, Math.min(16, v)))} />
+          <SegmentedPicker label="Strip width (cards per row)" value={homeStripSize} options={[5, 6, 7, 8, 9, 10, 12, 15]}
+            onChange={(v) => setHomeStripSize(v)} />
         </div>
       </section>
 
       <section>
         <SectionLabel>Browse &amp; Search</SectionLabel>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <PagingInput label="Items per page" value={pageSize} min={100} max={5000} step={100}
-            onChange={(v) => setPageSize(Math.max(100, Math.min(5000, v)))} />
-          <PagingInput label="Search: live channels" value={searchLive} min={10} max={200} step={5}
-            onChange={(v) => saveSearchLimit('fractals-search-live-limit', v, setSearchLive)} />
-          <PagingInput label="Search: movies" value={searchMovies} min={10} max={200} step={5}
-            onChange={(v) => saveSearchLimit('fractals-search-movie-limit', v, setSearchMovies)} />
-          <PagingInput label="Search: series" value={searchSeries} min={10} max={200} step={5}
-            onChange={(v) => saveSearchLimit('fractals-search-series-limit', v, setSearchSeries)} />
-          <p style={{ fontSize: 10, color: 'var(--text-2)', lineHeight: 1.5, marginTop: 2 }}>
-            Items per page: 100–5,000 (default 500). Pagination shown when total exceeds 1,000.
+          <p style={{ fontSize: 10, color: 'var(--text-2)', lineHeight: 1.5, marginBottom: 4, fontStyle: 'italic', padding: '0 4px' }}>
+            Items per page controls browse pagination. Search limits control how many results appear per type.
           </p>
+          <SegmentedPicker label="Items per page" value={pageSize} options={[25, 50, 100, 200, 500]}
+            onChange={(v) => setPageSize(v)} />
+          <SegmentedPicker label="Search: live" value={searchLive} options={[10, 20, 50, 100, 200]}
+            onChange={(v) => saveSearchLimit('fractals-search-live-limit', v, setSearchLive)} />
+          <SegmentedPicker label="Search: movies" value={searchMovies} options={[10, 20, 50, 100, 200]}
+            onChange={(v) => saveSearchLimit('fractals-search-movie-limit', v, setSearchMovies)} />
+          <SegmentedPicker label="Search: series" value={searchSeries} options={[10, 20, 50, 100, 200]}
+            onChange={(v) => saveSearchLimit('fractals-search-series-limit', v, setSearchSeries)} />
         </div>
       </section>
     </div>
   )
 }
 
-function PagingInput({ label, value, onChange, min = 10, max = 200, step = 5 }: {
-  label: string; value: number; onChange: (v: number) => void
-  min?: number; max?: number; step?: number
+function SegmentedPicker({ label, value, options, onChange }: {
+  label: string; value: number; options: number[]; onChange: (v: number) => void
 }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-      <span style={{ fontSize: 11, color: 'var(--text-1)' }}>{label}</span>
-      <input
-        type="number" min={min} max={max} step={step}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        style={{
-          width: 60, textAlign: 'center', borderRadius: 6, padding: '4px 6px',
-          fontSize: 11, fontFamily: 'var(--font-mono)',
-          background: 'var(--bg-2)', border: '1px solid var(--border-default)',
-          color: 'var(--text-0)', outline: 'none',
-        }}
-        onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--accent-interactive)' }}
-        onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--border-default)' }}
-      />
+      <span style={{ fontSize: 11, color: 'var(--text-1)', flexShrink: 0 }}>{label}</span>
+      <div style={{ display: 'flex', borderRadius: 6, overflow: 'hidden', border: '1px solid var(--border-default)' }}>
+        {options.map((opt, i) => {
+          const active = value === opt
+          const isLast = i === options.length - 1
+          return (
+            <button
+              key={opt}
+              onClick={() => onChange(opt)}
+              style={{
+                padding: '4px 8px',
+                fontSize: 10,
+                fontFamily: 'var(--font-mono)',
+                background: active ? 'var(--accent-interactive)' : 'var(--bg-2)',
+                color: active ? '#fff' : 'var(--text-1)',
+                border: 'none',
+                borderRight: isLast ? 'none' : '1px solid var(--border-default)',
+                cursor: 'pointer',
+                fontWeight: active ? 600 : 400,
+                transition: 'background 0.15s, color 0.15s',
+              }}
+              onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'var(--bg-3)' }}
+              onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'var(--bg-2)' }}
+            >
+              {opt}
+            </button>
+          )
+        })}
+      </div>
     </div>
   )
 }
@@ -399,7 +427,7 @@ function PlayerTab({ playerPref, setPlayerPref, mpvPath, setMpvPath, vlcPath, se
       </section>
 
       {playerPref === 'artplayer' && (
-        <p style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.6 }}>
+        <p style={{ fontSize: 11, color: 'var(--text-1)', lineHeight: 1.6 }}>
           Built-in player with HLS support. Works without any additional software.
         </p>
       )}
@@ -413,36 +441,9 @@ function PlayerTab({ playerPref, setPlayerPref, mpvPath, setMpvPath, vlcPath, se
       )}
 
       <section>
-        <SectionLabel>Watch tracking</SectionLabel>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <p style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.5, margin: 0 }}>
-            Minimum seconds watched before progress is saved to Continue Watching.
-          </p>
-          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-            {[5, 10, 30, 60].map((n) => (
-              <button
-                key={n}
-                onClick={() => setMinWatchSeconds(n)}
-                style={{
-                  flex: 1, padding: '7px 0', borderRadius: 7, fontSize: 11, fontWeight: 500,
-                  fontFamily: 'var(--font-ui)',
-                  border: `1px solid ${minWatchSeconds === n ? 'var(--accent-interactive)' : 'var(--border-default)'}`,
-                  background: minWatchSeconds === n ? 'var(--accent-interactive-dim)' : 'transparent',
-                  color: minWatchSeconds === n ? 'var(--accent-interactive)' : 'var(--text-1)',
-                  cursor: 'pointer', transition: 'all 0.1s',
-                }}
-              >
-                {n < 60 ? `${n}s` : '1m'}
-              </button>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section>
         <SectionLabel>Player controls</SectionLabel>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <p style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.5, margin: 0 }}>
+          <p style={{ fontSize: 11, color: 'var(--text-1)', lineHeight: 1.5, margin: 0 }}>
             When to show playback controls in fullscreen. Applies to the built-in player only.
           </p>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -470,10 +471,37 @@ function PlayerTab({ playerPref, setPlayerPref, mpvPath, setMpvPath, vlcPath, se
             ))}
           </div>
           {controlsMode === 'never' && (
-            <p style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.5, margin: 0 }}>
+            <p style={{ fontSize: 11, color: 'var(--text-1)', lineHeight: 1.5, margin: 0 }}>
               Controls hidden. Keyboard shortcuts still work. Use <kbd style={{ background: 'var(--bg-3)', border: '1px solid var(--border-default)', borderRadius: 3, padding: '0 4px', fontSize: 10, fontFamily: 'var(--font-mono)' }}>Esc</kbd> to close.
             </p>
           )}
+        </div>
+      </section>
+
+      <section>
+        <SectionLabel>Watch tracking</SectionLabel>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <p style={{ fontSize: 11, color: 'var(--text-1)', lineHeight: 1.5, margin: 0 }}>
+            Minimum seconds watched before progress is saved to Continue Watching.
+          </p>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            {[5, 10, 30, 60].map((n) => (
+              <button
+                key={n}
+                onClick={() => setMinWatchSeconds(n)}
+                style={{
+                  flex: 1, padding: '7px 0', borderRadius: 7, fontSize: 11, fontWeight: 500,
+                  fontFamily: 'var(--font-ui)',
+                  border: `1px solid ${minWatchSeconds === n ? 'var(--accent-interactive)' : 'var(--border-default)'}`,
+                  background: minWatchSeconds === n ? 'var(--accent-interactive-dim)' : 'transparent',
+                  color: minWatchSeconds === n ? 'var(--accent-interactive)' : 'var(--text-1)',
+                  cursor: 'pointer', transition: 'all 0.1s',
+                }}
+              >
+                {n < 60 ? `${n}s` : '1m'}
+              </button>
+            ))}
+          </div>
         </div>
       </section>
 
@@ -509,82 +537,13 @@ function PlayerNote({ title, color, children }: { title: string; color: string; 
   )
 }
 
-/* ── Enrichment tab ────────────────────────────────────────────── */
-function EnrichmentTab({ tmdbKey, setTmdbKey, enrichStatus, enrichProgress, enrichMsg, pct, isPending, onStart }: {
+/* ── Data tab ──────────────────────────────────────────────────── */
+function DataTab({ tmdbKey, setTmdbKey, enrichStatus, enrichProgress, enrichMsg, pct, isPending, onStart }: {
   tmdbKey: string; setTmdbKey: (v: string) => void
   enrichStatus: any; enrichProgress: { done: number; total: number } | null
   enrichMsg: string | null; pct: number | null; isPending: boolean
   onStart: () => void
 }) {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <section>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-          <SectionLabel style={{ marginBottom: 0 }}>TMDB Enrichment</SectionLabel>
-          {enrichStatus && (
-            <span style={{ fontSize: 10, color: 'var(--text-2)', fontFamily: 'var(--font-mono)' }}>
-              <span style={{ color: 'var(--accent-success)' }}>{enrichStatus.enriched}</span>
-              /{enrichStatus.total}
-            </span>
-          )}
-        </div>
-        <p style={{ fontSize: 11, color: 'var(--text-1)', lineHeight: 1.6, marginBottom: 12 }}>
-          Fetches posters, ratings, plots, cast, and genres from TMDB.
-          Get a free key at{' '}
-          <span style={{ color: 'var(--accent-interactive)' }}>themoviedb.org/settings/api</span>
-        </p>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <input
-              type="password"
-              placeholder="TMDB API key (v3 auth)"
-              value={tmdbKey}
-              onChange={(e) => setTmdbKey(e.target.value)}
-              style={{
-                flex: 1, borderRadius: 8, padding: '8px 10px', fontSize: 11, outline: 'none',
-                background: 'var(--bg-2)', border: '1px solid var(--border-default)',
-                color: 'var(--text-0)', caretColor: 'var(--accent-interactive)',
-                fontFamily: 'var(--font-ui)', transition: 'border-color 0.15s',
-              }}
-              onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--accent-interactive)' }}
-              onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--border-default)' }}
-            />
-            <button
-              onClick={onStart}
-              disabled={isPending || !!enrichProgress}
-              style={{
-                padding: '8px 16px', borderRadius: 8, fontSize: 11, fontWeight: 600,
-                background: 'var(--accent-success)', color: '#fff', border: 'none',
-                cursor: 'pointer', whiteSpace: 'nowrap',
-                opacity: (isPending || !!enrichProgress) ? 0.5 : 1,
-                transition: 'opacity 0.15s', fontFamily: 'var(--font-ui)',
-              }}
-            >
-              {enrichProgress ? `${pct}%` : 'Enrich'}
-            </button>
-          </div>
-
-          {enrichProgress && (
-            <div style={{ borderRadius: 99, overflow: 'hidden', height: 3, background: 'var(--bg-3)' }}>
-              <div style={{
-                height: '100%', background: 'var(--accent-success)',
-                width: `${pct}%`, transition: 'width 0.3s',
-              }} />
-            </div>
-          )}
-
-          {enrichMsg && (
-            <p style={{ fontSize: 11, color: 'var(--text-1)' }}>{enrichMsg}</p>
-          )}
-        </div>
-      </section>
-    </div>
-  )
-}
-
-/* ── Data tab ──────────────────────────────────────────────────── */
-function DataTab() {
   const qc = useQueryClient()
   const setSources = useSourcesStore((s) => s.setSources)
   const [confirm, setConfirm] = useState<'history' | 'favorites' | 'all' | 'prefs' | 'factory' | null>(null)
@@ -606,7 +565,7 @@ function DataTab() {
         useAppStore.setState({
           sort: 'updated:desc',
           viewMode: 'grid',
-          pageSize: 500,
+          pageSize: 60,
           homeMode: 'discover',
           hasSeenChannelsModePrompt: false,
           minWatchSeconds: 5,
@@ -703,6 +662,120 @@ function DataTab() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
+      {/* ── Enrichment ── */}
+      <section>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+          <SectionLabel style={{ marginBottom: 0 }}>TMDB Enrichment</SectionLabel>
+          {enrichStatus && (
+            <span style={{ fontSize: 10, color: 'var(--text-2)', fontFamily: 'var(--font-mono)' }}>
+              <span style={{ color: 'var(--accent-success)' }}>{enrichStatus.enriched}</span>
+              /{enrichStatus.total}
+            </span>
+          )}
+        </div>
+        <p style={{ fontSize: 11, color: 'var(--text-1)', lineHeight: 1.6, marginBottom: 12 }}>
+          Fetches posters, ratings, plots, cast, and genres from TMDB.
+          Get a free key at{' '}
+          <span style={{ color: 'var(--accent-interactive)' }}>themoviedb.org/settings/api</span>
+        </p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input
+              type="password"
+              placeholder="TMDB API key (v3 auth)"
+              value={tmdbKey}
+              onChange={(e) => setTmdbKey(e.target.value)}
+              style={{
+                flex: 1, borderRadius: 8, padding: '8px 10px', fontSize: 11, outline: 'none',
+                background: 'var(--bg-2)', border: '1px solid var(--border-default)',
+                color: 'var(--text-0)', caretColor: 'var(--accent-interactive)',
+                fontFamily: 'var(--font-ui)', transition: 'border-color 0.15s',
+              }}
+              onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--accent-interactive)' }}
+              onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--border-default)' }}
+            />
+            <button
+              onClick={onStart}
+              disabled={isPending || !!enrichProgress}
+              style={{
+                padding: '8px 16px', borderRadius: 8, fontSize: 11, fontWeight: 600,
+                background: 'var(--accent-success)', color: '#fff', border: 'none',
+                cursor: 'pointer', whiteSpace: 'nowrap',
+                opacity: (isPending || !!enrichProgress) ? 0.5 : 1,
+                transition: 'opacity 0.15s', fontFamily: 'var(--font-ui)',
+              }}
+            >
+              {enrichProgress ? `${pct}%` : 'Enrich'}
+            </button>
+          </div>
+          {enrichProgress && (
+            <div style={{ borderRadius: 99, overflow: 'hidden', height: 3, background: 'var(--bg-3)' }}>
+              <div style={{
+                height: '100%', background: 'var(--accent-success)',
+                width: `${pct}%`, transition: 'width 0.3s',
+              }} />
+            </div>
+          )}
+          {enrichMsg && (
+            <p style={{ fontSize: 11, color: 'var(--text-1)' }}>{enrichMsg}</p>
+          )}
+        </div>
+      </section>
+
+      {/* ── Backup/Import ── */}
+      <section>
+        <SectionLabel>Sources backup</SectionLabel>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ padding: '12px 14px', borderRadius: 8, background: 'var(--bg-2)', border: '1px solid var(--border-subtle)' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-0)', marginBottom: 6 }}>Export backup</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 11, color: 'var(--text-2)', cursor: 'default' }}>
+                    <input type="checkbox" checked disabled style={{ accentColor: 'var(--accent-interactive)' }} />
+                    Sources &amp; Settings (TMDB key, colors)
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 11, color: 'var(--text-1)', cursor: 'pointer' }}>
+                    <input type="checkbox" checked={includeUserData} onChange={(e) => setIncludeUserData(e.target.checked)} style={{ accentColor: 'var(--accent-interactive)', cursor: 'pointer' }} />
+                    User data (favourites, watchlist, history)
+                  </label>
+                </div>
+              </div>
+              <button
+                onClick={handleExport}
+                disabled={busy}
+                style={{ padding: '5px 12px', borderRadius: 6, fontSize: 11, cursor: 'pointer', flexShrink: 0, background: 'var(--bg-3)', color: 'var(--text-1)', border: '1px solid var(--border-default)', opacity: busy ? 0.6 : 1 }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-4)' }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--bg-3)' }}
+              >
+                Export
+              </button>
+            </div>
+          </div>
+          <div style={{ padding: '12px 14px', borderRadius: 8, background: 'var(--bg-2)', border: '1px solid var(--border-subtle)' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-0)', marginBottom: 3 }}>Import sources</div>
+                <div style={{ fontSize: 11, color: 'var(--text-1)', lineHeight: 1.45 }}>Restore sources from a previously exported JSON file. Existing sources with the same ID will be updated.</div>
+              </div>
+              <button
+                onClick={handleImport}
+                disabled={busy}
+                style={{ padding: '5px 12px', borderRadius: 6, fontSize: 11, cursor: 'pointer', flexShrink: 0, background: 'var(--bg-3)', color: 'var(--text-1)', border: '1px solid var(--border-default)', opacity: busy ? 0.6 : 1 }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-4)' }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--bg-3)' }}
+              >
+                Import
+              </button>
+            </div>
+          </div>
+        </div>
+        {importMsg && (
+          <p style={{ fontSize: 11, color: importMsg.includes('failed') ? 'var(--accent-danger)' : 'var(--accent-success)', marginTop: 8 }}>{importMsg}</p>
+        )}
+      </section>
+
+      {/* ── User data ── */}
       <section>
         <SectionLabel>User data</SectionLabel>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -718,7 +791,7 @@ function DataTab() {
                   <div style={{ fontSize: 12, fontWeight: 600, color: a.danger ? 'var(--accent-danger)' : 'var(--text-0)', marginBottom: 3 }}>
                     {a.label}
                   </div>
-                  <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.45 }}>{a.description}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-1)', lineHeight: 1.45 }}>{a.description}</div>
                 </div>
                 {confirm === a.id ? (
                   <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
@@ -766,65 +839,14 @@ function DataTab() {
         )}
       </section>
 
-      <section>
-        <SectionLabel>Sources backup</SectionLabel>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <div style={{ padding: '12px 14px', borderRadius: 8, background: 'var(--bg-2)', border: '1px solid var(--border-subtle)' }}>
-            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-0)', marginBottom: 6 }}>Export backup</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 11, color: 'var(--text-2)', cursor: 'default' }}>
-                    <input type="checkbox" checked disabled style={{ accentColor: 'var(--accent-interactive)' }} />
-                    Sources &amp; Settings (TMDB key, colors)
-                  </label>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 11, color: 'var(--text-2)', cursor: 'pointer' }}>
-                    <input type="checkbox" checked={includeUserData} onChange={(e) => setIncludeUserData(e.target.checked)} style={{ accentColor: 'var(--accent-interactive)', cursor: 'pointer' }} />
-                    User data (favourites, watchlist, history)
-                  </label>
-                </div>
-              </div>
-              <button
-                onClick={handleExport}
-                disabled={busy}
-                style={{ padding: '5px 12px', borderRadius: 6, fontSize: 11, cursor: 'pointer', flexShrink: 0, background: 'var(--bg-3)', color: 'var(--text-1)', border: '1px solid var(--border-default)', opacity: busy ? 0.6 : 1 }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-4)' }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--bg-3)' }}
-              >
-                Export
-              </button>
-            </div>
-          </div>
-          <div style={{ padding: '12px 14px', borderRadius: 8, background: 'var(--bg-2)', border: '1px solid var(--border-subtle)' }}>
-            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-0)', marginBottom: 3 }}>Import sources</div>
-                <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.45 }}>Restore sources from a previously exported JSON file. Existing sources with the same ID will be updated.</div>
-              </div>
-              <button
-                onClick={handleImport}
-                disabled={busy}
-                style={{ padding: '5px 12px', borderRadius: 6, fontSize: 11, cursor: 'pointer', flexShrink: 0, background: 'var(--bg-3)', color: 'var(--text-1)', border: '1px solid var(--border-default)', opacity: busy ? 0.6 : 1 }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-4)' }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--bg-3)' }}
-              >
-                Import
-              </button>
-            </div>
-          </div>
-        </div>
-        {importMsg && (
-          <p style={{ fontSize: 11, color: importMsg.includes('failed') ? 'var(--accent-danger)' : 'var(--accent-success)', marginTop: 8 }}>{importMsg}</p>
-        )}
-      </section>
-
+      {/* ── Factory reset ── */}
       <section>
         <SectionLabel>Factory reset</SectionLabel>
         <div style={{ padding: '12px 14px', borderRadius: 8, background: 'var(--bg-2)', border: `1px solid ${confirm === 'factory' ? 'rgba(239,68,68,0.35)' : 'var(--border-subtle)'}` }}>
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent-danger)', marginBottom: 3 }}>Factory reset</div>
-              <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.45 }}>Removes all sources, content, user data, and history. The app will be completely empty. Export your sources first if you want to restore them.</div>
+              <div style={{ fontSize: 11, color: 'var(--text-1)', lineHeight: 1.45 }}>Removes all sources, content, user data, and history. The app will be completely empty. Export your sources first if you want to restore them.</div>
             </div>
             {confirm === 'factory' ? (
               <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
@@ -875,7 +897,7 @@ function AboutTab() {
       </section>
       <section>
         <SectionLabel>Developer</SectionLabel>
-        <p style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.6, marginBottom: 10 }}>
+        <p style={{ fontSize: 11, color: 'var(--text-1)', lineHeight: 1.6, marginBottom: 10 }}>
           Press{' '}
           <kbd style={{
             padding: '1px 5px', borderRadius: 3, fontSize: 10,
@@ -920,7 +942,7 @@ function SectionLabel({ children, style }: { children: React.ReactNode; style?: 
     }}>
       <span style={{
         fontSize: 11, fontWeight: 600,
-        color: 'var(--text-1)',
+        color: 'var(--text-0)',
         fontFamily: 'var(--font-ui)',
         letterSpacing: '0.01em',
       }}>
@@ -933,6 +955,10 @@ function SectionLabel({ children, style }: { children: React.ReactNode; style?: 
 
 function ThemeSwatch({ id, active, onSelect }: { id: ThemeId; active: boolean; onSelect: (t: ThemeId) => void }) {
   const [bg, accent] = THEME_SWATCHES[id]
+  const isLight = LIGHT_THEMES.includes(id)
+  const labelColor = isLight ? 'rgba(0,0,0,0.75)' : 'rgba(255,255,255,0.92)'
+  const labelShadow = isLight ? 'none' : '0 1px 4px rgba(0,0,0,0.6)'
+  const checkColor = isLight ? accent : 'white'
   return (
     <button
       onClick={() => onSelect(id)}
@@ -946,7 +972,7 @@ function ThemeSwatch({ id, active, onSelect }: { id: ThemeId; active: boolean; o
     >
       {active && (
         <div style={{ position: 'absolute', top: 6, right: 8 }}>
-          <svg width="13" height="13" viewBox="0 0 12 12" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round">
+          <svg width="13" height="13" viewBox="0 0 12 12" fill="none" stroke={checkColor} strokeWidth="2.5" strokeLinecap="round">
             <path d="M2 6l3 3 5-5" />
           </svg>
         </div>
@@ -954,7 +980,7 @@ function ThemeSwatch({ id, active, onSelect }: { id: ThemeId; active: boolean; o
       <div style={{
         position: 'absolute', bottom: 5, left: 10,
         fontSize: 9, fontWeight: 700, textAlign: 'left',
-        color: 'rgba(255,255,255,0.92)', textShadow: '0 1px 4px rgba(0,0,0,0.6)',
+        color: labelColor, textShadow: labelShadow,
         letterSpacing: '0.03em',
       }}>
         {THEME_LABELS[id]}

@@ -74,6 +74,8 @@ export const api = {
     setCompleted: (contentId: string) => ipcRenderer.invoke('user:set-completed', contentId),
     setRating: (contentId: string, rating: number | null) =>
       ipcRenderer.invoke('user:set-rating', { contentId, rating }),
+    clearContinue: (contentId: string) =>
+      ipcRenderer.invoke('user:clear-continue', contentId),
     clearItemHistory: (contentId: string) =>
       ipcRenderer.invoke('user:clear-item-history', contentId),
     clearHistory: () => ipcRenderer.invoke('user:clear-history'),

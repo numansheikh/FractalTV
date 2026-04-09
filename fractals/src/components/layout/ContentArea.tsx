@@ -41,7 +41,6 @@ const VIEW_TYPE: Record<ActiveView, 'live' | 'movie' | 'series' | undefined> = {
 const BROWSE_VIEWS: ActiveView[] = ['live', 'films', 'series']
 
 const SEARCH_INIT = 21   // N+1: fetch one extra to detect "has more"
-const SEARCH_FULL = 9999 // effectively unlimited
 const SEARCH_INITIAL_CAP = 20 // max displayed before "Show all"
 
 interface Props {
@@ -50,7 +49,6 @@ interface Props {
   onAddSource: () => void
 }
 
-const PAGINATION_THRESHOLD = 1000
 
 function navBtnStyle(disabled: boolean): React.CSSProperties {
   return {
@@ -135,19 +133,15 @@ export function ContentArea({ sort, onSelectContent, onAddSource }: Props) {
 
   // Navigation callbacks for "Show all" — navigate to view + clear search
   const { setView } = useAppStore()
-  const { setQuery } = useSearchStore()
   const handleShowAllLive = useCallback(() => {
     setView('live')
-    setQuery('')
-  }, [setView, setQuery])
+  }, [setView])
   const handleShowAllMovies = useCallback(() => {
     setView('films')
-    setQuery('')
-  }, [setView, setQuery])
+  }, [setView])
   const handleShowAllSeries = useCallback(() => {
     setView('series')
-    setQuery('')
-  }, [setView, setQuery])
+  }, [setView])
 
   const searchBase = {
     query,
@@ -260,6 +254,13 @@ export function ContentArea({ sort, onSelectContent, onAddSource }: Props) {
 
         {/* Content grid */}
         <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+          {isLoading && isEmpty && (
+            <div style={{ flex: 1, padding: '12px 16px', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 10 }}>
+              {Array.from({ length: 24 }).map((_, i) => (
+                <BrowseSkeleton key={i} type={contentType === 'live' ? 'live' : 'poster'} />
+              ))}
+            </div>
+          )}
           {isEmpty && !isLoading && (() => {
             const hasSources = sources.filter((s) => !s.disabled).length > 0
             if (!hasSources) {
@@ -300,7 +301,7 @@ export function ContentArea({ sort, onSelectContent, onAddSource }: Props) {
                 }
               </div>
               {/* Pagination bar — only when total exceeds threshold */}
-              {total > PAGINATION_THRESHOLD && (() => {
+              {total > pageSize && (() => {
                 const totalPages = Math.ceil(total / pageSize)
                 return (
                   <div style={{
@@ -341,7 +342,7 @@ export function ContentArea({ sort, onSelectContent, onAddSource }: Props) {
                     </button>
 
                     {/* Page label */}
-                    <span style={{ fontSize: 11, color: 'var(--text-2)', fontFamily: 'var(--font-ui)', whiteSpace: 'nowrap', minWidth: 80, textAlign: 'right' }}>
+                    <span style={{ fontSize: 11, color: 'var(--text-1)', fontFamily: 'var(--font-ui)', whiteSpace: 'nowrap', minWidth: 80, textAlign: 'right' }}>
                       {isLoading ? 'Loading…' : `${((page - 1) * pageSize + 1).toLocaleString()}–${Math.min(page * pageSize, total).toLocaleString()} of ${total.toLocaleString()}`}
                     </span>
                   </div>
@@ -371,6 +372,19 @@ function FallbackGrid({ items, onSelect }: { items: ContentItem[]; onSelect: (i:
           </div>
         </div>
       ))}
+    </div>
+  )
+}
+
+function BrowseSkeleton({ type }: { type: 'live' | 'poster' }) {
+  const aspect = type === 'live' ? '16/9' : '2/3'
+  return (
+    <div style={{ borderRadius: 6, background: 'var(--bg-2)', border: '1px solid var(--border-subtle)', overflow: 'hidden' }}>
+      <div style={{ aspectRatio: aspect, background: 'linear-gradient(90deg, var(--bg-2) 25%, var(--bg-3) 50%, var(--bg-2) 75%)', backgroundSize: '200% 100%', animation: 'shimmer 1.4s infinite' }} />
+      <div style={{ padding: '6px 8px 8px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <div style={{ height: 10, borderRadius: 3, background: 'var(--bg-3)', width: '70%' }} />
+        {type === 'poster' && <div style={{ height: 8, borderRadius: 3, background: 'var(--bg-3)', width: '45%' }} />}
+      </div>
     </div>
   )
 }

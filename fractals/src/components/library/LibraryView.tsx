@@ -43,7 +43,7 @@ function TypePill({
         background: active
           ? 'var(--accent-interactive-dim)'
           : 'transparent',
-        color: active ? 'var(--text-0)' : 'var(--text-2)',
+        color: active ? 'var(--text-0)' : 'var(--text-1)',
         cursor: 'pointer',
         fontFamily: 'var(--font-ui)',
         transition: 'background 0.1s, border-color 0.1s, color 0.1s',
@@ -80,7 +80,7 @@ function SectionHeader({
       </span>
       <span style={{
         fontSize: 11,
-        color: 'var(--text-2)',
+        color: 'var(--text-1)',
         fontFamily: 'var(--font-mono)',
         userSelect: 'none',
       }}>
@@ -113,64 +113,6 @@ function EmptyText() {
     }}>
       Nothing here yet
     </p>
-  )
-}
-
-// ─── Show all link ───────────────────────────────────────────────────
-function ShowAllLink({ onClick }: { onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        background: 'none',
-        border: 'none',
-        padding: '0 4px',
-        color: 'var(--accent-interactive)',
-        fontSize: 11,
-        cursor: 'pointer',
-        flexShrink: 0,
-        alignSelf: 'flex-start',
-        marginTop: 2,
-        fontFamily: 'var(--font-ui)',
-      }}
-    >
-      Show all →
-    </button>
-  )
-}
-
-// ─── Scrollable card row ─────────────────────────────────────────────
-function CardRow({
-  items,
-  onSelect,
-  showAllAt = 20,
-  onShowAll,
-}: {
-  items: ContentItem[]
-  onSelect: (item: ContentItem) => void
-  showAllAt?: number
-  onShowAll?: () => void
-}) {
-  const sliced = items.slice(0, showAllAt)
-  const hasMore = items.length > showAllAt
-
-  return (
-    <div style={{ display: 'flex', gap: 10, overflowX: 'auto', overflowY: 'hidden', scrollbarWidth: 'none', paddingBottom: 4 }}>
-      {sliced.map((item) => {
-        const isLive = item.type === 'live'
-        return (
-          <div key={item.id} style={{ width: isLive ? 168 : 130, flexShrink: 0 }}>
-            {isLive
-              ? <ChannelCard item={item} onClick={onSelect} />
-              : <PosterCard item={item} onClick={onSelect} />
-            }
-          </div>
-        )
-      })}
-      {hasMore && onShowAll && (
-        <ShowAllLink onClick={onShowAll} />
-      )}
-    </div>
   )
 }
 
@@ -295,7 +237,7 @@ function ContinueWatchingRow({
                 {episodeTitle && (
                   <span style={{
                     fontSize: 10,
-                    color: 'var(--text-2)',
+                    color: 'var(--text-1)',
                     fontFamily: 'var(--font-ui)',
                     lineHeight: 1.2,
                     overflow: 'hidden',
@@ -363,22 +305,15 @@ function filterItems(items: ContentItem[], filter: TypeFilter): ContentItem[] {
   return items.filter((i) => i.type === filter)
 }
 
-function filterBySearch(items: ContentItem[], query: string): ContentItem[] {
-  if (!query.trim()) return items
-  const q = query.toLowerCase()
-  return items.filter((i) => (i.title || '').toLowerCase().includes(q))
-}
 
 // ─── Main component ──────────────────────────────────────────────────
 export function LibraryView({ onSelectContent }: Props) {
   const loadBulk = useUserStore((s) => s.loadBulk)
   const qc = useQueryClient()
 
-  const [searchQuery, setSearchQuery] = useState('')
   const [favoritesFilter, setFavoritesFilter] = useState<TypeFilter>('all')
   const [watchlistFilter, setWatchlistFilter] = useState<TypeFilter>('all')
   // History filter excluded (mixed, no live) — kept as 'all' only
-  const [historyFilter] = useState<TypeFilter>('all')
 
   // ── Continue Watching query ──────────────────────────────────────
   const { data: continueWatching = [] } = useQuery<ContentItem[]>({
@@ -404,7 +339,7 @@ export function LibraryView({ onSelectContent }: Props) {
   // ── History query ────────────────────────────────────────────────
   const { data: history = [] } = useQuery<ContentItem[]>({
     queryKey: ['library', 'history'],
-    queryFn: () => api.user.history({ limit: 50 }),
+    queryFn: () => api.user.history({ limit: 30 }),
   })
 
   // Bulk-load user data whenever queries resolve
@@ -432,14 +367,13 @@ export function LibraryView({ onSelectContent }: Props) {
   ]
 
   const handleRemoveContinue = async (item: ContentItem) => {
-    // Remove optimistically — clear the series episode or movie history
+    // Remove from continue watching only — keeps watch history intact
     const clearId = item.resume_episode_id ?? item.id
     qc.setQueryData<ContentItem[]>(['library', 'continue-watching'], (prev) =>
       prev ? prev.filter((i) => i.id !== item.id) : []
     )
-    useUserStore.getState().clearItemHistory(item.id)
     try {
-      await api.user.clearItemHistory(clearId)
+      await api.user.clearContinue(clearId)
     } catch { /* noop — already removed from UI */ }
     qc.invalidateQueries({ queryKey: ['library', 'continue-watching'] })
     qc.invalidateQueries({ queryKey: ['home-continue'] })
@@ -455,6 +389,7 @@ export function LibraryView({ onSelectContent }: Props) {
     } catch { /* noop */ }
     qc.invalidateQueries({ queryKey: ['browse-favorites'] })
     qc.invalidateQueries({ queryKey: ['library', 'favorites'] })
+    qc.invalidateQueries({ queryKey: ['channels', 'favorites'] })
   }
 
   const handleRemoveWatchlist = async (item: ContentItem) => {
@@ -466,6 +401,7 @@ export function LibraryView({ onSelectContent }: Props) {
       await api.user.toggleWatchlist(item.id)
     } catch { /* noop */ }
     qc.invalidateQueries({ queryKey: ['library', 'watchlist'] })
+    qc.invalidateQueries({ queryKey: ['home-watchlist'] })
   }
 
   const handleRemoveHistory = async (item: ContentItem) => {
@@ -479,13 +415,10 @@ export function LibraryView({ onSelectContent }: Props) {
     qc.invalidateQueries({ queryKey: ['library', 'history'] })
   }
 
-  const displayedContinueWatching = filterBySearch(continueWatching, searchQuery)
-  const displayedFavorites = filterBySearch(favorites, searchQuery)
-  const displayedWatchlist = filterBySearch(filterItems(watchlist, watchlistFilter), searchQuery)
-  const displayedHistory = filterBySearch(filterItems(history, historyFilter), searchQuery)
-
-  const isSearching = searchQuery.trim().length > 0
-  const totalMatches = displayedContinueWatching.length + displayedFavorites.length + displayedWatchlist.length + displayedHistory.length
+  const displayedContinueWatching = continueWatching
+  const displayedFavorites = favorites
+  const displayedWatchlist = filterItems(watchlist, watchlistFilter)
+  const displayedHistory = history
 
   return (
     <div style={{
@@ -497,51 +430,6 @@ export function LibraryView({ onSelectContent }: Props) {
       padding: '16px',
       fontFamily: 'var(--font-ui)',
     }}>
-
-      {/* ── Search bar ── */}
-      <div style={{ marginBottom: 8 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent-interactive)" strokeWidth="2.5"><circle cx="11" cy="11" r="8" /><path d="M21 21l-4.35-4.35" /></svg>
-          <input
-            type="text"
-            placeholder="Search favorites…"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.currentTarget.value)}
-            style={{
-              flex: 1,
-              border: '1px solid var(--border-subtle)',
-              borderRadius: 6,
-              padding: '6px 8px',
-              fontSize: 12,
-              fontFamily: 'var(--font-ui)',
-              background: 'var(--bg-1)',
-              color: 'var(--text-0)',
-              outline: 'none',
-            }}
-            onFocus={(e) => {
-              e.currentTarget.style.borderColor = 'var(--accent-interactive)'
-              e.currentTarget.style.background = '#F5F3FF'
-            }}
-            onBlur={(e) => {
-              e.currentTarget.style.borderColor = 'var(--border-subtle)'
-              e.currentTarget.style.background = 'var(--bg-1)'
-            }}
-          />
-          {isSearching && (
-            <span style={{
-              fontSize: 11,
-              fontWeight: 600,
-              padding: '2px 8px',
-              borderRadius: 4,
-              background: 'var(--accent-interactive)',
-              color: '#fff',
-              whiteSpace: 'nowrap',
-            }}>
-              {totalMatches} match{totalMatches !== 1 ? 'es' : ''}
-            </span>
-          )}
-        </div>
-      </div>
 
       {/* ── Continue Watching ── */}
       {displayedContinueWatching.length > 0 && (
@@ -558,11 +446,11 @@ export function LibraryView({ onSelectContent }: Props) {
             </span>
             <span style={{
               fontSize: 11,
-              color: 'var(--text-2)',
+              color: 'var(--text-1)',
               fontFamily: 'var(--font-mono)',
               userSelect: 'none',
             }}>
-              {isSearching ? `${displayedContinueWatching.length}/${continueWatching.length}` : continueWatching.length}
+              {continueWatching.length}
             </span>
           </div>
           <ContinueWatchingRow
@@ -589,11 +477,11 @@ export function LibraryView({ onSelectContent }: Props) {
           </span>
           <span style={{
             fontSize: 11,
-            color: 'var(--text-2)',
+            color: 'var(--text-1)',
             fontFamily: 'var(--font-mono)',
             userSelect: 'none',
           }}>
-            {isSearching ? `${displayedFavorites.length}/${favorites.length}` : favorites.length}
+            {favorites.length}
           </span>
           <div style={{ flex: 1 }} />
           <div style={{ display: 'flex', gap: 4 }}>
@@ -629,11 +517,11 @@ export function LibraryView({ onSelectContent }: Props) {
           </span>
           <span style={{
             fontSize: 11,
-            color: 'var(--text-2)',
+            color: 'var(--text-1)',
             fontFamily: 'var(--font-mono)',
             userSelect: 'none',
           }}>
-            {isSearching ? `${displayedWatchlist.length}/${watchlist.length}` : watchlist.length}
+            {watchlist.length}
           </span>
           <div style={{ flex: 1 }} />
           <div style={{ display: 'flex', gap: 4 }}>
@@ -668,12 +556,13 @@ export function LibraryView({ onSelectContent }: Props) {
             Watch History
           </span>
           <span style={{
-            fontSize: 11,
+            fontSize: 10,
             color: 'var(--text-2)',
-            fontFamily: 'var(--font-mono)',
+            fontStyle: 'italic',
+            fontFamily: 'var(--font-ui)',
             userSelect: 'none',
           }}>
-            {isSearching ? `${displayedHistory.length}/${history.length}` : history.length}
+            latest 30
           </span>
         </div>
         {displayedHistory.length === 0

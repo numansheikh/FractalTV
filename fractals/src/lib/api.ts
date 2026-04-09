@@ -111,6 +111,8 @@ export const api = {
 
     setRating: (contentId: string, rating: number | null) =>
       isElectron ? (window.api as any).user.setRating(contentId, rating) : Promise.resolve({ success: true }),
+    clearContinue: (contentId: string) =>
+      isElectron ? (window.api as any).user.clearContinue(contentId) : Promise.resolve({ success: true }),
     clearItemHistory: (contentId: string) =>
       isElectron ? (window.api as any).user.clearItemHistory(contentId) : Promise.resolve({ success: true }),
     clearHistory: () =>
