@@ -847,6 +847,19 @@ export function registerHandlers() {
         last_position = excluded.last_position,
         last_watched_at = excluded.last_watched_at
     `).run(args.contentId, args.position)
+
+    // Dual-write to user_data_v2 (new schema)
+    const stream = sqlite.prepare(`SELECT canonical_id FROM streams WHERE id = ?`).get(args.contentId) as any
+    if (stream?.canonical_id) {
+      sqlite.prepare(`
+        INSERT INTO user_data_v2 (canonical_id, watch_position, last_watched_at)
+        VALUES (?, ?, unixepoch())
+        ON CONFLICT(canonical_id, profile_id) DO UPDATE SET
+          watch_position  = excluded.watch_position,
+          last_watched_at = excluded.last_watched_at
+      `).run(stream.canonical_id, args.position)
+    }
+
     return { success: true }
   })
 
@@ -860,7 +873,7 @@ export function registerHandlers() {
     const row = sqlite.prepare('SELECT favorite FROM user_data WHERE content_id = ?').get(contentId) as any
     const isFavorite = !!row?.favorite
 
-    // Dual-write to user_data_v2 for live channels (new schema)
+    // Dual-write to user_data_v2 (new schema — all types: channels, movies, series)
     const stream = sqlite.prepare(
       `SELECT canonical_id FROM streams WHERE id = ?`
     ).get(contentId) as any
@@ -883,7 +896,19 @@ export function registerHandlers() {
       ON CONFLICT(content_id) DO UPDATE SET watchlist = NOT watchlist
     `).run(contentId)
     const row = sqlite.prepare('SELECT watchlist FROM user_data WHERE content_id = ?').get(contentId) as any
-    return { watchlist: !!row?.watchlist }
+    const isWatchlisted = !!row?.watchlist
+
+    // Dual-write to user_data_v2 (new schema)
+    const stream = sqlite.prepare(`SELECT canonical_id FROM streams WHERE id = ?`).get(contentId) as any
+    if (stream?.canonical_id) {
+      sqlite.prepare(`
+        INSERT INTO user_data_v2 (canonical_id, is_watchlisted)
+        VALUES (?, ?)
+        ON CONFLICT(canonical_id, profile_id) DO UPDATE SET is_watchlisted = excluded.is_watchlisted
+      `).run(stream.canonical_id, isWatchlisted ? 1 : 0)
+    }
+
+    return { watchlist: isWatchlisted }
   })
 
   ipcMain.handle('user:favorites', async (_event, args?: { type?: 'live' | 'movie' | 'series' }) => {
@@ -1162,6 +1187,20 @@ export function registerHandlers() {
         last_position = 0,
         last_watched_at = unixepoch()
     `).run(contentId)
+
+    // Dual-write to user_data_v2 (new schema)
+    const stream = sqlite.prepare(`SELECT canonical_id FROM streams WHERE id = ?`).get(contentId) as any
+    if (stream?.canonical_id) {
+      sqlite.prepare(`
+        INSERT INTO user_data_v2 (canonical_id, completed, watch_position, last_watched_at)
+        VALUES (?, 1, 0, unixepoch())
+        ON CONFLICT(canonical_id, profile_id) DO UPDATE SET
+          completed       = 1,
+          watch_position  = 0,
+          last_watched_at = unixepoch()
+      `).run(stream.canonical_id)
+    }
+
     return { success: true }
   })
 
@@ -1172,6 +1211,17 @@ export function registerHandlers() {
       VALUES (?, ?)
       ON CONFLICT(content_id) DO UPDATE SET rating = excluded.rating
     `).run(args.contentId, args.rating)
+
+    // Dual-write to user_data_v2 (new schema)
+    const stream = sqlite.prepare(`SELECT canonical_id FROM streams WHERE id = ?`).get(args.contentId) as any
+    if (stream?.canonical_id) {
+      sqlite.prepare(`
+        INSERT INTO user_data_v2 (canonical_id, rating)
+        VALUES (?, ?)
+        ON CONFLICT(canonical_id, profile_id) DO UPDATE SET rating = excluded.rating
+      `).run(stream.canonical_id, args.rating)
+    }
+
     return { success: true }
   })
 
@@ -1184,6 +1234,16 @@ export function registerHandlers() {
       SET last_position = 0, completed = 1
       WHERE content_id = ?
     `).run(contentId)
+
+    // Dual-write to user_data_v2 (new schema)
+    const stream = sqlite.prepare(`SELECT canonical_id FROM streams WHERE id = ?`).get(contentId) as any
+    if (stream?.canonical_id) {
+      sqlite.prepare(`
+        UPDATE user_data_v2 SET watch_position = 0, completed = 1
+        WHERE canonical_id = ? AND profile_id = 'default'
+      `).run(stream.canonical_id)
+    }
+
     return { success: true }
   })
 
@@ -1194,6 +1254,16 @@ export function registerHandlers() {
       SET last_position = 0, last_watched_at = NULL, completed = 0
       WHERE content_id = ?
     `).run(contentId)
+
+    // Dual-write to user_data_v2 (new schema)
+    const stream = sqlite.prepare(`SELECT canonical_id FROM streams WHERE id = ?`).get(contentId) as any
+    if (stream?.canonical_id) {
+      sqlite.prepare(`
+        UPDATE user_data_v2 SET watch_position = 0, last_watched_at = NULL, completed = 0
+        WHERE canonical_id = ? AND profile_id = 'default'
+      `).run(stream.canonical_id)
+    }
+
     return { success: true }
   })
 
@@ -1202,6 +1272,9 @@ export function registerHandlers() {
     sqlite.prepare(`
       UPDATE user_data
       SET last_position = 0, last_watched_at = NULL, completed = 0
+    `).run()
+    sqlite.prepare(`
+      UPDATE user_data_v2 SET watch_position = 0, last_watched_at = NULL, completed = 0
     `).run()
     return { success: true }
   })

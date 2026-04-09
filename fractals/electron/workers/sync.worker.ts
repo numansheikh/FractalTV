@@ -140,6 +140,46 @@ async function run() {
       INSERT OR REPLACE INTO canonical_fts (canonical_id, title) VALUES (?, ?)
     `)
 
+    // New schema double-write — movies
+    const insertCanonicalMovie = db.prepare(`
+      INSERT INTO canonical (id, type, title, year, poster_path)
+      VALUES (?, 'movie', ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        title       = excluded.title,
+        year        = COALESCE(excluded.year, canonical.year),
+        poster_path = COALESCE(excluded.poster_path, canonical.poster_path)
+    `)
+    const insertStreamMovie = db.prepare(`
+      INSERT INTO streams (id, canonical_id, source_id, type, stream_id, title, category_id, thumbnail_url, container_extension)
+      VALUES (?, ?, ?, 'movie', ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        canonical_id        = excluded.canonical_id,
+        title               = excluded.title,
+        category_id         = excluded.category_id,
+        thumbnail_url       = excluded.thumbnail_url,
+        container_extension = excluded.container_extension
+    `)
+
+    // New schema double-write — series
+    const insertCanonicalSeries = db.prepare(`
+      INSERT INTO canonical (id, type, title, year, poster_path, overview)
+      VALUES (?, 'series', ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        title       = excluded.title,
+        year        = COALESCE(excluded.year, canonical.year),
+        poster_path = COALESCE(excluded.poster_path, canonical.poster_path),
+        overview    = COALESCE(excluded.overview, canonical.overview)
+    `)
+    const insertStreamSeries = db.prepare(`
+      INSERT INTO streams (id, canonical_id, source_id, type, stream_id, title, category_id, thumbnail_url)
+      VALUES (?, ?, ?, 'series', ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        canonical_id  = excluded.canonical_id,
+        title         = excluded.title,
+        category_id   = excluded.category_id,
+        thumbnail_url = excluded.thumbnail_url
+    `)
+
     const BATCH = 500
     const batchLive = db.transaction((items: any[]) => {
       for (const s of items) {
@@ -183,10 +223,20 @@ async function run() {
     const batchVod = db.transaction((items: any[]) => {
       for (const s of items) {
         const cid = `${sourceId}:movie:${s.stream_id}`
-        insertVod.run(cid, sourceId, String(s.stream_id), s.name || `Movie ${s.stream_id}`, s.category_id || null, s.stream_icon || null, s.rating_5based ? s.rating_5based * 2 : null, s.container_extension || null)
+        const title = s.name || `Movie ${s.stream_id}`
+        const year = s.year ? parseInt(s.year) : null
+
+        // Old schema (unchanged)
+        insertVod.run(cid, sourceId, String(s.stream_id), title, s.category_id || null, s.stream_icon || null, s.rating_5based ? s.rating_5based * 2 : null, s.container_extension || null)
         insertVodSource.run(cid, cid, sourceId, String(s.stream_id))
-        insertFts.run(cid, normalize(s.name))
+        insertFts.run(cid, normalize(title))
         if (s.category_id) { const catId = `${sourceId}:movie:${s.category_id}`; insertCC.run(cid, catId, catId) }
+
+        // New schema double-write
+        const canonicalId = `anon:movie:${sourceId}:${s.stream_id}`
+        insertCanonicalMovie.run(canonicalId, title, year, s.stream_icon || null)
+        insertStreamMovie.run(cid, canonicalId, sourceId, String(s.stream_id), title, s.category_id || null, s.stream_icon || null, s.container_extension || null)
+        insertCanonicalFts.run(canonicalId, normalize(title))
       }
     })
     for (let i = 0; i < (vodStreams?.length ?? 0); i += BATCH) {
@@ -211,10 +261,20 @@ async function run() {
     const batchSeries = db.transaction((items: any[]) => {
       for (const s of items) {
         const cid = `${sourceId}:series:${s.series_id}`
-        insertSeries.run(cid, sourceId, String(s.series_id), s.name || `Series ${s.series_id}`, s.category_id || null, s.cover || null, s.plot || null, s.director || null, s.cast || null, s.rating_5based ? s.rating_5based * 2 : null)
+        const title = s.name || `Series ${s.series_id}`
+        const year = s.year ? parseInt(s.year) : null
+
+        // Old schema (unchanged)
+        insertSeries.run(cid, sourceId, String(s.series_id), title, s.category_id || null, s.cover || null, s.plot || null, s.director || null, s.cast || null, s.rating_5based ? s.rating_5based * 2 : null)
         insertVodSource.run(cid, cid, sourceId, String(s.series_id))
-        insertFtsSeries.run(cid, normalize(s.name), normalize(s.plot), normalize(s.cast), normalize(s.director))
+        insertFtsSeries.run(cid, normalize(title), normalize(s.plot), normalize(s.cast), normalize(s.director))
         if (s.category_id) { const catId = `${sourceId}:series:${s.category_id}`; insertCC.run(cid, catId, catId) }
+
+        // New schema double-write
+        const canonicalId = `anon:series:${sourceId}:${s.series_id}`
+        insertCanonicalSeries.run(canonicalId, title, year, s.cover || null, s.plot || null)
+        insertStreamSeries.run(cid, canonicalId, sourceId, String(s.series_id), title, s.category_id || null, s.cover || null)
+        insertCanonicalFts.run(canonicalId, normalize(title))
       }
     })
     for (let i = 0; i < (seriesList?.length ?? 0); i += BATCH) {
