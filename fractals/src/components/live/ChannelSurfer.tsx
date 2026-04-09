@@ -18,8 +18,11 @@ export function ChannelSurfer({ channels, activeId, onSwitch, onClose }: Props) 
 
   // Scroll active channel into view — instant on mount, smooth on surf
   useEffect(() => {
-    activeRef.current?.scrollIntoView({ block: 'center', behavior: isFirstMount.current ? 'instant' : 'smooth' })
+    const behavior = isFirstMount.current ? 'instant' : 'smooth'
     isFirstMount.current = false
+    requestAnimationFrame(() => {
+      activeRef.current?.scrollIntoView({ block: 'center', behavior })
+    })
   }, [activeId])
 
   return (

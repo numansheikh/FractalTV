@@ -67,7 +67,7 @@ export function HomeView({ onSelectContent }: Props) {
   const handleSelectContent = useCallback((item: ContentItem) => {
     if (item.type === 'live') {
       const idx = favChannels.findIndex((c) => c.id === item.id)
-      setChannelSurfContext(favChannels, idx >= 0 ? idx : 0)
+      setChannelSurfContext(favChannels, idx >= 0 ? idx : 0, 'home-discover')
     }
     onSelectContent(item)
   }, [favChannels, onSelectContent, setChannelSurfContext])
@@ -739,7 +739,7 @@ function HomeSearchResults({ query, onSelectContent }: { query: string; onSelect
         0, liveLimit > SEARCH_INIT ? liveResults.length : SEARCH_INITIAL_CAP
       )
       const idx = liveForSurf.findIndex((i) => i.id === item.id)
-      setChannelSurfContext(liveForSurf, idx >= 0 ? idx : 0)
+      setChannelSurfContext(liveForSurf, idx >= 0 ? idx : 0, 'home-channels')
     }
     onSelectContent(item)
   }, [liveResults, liveLimit, onSelectContent, setChannelSurfContext])

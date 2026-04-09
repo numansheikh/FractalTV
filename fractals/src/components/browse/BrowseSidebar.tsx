@@ -56,7 +56,9 @@ export function BrowseSidebar() {
   const activeItemRef = useRef<HTMLButtonElement>(null)
   useEffect(() => {
     if (categoryFilter && categoryFilter !== '__favorites__') {
-      activeItemRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        activeItemRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      }))
     }
   }, [categoryFilter])
 

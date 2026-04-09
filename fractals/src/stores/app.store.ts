@@ -54,7 +54,8 @@ interface AppState {
   setPlayingContent: (item: ContentItem | null) => void
   setShowSettings: (v: boolean) => void
   setSplitViewChannel: (item: ContentItem | null) => void
-  setChannelSurfContext: (list: ContentItem[], index: number) => void
+  surfContextAction: 'home-discover' | 'home-channels' | 'browse-favorites' | null
+  setChannelSurfContext: (list: ContentItem[], index: number, action?: 'home-discover' | 'home-channels' | 'browse-favorites' | null) => void
   surfChannel: (dir: 1 | -1) => ContentItem | null
   setShowSources: (v: boolean) => void
   setTypeFilter: (type: ContentType) => void
@@ -82,6 +83,7 @@ export const useAppStore = create<AppState>()(
       splitViewChannel: null,
       channelSurfList: [],
       channelSurfIndex: -1,
+      surfContextAction: null,
       typeFilter: 'all',
       categoryFilter: null,
       selectedSourceIds: [],
@@ -104,7 +106,7 @@ export const useAppStore = create<AppState>()(
       setPlayingContent: (playingContent) => set({ playingContent }),
       setShowSettings: (showSettings) => set({ showSettings }),
       setSplitViewChannel: (splitViewChannel) => set({ splitViewChannel }),
-      setChannelSurfContext: (channelSurfList, channelSurfIndex) => set({ channelSurfList, channelSurfIndex }),
+      setChannelSurfContext: (channelSurfList, channelSurfIndex, action) => set({ channelSurfList, channelSurfIndex, surfContextAction: action ?? null }),
       surfChannel: (dir) => {
         const { channelSurfList, channelSurfIndex, splitViewChannel, playingContent } = useAppStore.getState()
         if (channelSurfList.length === 0) return null

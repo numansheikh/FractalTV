@@ -174,6 +174,20 @@ function AppShell() {
     setPlayerMode('hidden')
   }
 
+  const handlePlayerChipClick = (item: ContentItem) => {
+    setPlayerMode('mini')
+    const parent = (item as any)._parent
+    if (parent) {
+      // Episode — open series detail panel
+      setSelectedContent({ ...item, id: parent.id, title: parent.title, type: 'series' } as ContentItem)
+    } else {
+      // Film — navigate to category
+      const cat = (item as any).category_name
+      setView('films')
+      if (cat) setCategoryFilter(cat.split(',')[0])
+    }
+  }
+
   const handleBreadcrumbNav = (nav: { type?: 'live' | 'movie' | 'series'; sourceId?: string; category?: string }) => {
     setSelectedContent(null)
     useSearchStore.getState().setQuery('')  // clear search so browse view shows, not search results
@@ -223,6 +237,7 @@ function AppShell() {
         onMinimize={() => setPlayerMode('mini')}
         onExpand={() => setPlayerMode('fullscreen')}
         onSurfChannel={surfChannel}
+        onChipClick={handlePlayerChipClick}
       />
 
       {/* Overlay panels — rendered via Suspense/lazy */}

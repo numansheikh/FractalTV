@@ -192,7 +192,7 @@ export function ContentArea({ sort, onSelectContent, onAddSource }: Props) {
           0, liveSearchLimit > SEARCH_INIT ? liveSearchResults.length : SEARCH_INITIAL_CAP
         )
         const idx = liveForSurf.findIndex((i: ContentItem) => i.id === item.id)
-        setChannelSurfContext(liveForSurf, idx)
+        setChannelSurfContext(liveForSurf, idx, null)
       } else {
         // Browse/favorites mode: use current displayed items as surf list
         const currentItems = isFavoritesFilter
@@ -200,7 +200,7 @@ export function ContentArea({ sort, onSelectContent, onAddSource }: Props) {
           : ((browseData?.items ?? []) as ContentItem[])
         const liveItems = currentItems.filter((i) => i.type === 'live')
         const idx = liveItems.findIndex((i: ContentItem) => i.id === item.id)
-        setChannelSurfContext(liveItems, idx >= 0 ? idx : 0)
+        setChannelSurfContext(liveItems, idx >= 0 ? idx : 0, isFavoritesFilter ? 'browse-favorites' : null)
       }
     }
     onSelectContent(item)

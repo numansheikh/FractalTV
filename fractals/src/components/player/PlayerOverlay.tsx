@@ -18,6 +18,7 @@ interface Props {
   onMinimize: () => void
   onExpand: () => void
   onSurfChannel?: (dir: 1 | -1) => ContentItem | null
+  onChipClick?: (content: ContentItem) => void
 }
 
 const FULLSCREEN_STYLE: React.CSSProperties = {
@@ -27,14 +28,14 @@ const FULLSCREEN_STYLE: React.CSSProperties = {
 
 const MINI_STYLE: React.CSSProperties = {
   position: 'fixed', bottom: 20, right: 20,
-  width: 320, height: 200,
+  width: 400, height: 225,
   zIndex: 200, borderRadius: 12, overflow: 'hidden',
   boxShadow: '0 8px 40px rgba(0,0,0,0.7)',
   border: '1px solid rgba(255,255,255,0.12)',
   background: '#000',
 }
 
-export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, onSurfChannel }: Props) {
+export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, onSurfChannel, onChipClick }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const artRef = useRef<Artplayer | null>(null)
   const qc = useQueryClient()
@@ -61,6 +62,31 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
   const srcColor = localContent
     ? colorMap[localContent.primarySourceId ?? localContent.primary_source_id ?? (localContent as any).source_ids ?? localContent.id?.split(':')[0] ?? '']
     : null
+
+  // Controls visibility — mirrors ArtPlayer autoHide so chip fades with the bar
+  const [showControls, setShowControls] = useState(false)
+  const controlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const handlePlayerMouseMove = useCallback(() => {
+    setShowControls(true)
+    if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current)
+    if (controlsMode === 'always') return
+    const ms = controlsMode === 'never' ? 1500
+      : controlsMode === 'auto-2' ? 2000
+      : controlsMode === 'auto-3' ? 3000
+      : 5000
+    controlsTimerRef.current = setTimeout(() => setShowControls(false), ms)
+  }, [controlsMode])
+
+  // Category name — fetched for VOD on content change
+  const [categoryName, setCategoryName] = useState<string | null>(null)
+  useEffect(() => {
+    setCategoryName(null)
+    if (!content || content.type === 'live') return
+    if (content.category_name) { setCategoryName(content.category_name.split(',')[0]); return }
+    api.content.get(content.id).then((item: any) => {
+      if (item?.category_name) setCategoryName(item.category_name.split(',')[0])
+    })
+  }, [content?.id, content?.type])
 
   // Player state
   const [playerState, setPlayerState] = useState<'idle' | 'loading' | 'playing' | 'error'>('idle')
@@ -634,7 +660,7 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
   const isError = playerState === 'error'
 
   return (
-    <div style={containerStyle}>
+    <div style={containerStyle} onMouseMove={mode === 'fullscreen' ? handlePlayerMouseMove : undefined}>
 
       {/* ── Mini-player top bar ── */}
       {mode === 'mini' && localContent && (
@@ -812,6 +838,40 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
           currentProg={timeshiftProg}
         />
       )}
+
+      {/* ── VOD category / series chip (fullscreen only) ── */}
+      {mode === 'fullscreen' && localContent && localContent.type !== 'live' && onChipClick && (() => {
+        const isEpisode = !!(localContent as any)._parent
+        const seInfo = isEpisode ? localContent.title.split(' · ')[0] : null
+        const label = isEpisode ? `${(localContent as any)._parent.title} · ${seInfo}` : categoryName
+        if (!label) return null
+        return (
+          <button
+            onClick={() => onChipClick({ ...localContent, category_name: categoryName ?? undefined })}
+            style={{
+              position: 'absolute', bottom: 15, right: 15, zIndex: 100,
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '4px 10px', borderRadius: 12,
+              background: 'rgba(255,255,255,0.12)',
+              border: '1px solid rgba(255,255,255,0.18)',
+              color: 'rgba(255,255,255,0.8)', fontSize: 11, fontWeight: 500,
+              cursor: 'pointer', fontFamily: 'var(--font-ui)',
+              transition: 'opacity 0.2s, background 0.15s',
+              opacity: showControls ? 1 : 0,
+              pointerEvents: showControls ? 'all' : 'none',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.22)' }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.12)' }}
+          >
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              {isEpisode
+                ? <><rect x="2" y="7" width="20" height="15" rx="2"/><path d="M16 3H8l-2 4h12l-2-4z"/></>
+                : <><path d="M4 6h16M4 12h16M4 18h10"/></>}
+            </svg>
+            {label}
+          </button>
+        )
+      })()}
 
       {/* ── Channel surfer overlay ── */}
       {localContent?.type === 'live' && showSurfer && mode === 'fullscreen' && (
