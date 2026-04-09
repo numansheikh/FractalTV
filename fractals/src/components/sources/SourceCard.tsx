@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState } from 'react'
 import { Source, SyncProgress, useSourcesStore } from '@/stores/sources.store'
 import { useAppStore } from '@/stores/app.store'
 import { getSourceColor, PALETTE_HEX, PALETTE_SIZE } from '@/lib/sourceColors'
@@ -53,11 +53,8 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
   const autoIndex = sources.findIndex(s => s.id === source.id)
   const color = getSourceColor(source.colorIndex ?? autoIndex)
 
-  const [menuOpen, setMenuOpen] = useState(false)
   const [editMode, setEditMode] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
-  const menuRef = useRef<HTMLDivElement>(null)
-
   // Edit form state
   const isM3u = source.type === 'm3u'
   const [editForm, setEditForm] = useState({
@@ -69,18 +66,31 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
   })
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null)
 
-  // Close menu on outside click
-  useEffect(() => {
-    if (!menuOpen) return
-    const handler = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(false)
+  const handleTest = async () => {
+    setTesting(true)
+    setTestResult(null)
+    try {
+      if (isM3u) {
+        const r = await api.sources.testM3u({ m3uUrl: editForm.m3uUrl })
+        setTestResult(r.error
+          ? { success: false, message: r.error }
+          : { success: true, message: `${(r.count ?? 0).toLocaleString()} items` })
+      } else {
+        const r = await api.sources.testXtream({ serverUrl: editForm.serverUrl, username: editForm.username, password: editForm.password || source.password || '' })
+        setTestResult(r.success
+          ? { success: true, message: `${((r as any).itemCount ?? 0).toLocaleString()} items` }
+          : { success: false, message: (r as any).error ?? 'Connection failed' })
       }
+    } catch (e) {
+      setTestResult({ success: false, message: String(e) })
+    } finally {
+      setTesting(false)
     }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [menuOpen])
+  }
+
 
   const isSyncing = progress !== null && progress.phase !== 'done' && progress.phase !== 'error'
   const syncPct = progress && progress.total > 0
@@ -123,7 +133,7 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
   }
 
   const handleToggleDisable = async () => {
-    setMenuOpen(false)
+
     const result = await api.sources.toggleDisabled(source.id)
     const nowDisabled = result?.disabled ?? !source.disabled
     useSourcesStore.getState().updateSource(source.id, { disabled: nowDisabled })
@@ -139,7 +149,7 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
       setConfirmDelete(true)
       return
     }
-    setMenuOpen(false)
+
     setConfirmDelete(false)
     onRemove(source.id)
   }
@@ -152,8 +162,9 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
 
   return (
     <div style={{
-      background: 'var(--bg-2)',
+      background: `color-mix(in srgb, ${color.accent} 5%, var(--bg-3))`,
       border: '1px solid var(--border-subtle)',
+      borderLeft: `3px solid ${dotColor}`,
       borderRadius: 8,
       padding: 16,
       display: 'flex',
@@ -162,19 +173,13 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
       opacity: source.disabled ? 0.6 : 1,
       transition: 'opacity 0.15s',
     }}>
-      {/* Top row: dot + name + menu */}
+      {/* Top row: dot + name + actions */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        {/* Colored dot */}
         <div style={{
           width: 8, height: 8, borderRadius: '50%',
-          background: dotColor,
-          flexShrink: 0,
-          boxShadow: source.status !== 'error' && !source.disabled
-            ? `0 0 0 2px ${color.glow}`
-            : 'none',
+          background: dotColor, flexShrink: 0,
+          boxShadow: source.status !== 'error' && !source.disabled ? `0 0 0 2px ${color.glow}` : 'none',
         }} />
-
-        {/* Source name */}
         <span style={{
           flex: 1, fontSize: 13, fontWeight: 600, color: 'var(--text-0)',
           fontFamily: 'var(--font-ui)',
@@ -182,52 +187,39 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
         }}>
           {source.name}
         </span>
-
-        {/* ··· menu button */}
-        <div style={{ position: 'relative' }} ref={menuRef}>
-          <button
-            onClick={() => { setMenuOpen(v => !v); setConfirmDelete(false) }}
-            style={{
-              width: 24, height: 24, borderRadius: 5, border: 'none',
-              background: menuOpen ? 'var(--bg-3)' : 'transparent',
-              color: 'var(--text-2)', cursor: 'pointer',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 14, letterSpacing: 1, transition: 'background 0.1s, color 0.1s',
-              fontFamily: 'var(--font-ui)',
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-3)'; e.currentTarget.style.color = 'var(--text-0)' }}
-            onMouseLeave={(e) => { if (!menuOpen) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-2)' } }}
-          >
-            ···
-          </button>
-
-          {menuOpen && (
-            <div style={{
-              position: 'absolute', top: '100%', right: 0, marginTop: 4,
-              background: 'var(--bg-1)', border: '1px solid var(--border-default)',
-              borderRadius: 8, padding: '4px 0',
-              minWidth: 160, zIndex: 100,
-              boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
-            }}>
-              <MenuButton onClick={() => { setMenuOpen(false); onSync(source.id) }} disabled={isSyncing}>
-                Sync now
-              </MenuButton>
-              <MenuButton onClick={() => { setMenuOpen(false); setEditMode(v => !v) }}>
-                Edit credentials
-              </MenuButton>
-              <MenuButton onClick={handleToggleDisable}>
-                {source.disabled ? 'Enable' : 'Disable'}
-              </MenuButton>
-              <div style={{ height: 1, background: 'var(--border-subtle)', margin: '4px 0' }} />
-              <MenuButton
-                onClick={handleDelete}
-                color={confirmDelete ? 'var(--accent-danger)' : undefined}
-              >
-                {confirmDelete ? 'Click again to confirm' : 'Delete'}
-              </MenuButton>
-            </div>
-          )}
-        </div>
+        {!editMode && (
+          <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+            <ActionButton
+              icon={isSyncing
+                ? <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ animation: 'spin 1s linear infinite' }}><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
+                : <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" /><path d="M8 16H3v5" /></svg>
+              }
+              onClick={() => onSync(source.id)} disabled={isSyncing}>
+              {isSyncing ? 'Syncing…' : 'Sync'}
+            </ActionButton>
+            <ActionButton
+              icon={<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>}
+              onClick={handleTest} disabled={testing}>
+              {testing ? 'Testing…' : 'Test'}
+            </ActionButton>
+            <ActionButton
+              icon={source.disabled
+                ? <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0" /><line x1="12" y1="2" x2="12" y2="12" /></svg>
+                : <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="4.93" y1="4.93" x2="19.07" y2="19.07" /></svg>
+              }
+              onClick={handleToggleDisable}>
+              {source.disabled ? 'Enable' : 'Disable'}
+            </ActionButton>
+            <ActionButton
+              icon={<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>}
+              onClick={() => setEditMode(true)}>Edit</ActionButton>
+            <ActionButton
+              icon={<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6" /><path d="M14 11v6" /><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /></svg>}
+              onClick={handleDelete}>
+              {confirmDelete ? 'Confirm?' : 'Delete'}
+            </ActionButton>
+          </div>
+        )}
       </div>
 
       {/* URL row */}
@@ -246,9 +238,7 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
       {/* Account / expiry row */}
       {expInfo && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 11, color: expInfo.color }}>
-            {expInfo.label}
-          </span>
+          <span style={{ fontSize: 11, color: expInfo.color }}>{expInfo.label}</span>
           {source.maxConnections != null && (
             <span style={{
               fontSize: 10, fontWeight: 600, padding: '1px 6px',
@@ -342,6 +332,21 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
             <ColorPicker selected={source.colorIndex ?? autoIndex} onPick={handleColorPick} />
           </div>
 
+          {/* Test result */}
+          {testResult && (
+            <div style={{
+              padding: '6px 8px', borderRadius: 5, fontSize: 10,
+              background: testResult.success
+                ? 'color-mix(in srgb, var(--accent-success) 10%, transparent)'
+                : 'color-mix(in srgb, var(--accent-danger) 10%, transparent)',
+              border: `1px solid color-mix(in srgb, ${testResult.success ? 'var(--accent-success)' : 'var(--accent-danger)'} 25%, transparent)`,
+              color: testResult.success ? 'var(--accent-success)' : 'var(--accent-danger)',
+              display: 'flex', alignItems: 'center', gap: 5,
+            }}>
+              {testResult.success ? '✓ Connected' : '✗ Failed'} — {testResult.message}
+            </div>
+          )}
+
           {saveError && (
             <p style={{ fontSize: 10, color: 'var(--accent-danger)', margin: 0 }}>{saveError}</p>
           )}
@@ -356,6 +361,18 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
               }}
             >
               Cancel
+            </button>
+            <button
+              onClick={handleTest}
+              disabled={testing || saving}
+              style={{
+                flex: 1, padding: '6px 0', borderRadius: 6, fontSize: 11,
+                background: 'transparent', border: '1px solid var(--border-default)',
+                color: 'var(--text-1)', cursor: testing ? 'default' : 'pointer',
+                opacity: (testing || saving) ? 0.5 : 1, fontFamily: 'var(--font-ui)',
+              }}
+            >
+              {testing ? 'Testing…' : 'Test'}
             </button>
             <button
               onClick={handleSave}
@@ -374,20 +391,21 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
         </div>
       )}
 
-      {/* Bottom action buttons */}
-      {!editMode && (
-        <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
-          <ActionButton
-            onClick={() => onSync(source.id)}
-            disabled={isSyncing}
-          >
-            {isSyncing ? 'Syncing…' : 'Sync'}
-          </ActionButton>
-          <ActionButton onClick={handleToggleDisable}>
-            {source.disabled ? 'Enable' : 'Disable'}
-          </ActionButton>
+      {/* Test result (shown outside edit mode) */}
+      {!editMode && testResult && (
+        <div style={{
+          padding: '5px 8px', borderRadius: 5, fontSize: 10,
+          background: testResult.success
+            ? 'color-mix(in srgb, var(--accent-success) 10%, transparent)'
+            : 'color-mix(in srgb, var(--accent-danger) 10%, transparent)',
+          border: `1px solid color-mix(in srgb, ${testResult.success ? 'var(--accent-success)' : 'var(--accent-danger)'} 25%, transparent)`,
+          color: testResult.success ? 'var(--accent-success)' : 'var(--accent-danger)',
+        }}>
+          {testResult.success ? '✓ Connected' : '✗ Failed'} — {testResult.message}
         </div>
       )}
+
+
     </div>
   )
 }
@@ -421,24 +439,27 @@ function MenuButton({
 }
 
 function ActionButton({
-  children, onClick, disabled,
+  children, icon, onClick, disabled,
 }: {
-  children: React.ReactNode; onClick: () => void; disabled?: boolean
+  children: React.ReactNode; icon?: React.ReactNode; onClick: () => void; disabled?: boolean
 }) {
   return (
     <button
       onClick={onClick}
       disabled={disabled}
+      title={typeof children === 'string' ? children : undefined}
       style={{
-        padding: '5px 12px', borderRadius: 6, fontSize: 11, fontWeight: 500,
+        padding: '4px 8px', borderRadius: 6, fontSize: 10, fontWeight: 500,
         background: 'var(--bg-3)', border: '1px solid var(--border-subtle)',
         color: 'var(--text-1)', cursor: disabled ? 'default' : 'pointer',
-        opacity: disabled ? 0.5 : 1, fontFamily: 'var(--font-ui)',
+        opacity: disabled ? 0.45 : 1, fontFamily: 'var(--font-ui)',
+        display: 'flex', alignItems: 'center', gap: 4,
         transition: 'background 0.1s, color 0.1s, opacity 0.1s',
       }}
       onMouseEnter={(e) => { if (!disabled) { e.currentTarget.style.background = 'var(--bg-4)'; e.currentTarget.style.color = 'var(--text-0)' } }}
       onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--bg-3)'; e.currentTarget.style.color = 'var(--text-1)' }}
     >
+      {icon && <span style={{ display: 'flex', alignItems: 'center' }}>{icon}</span>}
       {children}
     </button>
   )

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import Hls from 'hls.js'
 import Artplayer from 'artplayer'
 import { ContentItem } from '@/lib/types'
@@ -20,6 +21,7 @@ export function LiveSplitView({ channel, onFullscreen, onSwitchChannel, onClose 
   const { channelSurfList, selectedSourceIds, toggleSourceFilter, setView, setCategoryFilter } = useAppStore()
   const { sources } = useSourcesStore()
   const colorMap = buildColorMapFromSources(sources)
+  const qc = useQueryClient()
 
   const [search, setSearch] = useState('')
   const [epgExpanded, setEpgExpanded] = useState(false)
@@ -99,6 +101,7 @@ export function LiveSplitView({ channel, onFullscreen, onSwitchChannel, onClose 
     // Refetch to sync with DB (loadBulk skips cached IDs, force by direct bulkGetData)
     const result = await api.user.bulkGetData([ch.id])
     useUserStore.setState((state) => ({ data: { ...state.data, ...result } }))
+    qc.invalidateQueries({ queryKey: ['channels', 'favorites'] })
   }, [setFavorite])
 
   const srcColor = colorMap[channel.primarySourceId ?? channel.primary_source_id ?? (channel as any).source_ids ?? '']

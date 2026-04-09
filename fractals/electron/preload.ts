@@ -24,6 +24,9 @@ export const api = {
     accountInfo: (sourceId: string) => ipcRenderer.invoke('sources:account-info', sourceId),
     startupCheck: () => ipcRenderer.invoke('sources:startup-check'),
     totalCount: () => ipcRenderer.invoke('sources:total-count'),
+    exportBackup: (opts?: { includeUserData?: boolean }) => ipcRenderer.invoke('sources:export', opts),
+    import: (filePath: string) => ipcRenderer.invoke('sources:import', filePath),
+    factoryReset: () => ipcRenderer.invoke('sources:factory-reset'),
   },
 
   // Categories
@@ -80,6 +83,18 @@ export const api = {
       ipcRenderer.invoke('user:reorder-favorites', order),
   },
 
+  // Channels (new schema — Phase A)
+  channels: {
+    favorites: (args?: { profileId?: string }) =>
+      ipcRenderer.invoke('channels:favorites', args),
+    toggleFavorite: (canonicalId: string) =>
+      ipcRenderer.invoke('channels:toggle-favorite', canonicalId),
+    reorderFavorites: (order: { canonicalId: string; sortOrder: number }[]) =>
+      ipcRenderer.invoke('channels:reorder-favorites', order),
+    getData: (canonicalId: string) =>
+      ipcRenderer.invoke('channels:get-data', canonicalId),
+  },
+
   // External player
   player: {
     openExternal: (args: { player: 'mpv' | 'vlc'; url: string; title: string; customPath?: string }) =>
@@ -114,6 +129,8 @@ export const api = {
   dialog: {
     openFile: (args?: { filters?: { name: string; extensions: string[] }[] }) =>
       ipcRenderer.invoke('dialog:open-file', args),
+    saveFile: (args?: { defaultPath?: string; filters?: { name: string; extensions: string[] }[] }) =>
+      ipcRenderer.invoke('dialog:save-file', args),
   },
 
   // Window

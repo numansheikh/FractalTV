@@ -79,8 +79,11 @@ export function ActionButtons({ item, onPlay, episodeToPlay, overridePlayLabel }
     userStore.setWatchlist(item.id, !isWatchlist)
     try {
       await api.user.toggleWatchlist(item.id)
+      qc.invalidateQueries({ queryKey: ['home-watchlist'] })
+      qc.invalidateQueries({ queryKey: ['library', 'watchlist'] })
     } catch {
       userStore.setWatchlist(item.id, isWatchlist)
+      qc.invalidateQueries({ queryKey: ['home-watchlist'] })
     }
   }
 

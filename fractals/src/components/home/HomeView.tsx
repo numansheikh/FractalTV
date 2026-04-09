@@ -19,6 +19,16 @@ import { useSourcesStore } from '@/stores/sources.store'
 import { buildColorMapFromSources } from '@/lib/sourceColors'
 import { api } from '@/lib/api'
 import { ContentItem } from '@/lib/types'
+import { PosterCard as RichPosterCard } from '@/components/cards/PosterCard'
+import { ChannelCard as RichChannelCard } from '@/components/cards/ChannelCard'
+import { useTheme } from '@/hooks/useTheme'
+
+function getGreeting() {
+  const h = new Date().getHours()
+  if (h < 12) return 'Good morning'
+  if (h < 17) return 'Good afternoon'
+  return 'Good evening'
+}
 
 interface Props {
   onSelectContent: (item: ContentItem) => void
@@ -28,31 +38,32 @@ export function HomeView({ onSelectContent }: Props) {
   const {
     setView, selectedSourceIds,
     homeMode, setHomeMode,
-    hasSeenChannelsModePrompt, setHasSeenChannelsModePrompt,
+    homeStripSize,
     setShowSources, setChannelSurfContext,
   } = useAppStore()
   const { query, setQuery } = useSearchStore()
   const { sources } = useSourcesStore()
+  const { theme } = useTheme()
   const inputRef = useRef<HTMLInputElement>(null)
 
-  // Favorite channels — drives both the prompt and Mode B content
-  // selectedSourceIds applied client-side (favorites query doesn't support source filter yet)
-  const { data: allFavChannels = [] } = useQuery<ContentItem[]>({
-    queryKey: ['library', 'favorites', 'live'],
-    queryFn: () => api.user.favorites({ type: 'live' }),
+  // Favorite channels (old schema) — drives Discover mode prompt + Discover row
+  // Favorite channels (new schema) — single source of truth for both modes
+  const { data: channelsFavData = [], isSuccess: channelsFavLoaded } = useQuery<ContentItem[]>({
+    queryKey: ['channels', 'favorites'],
+    queryFn: () => api.channels.favorites(),
     staleTime: 30_000,
   })
+  // Filter new-schema favorites by selected source (same logic as old)
   const favChannels = selectedSourceIds.length > 0
-    ? allFavChannels.filter((c) => {
+    ? channelsFavData.filter((c) => {
         const srcId = c.primarySourceId ?? c.primary_source_id ?? (c as any).source_ids ?? c.id?.split(':')[0]
         return srcId ? selectedSourceIds.includes(srcId) : true
       })
-    : allFavChannels
+    : channelsFavData
 
-  const hasFavChannels = favChannels.length > 0
   const effectiveMode = homeMode
 
-  // Capture surf context for live channels launched from home
+  // Capture surf context — use filtered list so surfing stays within active source filter
   const handleSelectContent = useCallback((item: ContentItem) => {
     if (item.type === 'live') {
       const idx = favChannels.findIndex((c) => c.id === item.id)
@@ -61,30 +72,7 @@ export function HomeView({ onSelectContent }: Props) {
     onSelectContent(item)
   }, [favChannels, onSelectContent, setChannelSurfContext])
 
-  // Show the "switch to channels mode" prompt once, on mount, when conditions are met
-  const [showPrompt, setShowPrompt] = useState(false)
-  const promptTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  useEffect(() => {
-    if (allFavChannels.length > 0 && !hasSeenChannelsModePrompt && homeMode === 'discover') {
-      setShowPrompt(true)
-      promptTimerRef.current = setTimeout(() => {
-        setShowPrompt(false)
-        setHasSeenChannelsModePrompt(true)
-      }, 10_000)
-    }
-    return () => {
-      if (promptTimerRef.current) clearTimeout(promptTimerRef.current)
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  const dismissPrompt = (switchMode: boolean) => {
-    if (promptTimerRef.current) clearTimeout(promptTimerRef.current)
-    setShowPrompt(false)
-    setHasSeenChannelsModePrompt(true)
-    if (switchMode) setHomeMode('channels')
-  }
+  // No auto-fallback — let My Channels show an empty state instead
 
   // Focus search on /
   useEffect(() => {
@@ -137,11 +125,33 @@ export function HomeView({ onSelectContent }: Props) {
 
       {/* Hero area — search + mode toggle */}
       <div style={{
-        padding: '10px 24px',
-        borderBottom: '1px solid var(--border-subtle)',
-        display: 'flex', alignItems: 'center', gap: 10,
+        padding: '12px 24px 16px',
+        borderBottom: '1px solid var(--border-default)',
+        background: `radial-gradient(ellipse 80% 250% at 50% 100%, color-mix(in srgb, var(--accent-interactive) ${theme === 'dark' ? '25%' : '6%'}, transparent), transparent), var(--bg-1)`,
+        display: 'flex', flexDirection: 'column', gap: 10,
         flexShrink: 0,
       }}>
+        {/* Stats line */}
+        {!query && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 11, color: 'var(--text-2)', fontFamily: 'var(--font-ui)' }}>
+              {getGreeting()}
+            </span>
+            {sources.length > 0 && (
+              <>
+                <span style={{ color: 'var(--border-default)', fontSize: 10 }}>·</span>
+                <span style={{ fontSize: 11, color: 'var(--text-2)', fontFamily: 'var(--font-ui)' }}>
+                  {sources.reduce((sum, s) => sum + (s.itemCount ?? 0), 0).toLocaleString()} titles
+                </span>
+                <span style={{ color: 'var(--border-default)', fontSize: 10 }}>·</span>
+                <span style={{ fontSize: 11, color: 'var(--text-2)', fontFamily: 'var(--font-ui)' }}>
+                  {sources.length} {sources.length === 1 ? 'source' : 'sources'}
+                </span>
+              </>
+            )}
+          </div>
+        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         {/* Search input */}
         <div style={{ flex: 1, position: 'relative' }}>
           <svg
@@ -178,29 +188,32 @@ export function HomeView({ onSelectContent }: Props) {
 
         {/* Mode toggle */}
         {!query && (
-          <div style={{
-            display: 'flex', background: 'var(--bg-3)',
-            borderRadius: 7, padding: 2, gap: 1, flexShrink: 0,
-          }}>
-            {(['discover', 'channels'] as const).map((m) => (
-              <button
-                key={m}
-                onClick={() => setHomeMode(m)}
-                style={{
-                  fontSize: 11, padding: '4px 10px', borderRadius: 5,
-                  border: 'none', cursor: 'pointer',
-                  fontFamily: 'var(--font-ui)', fontWeight: 500,
-                  background: homeMode === m ? 'var(--bg-1)' : 'transparent',
-                  color: homeMode === m ? 'var(--text-0)' : 'var(--text-2)',
-                  boxShadow: homeMode === m ? '0 1px 3px rgba(0,0,0,0.4)' : 'none',
-                  transition: 'background 0.1s, color 0.1s',
-                }}
-              >
-                {m === 'discover' ? 'Discover' : 'My Channels'}
-              </button>
-            ))}
+          <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+            {(['discover', 'channels'] as const).map((m) => {
+              const active = homeMode === m
+              const label = m === 'discover' ? 'Discover' : 'TV'
+              const color = m === 'discover' ? 'var(--accent-interactive)' : 'var(--accent-live)'
+              return (
+                <button
+                  key={m}
+                  onClick={() => setHomeMode(m)}
+                  style={{
+                    width: 80, padding: '6px 0', borderRadius: 7,
+                    fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                    fontFamily: 'var(--font-ui)', letterSpacing: '0.01em',
+                    border: `1px solid ${active ? color : 'var(--border-default)'}`,
+                    background: active ? `color-mix(in srgb, ${color} 12%, var(--bg-2))` : 'var(--bg-2)',
+                    color: active ? color : 'var(--text-2)',
+                    transition: 'all 0.12s',
+                  }}
+                >
+                  {label}
+                </button>
+              )
+            })}
           </div>
         )}
+        </div>
       </div>
 
       {/* Content area — scrollable */}
@@ -212,79 +225,213 @@ export function HomeView({ onSelectContent }: Props) {
         {query ? (
           <HomeSearchResults query={query} onSelectContent={onSelectContent} />
         ) : effectiveMode === 'channels'
-          ? hasFavChannels
-            ? <ChannelsMode items={favChannels} onSelectContent={handleSelectContent} />
-            : <EmptyChannelsMode onSwitchToDiscover={() => setHomeMode('discover')} onBrowseLive={() => setView('live')} />
-          : <DiscoverMode favChannels={favChannels} selectedSourceIds={selectedSourceIds} onSelectContent={handleSelectContent} onBrowseAll={setView} />
+          ? (channelsFavLoaded && channelsFavData.length === 0
+              ? (
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 40, color: 'var(--text-2)' }}>
+                  <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.35 }}>
+                    <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+                  </svg>
+                  <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-1)', margin: 0 }}>No favourite channels yet</p>
+                  <p style={{ fontSize: 12, color: 'var(--text-2)', margin: 0, textAlign: 'center', maxWidth: 260, lineHeight: 1.6 }}>
+                    Heart a channel from Live TV to add it here. Your list will be saved and reorderable.
+                  </p>
+                  <button
+                    onClick={() => setView('live')}
+                    style={{ marginTop: 4, padding: '7px 18px', borderRadius: 7, fontSize: 12, fontWeight: 600, background: 'var(--accent-interactive)', border: 'none', color: '#fff', cursor: 'pointer' }}
+                  >
+                    Browse Live TV
+                  </button>
+                </div>
+              )
+              : channelsFavLoaded && favChannels.length === 0
+              ? (
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 40 }}>
+                  <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-1)', margin: 0 }}>No channels from selected source</p>
+                  <p style={{ fontSize: 12, color: 'var(--text-2)', margin: 0 }}>Switch source filter to see your favourites.</p>
+                </div>
+              )
+              : <ChannelsMode items={favChannels} allItems={channelsFavData} onSelectContent={handleSelectContent} />
+            )
+          : <DiscoverMode favChannels={favChannels} selectedSourceIds={selectedSourceIds} onSelectContent={handleSelectContent} onNavigate={(t) => t === 'channels' ? setHomeMode('channels') : setView(t as any)} />
         }
 
-        {!query && showPrompt && (
-          <SwitchModePrompt
-            onSwitch={() => dismissPrompt(true)}
-            onDismiss={() => dismissPrompt(false)}
-          />
-        )}
       </div>
     </div>
   )
 }
 
-// ── Discover mode (current layout) ───────────────────────────────
+// ── Discover mode ────────────────────────────────────────────────
 
-function DiscoverMode({ favChannels, selectedSourceIds, onSelectContent, onBrowseAll }: {
+function DiscoverMode({ favChannels, selectedSourceIds, onSelectContent, onNavigate }: {
   favChannels: ContentItem[]
   selectedSourceIds: string[]
   onSelectContent: (item: ContentItem) => void
-  onBrowseAll: (view: 'live' | 'films' | 'series') => void
+  onNavigate: (target: 'channels' | 'library' | 'films' | 'series') => void
 }) {
-  const hasFavChannels = favChannels.length > 0
+  const STRIP_MAX = useAppStore((s) => s.homeStripSize)
+  const STRIP_FETCH = STRIP_MAX + 1
+
+  const filterBySrc = (items: ContentItem[]) =>
+    selectedSourceIds.length > 0
+      ? items.filter((i) => {
+          const s = i.primarySourceId ?? i.primary_source_id ?? (i as any).source_ids ?? i.id?.split(':')[0]
+          return s ? selectedSourceIds.includes(s) : true
+        })
+      : items
+
+  const { data: watchlistRaw = [], isLoading: watchlistLoading } = useQuery<ContentItem[]>({
+    queryKey: ['home-watchlist'],
+    queryFn: () => api.user.watchlist(),
+    staleTime: 30_000,
+  })
+  const { data: continueRaw = [], isLoading: continueLoading } = useQuery<ContentItem[]>({
+    queryKey: ['home-continue'],
+    queryFn: () => api.user.continueWatching(),
+    staleTime: 30_000,
+  })
+  const { data: moviesData, isLoading: moviesLoading } = useQuery({
+    queryKey: ['home-latest-movies', selectedSourceIds],
+    queryFn: () => api.content.browse({ type: 'movie', sortBy: 'updated', sortDir: 'desc', limit: STRIP_FETCH, offset: 0, sourceIds: selectedSourceIds.length > 0 ? selectedSourceIds : undefined }),
+    staleTime: 60_000,
+  })
+  const { data: seriesData, isLoading: seriesLoading } = useQuery({
+    queryKey: ['home-latest-series', selectedSourceIds],
+    queryFn: () => api.content.browse({ type: 'series', sortBy: 'updated', sortDir: 'desc', limit: STRIP_FETCH, offset: 0, sourceIds: selectedSourceIds.length > 0 ? selectedSourceIds : undefined }),
+    staleTime: 60_000,
+  })
+
+  const watchlist = filterBySrc(watchlistRaw)
+  const continueItems = filterBySrc(continueRaw)
+  const movies = (moviesData?.items ?? []) as ContentItem[]
+  const series = (seriesData?.items ?? []) as ContentItem[]
+
+  const allLoading = watchlistLoading || continueLoading || moviesLoading || seriesLoading
+  const allEmpty = !allLoading && favChannels.length === 0 && continueItems.length === 0 && watchlist.length === 0 && movies.length === 0 && series.length === 0
+
+  if (allEmpty) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: '64px 24px', textAlign: 'center' }}>
+        <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" strokeWidth="1.25" strokeLinecap="round">
+          <rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
+        </svg>
+        <div>
+          <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-1)', margin: '0 0 6px', fontFamily: 'var(--font-ui)' }}>Nothing here yet</p>
+          <p style={{ fontSize: 12, color: 'var(--text-2)', margin: 0, lineHeight: 1.5, maxWidth: 280, fontFamily: 'var(--font-ui)' }}>
+            Sync a source, browse channels, and start watching to populate your home screen.
+          </p>
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <>
-      <ContentRow
-        title={hasFavChannels ? 'Favorite Channels' : 'Channels'}
-        type="live"
-        accent="var(--accent-live)"
-        showLiveDot
-        pinnedItems={hasFavChannels ? favChannels : undefined}
-        selectedSourceIds={selectedSourceIds}
-        onSelectContent={onSelectContent}
-        onBrowseAll={() => onBrowseAll('live')}
+    <div style={{ display: 'flex', flexDirection: 'column' }}>
+      <DiscoverStrip
+        title="Favourite Channels" accent="var(--accent-live)" type="live"
+        items={favChannels} hasMore={favChannels.length > STRIP_MAX} isLoading={false}
+        onMore={() => onNavigate('channels')} onSelectContent={onSelectContent} stripMax={STRIP_MAX}
       />
-      <ContentRow
-        title="Continue Watching"
-        type="movie"
-        accent="var(--accent-film)"
-        continueWatching
-        selectedSourceIds={selectedSourceIds}
-        onSelectContent={onSelectContent}
-        onBrowseAll={() => onBrowseAll('films')}
+      <DiscoverStrip
+        title="Continue Watching" accent="var(--accent-film)" type="movie"
+        items={continueItems} hasMore={continueItems.length > STRIP_MAX} isLoading={continueLoading}
+        onMore={() => onNavigate('library')} onSelectContent={onSelectContent} stripMax={STRIP_MAX}
       />
-      <ContentRow
-        title="Continue Watching"
-        type="series"
-        accent="var(--accent-series)"
-        continueWatching
-        selectedSourceIds={selectedSourceIds}
-        onSelectContent={onSelectContent}
-        onBrowseAll={() => onBrowseAll('series')}
+      <DiscoverStrip
+        title="Watchlist" accent="var(--accent-interactive)" type="movie"
+        items={watchlist} hasMore={watchlist.length > STRIP_MAX} isLoading={watchlistLoading}
+        onMore={() => onNavigate('library')} onSelectContent={onSelectContent} stripMax={STRIP_MAX}
       />
-      <ContentRow
-        title="Watch Later"
-        type="movie"
-        accent="var(--accent-interactive)"
-        watchlist
-        selectedSourceIds={selectedSourceIds}
-        onSelectContent={onSelectContent}
-        onBrowseAll={() => onBrowseAll('films')}
+      <DiscoverStrip
+        title="Latest Movies" accent="var(--accent-film)" type="movie"
+        items={movies} hasMore={movies.length > STRIP_MAX} isLoading={moviesLoading}
+        onMore={() => onNavigate('films')} onSelectContent={onSelectContent} stripMax={STRIP_MAX}
       />
-    </>
+      <DiscoverStrip
+        title="Latest Series" accent="var(--accent-series)" type="series"
+        items={series} hasMore={series.length > STRIP_MAX} isLoading={seriesLoading}
+        onMore={() => onNavigate('series')} onSelectContent={onSelectContent} stripMax={STRIP_MAX}
+      />
+    </div>
+  )
+}
+
+function DiscoverStrip({ title, accent, type, items, hasMore, isLoading, onMore, onSelectContent, stripMax }: {
+  title: string
+  accent: string
+  type: 'live' | 'movie' | 'series'
+  items: ContentItem[]
+  hasMore: boolean
+  isLoading: boolean
+  onMore: () => void
+  onSelectContent: (item: ContentItem) => void
+  stripMax: number
+}) {
+  if (!isLoading && items.length === 0) return null
+  const visible = items.slice(0, stripMax)
+  const skeletonCount = stripMax
+
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', gap: 10,
+      padding: '20px 0',
+      borderTop: '1px solid var(--border-subtle)',
+    }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {type === 'live' && (
+            <span style={{
+              width: 7, height: 7, borderRadius: '50%', background: accent,
+              display: 'inline-block', flexShrink: 0, boxShadow: `0 0 6px ${accent}`,
+            }} />
+          )}
+          <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.09em', color: 'var(--text-0)' }}>
+            {title}
+          </span>
+          {!isLoading && (
+            <span style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--font-mono)' }}>
+              {items.length > stripMax ? `${stripMax}+` : items.length}
+            </span>
+          )}
+        </div>
+        {hasMore && (
+          <button
+            onClick={onMore}
+            style={{ background: 'none', border: 'none', fontSize: 11, color: 'var(--text-1)', cursor: 'pointer', fontFamily: 'var(--font-ui)' }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = accent }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-1)' }}
+          >
+            More →
+          </button>
+        )}
+      </div>
+
+      {/* Cards — equal-width grid */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: `repeat(${stripMax}, 1fr)`,
+        gap: 8,
+      }}>
+        {isLoading
+          ? Array.from({ length: skeletonCount }).map((_, i) =>
+              type === 'live' ? <ChannelSkeleton key={i} /> : <PosterSkeleton key={i} />
+            )
+          : visible.map((item) =>
+              type === 'live'
+                ? <RichChannelCard key={item.id} item={item} onClick={onSelectContent} />
+                : <RichPosterCard key={item.id} item={item} onClick={onSelectContent} />
+            )
+        }
+      </div>
+    </div>
   )
 }
 
 // ── Channels mode (sortable favorite channels grid) ──────────────
 
-function ChannelsMode({ items, onSelectContent }: {
+function ChannelsMode({ items, allItems, onSelectContent }: {
   items: ContentItem[]
+  allItems: ContentItem[]
   onSelectContent: (item: ContentItem) => void
 }) {
   const sources = useSourcesStore((s) => s.sources)
@@ -292,21 +439,24 @@ function ChannelsMode({ items, onSelectContent }: {
   const showSourceBar = sources.filter((s) => !s.disabled).length > 1
   const qc = useQueryClient()
 
-  // Local order state — initialised from server, updated optimistically on drag
-  const [orderedIds, setOrderedIds] = useState<string[]>(() => items.map((i) => i.id))
+  // Local order state — initialised from full unfiltered list to preserve order across source filter toggles
+  const [orderedIds, setOrderedIds] = useState<string[]>(() => allItems.map((i) => i.id))
 
-  // Keep in sync if query refreshes (new favorites added/removed)
+  // Keep in sync with the full list (new favorites added/removed from server)
   useEffect(() => {
     setOrderedIds((prev) => {
-      const incoming = items.map((i) => i.id)
+      const incoming = allItems.map((i) => i.id)
       // Preserve existing order, append any new ids, drop removed ones
       const kept = prev.filter((id) => incoming.includes(id))
       const added = incoming.filter((id) => !prev.includes(id))
       return [...kept, ...added]
     })
-  }, [items])
+  }, [allItems])
 
+  // Display only channels present in the filtered items list, in the global order
+  const visibleIds = new Set(items.map((i) => i.id))
   const orderedItems = orderedIds
+    .filter((id) => visibleIds.has(id))
     .map((id) => items.find((i) => i.id === id))
     .filter(Boolean) as ContentItem[]
 
@@ -327,14 +477,14 @@ function ChannelsMode({ items, onSelectContent }: {
 
     // Persist to DB — rollback if it fails
     try {
-      const payload = newOrder.map((contentId, idx) => ({ contentId, sortOrder: idx }))
-      await api.user.reorderFavorites(payload)
-      qc.invalidateQueries({ queryKey: ['browse-favorites'] })
-      qc.invalidateQueries({ queryKey: ['library', 'favorites'] })
+      const canonicalMap = Object.fromEntries(allItems.map((i) => [i.id, i.canonical_id ?? i.id]))
+      const payload = newOrder.map((id, idx) => ({ canonicalId: canonicalMap[id] ?? id, sortOrder: idx }))
+      await api.channels.reorderFavorites(payload)
+      qc.invalidateQueries({ queryKey: ['channels', 'favorites'] })
     } catch {
       setOrderedIds(previousOrder) // rollback to original order
     }
-  }, [orderedIds, qc])
+  }, [orderedIds, allItems, qc])
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -403,14 +553,15 @@ function SortableFavCard({ item, sourceColor, onClick }: {
         transition,
         opacity: isDragging ? 0.4 : 1,
         zIndex: isDragging ? 10 : undefined,
+        cursor: isDragging ? 'grabbing' : 'grab',
       }}
       {...attributes}
+      {...listeners}
     >
       <FavChannelCard
         item={item}
         sourceColor={sourceColor}
         onClick={onClick}
-        dragListeners={listeners}
         isDragging={isDragging}
       />
     </div>
@@ -419,11 +570,10 @@ function SortableFavCard({ item, sourceColor, onClick }: {
 
 // ── Favorite channel card (Mode B) ──────────────────────────────
 
-function FavChannelCard({ item, sourceColor, onClick, dragListeners, isDragging }: {
+function FavChannelCard({ item, sourceColor, onClick, isDragging }: {
   item: ContentItem
   sourceColor?: string
   onClick: (item: ContentItem) => void
-  dragListeners?: Record<string, unknown>
   isDragging?: boolean
 }) {
   const logo = item.posterUrl ?? item.poster_url
@@ -440,9 +590,10 @@ function FavChannelCard({ item, sourceColor, onClick, dragListeners, isDragging 
         borderRadius: 8,
         border: `1px solid ${hovered ? 'var(--border-strong)' : 'var(--border-default)'}`,
         overflow: 'hidden',
-        cursor: isDragging ? 'grabbing' : 'pointer',
+        cursor: 'inherit',
         transition: 'border-color 0.1s',
         position: 'relative',
+        userSelect: 'none',
       }}
     >
       {/* Source color bar */}
@@ -511,419 +662,34 @@ function FavChannelCard({ item, sourceColor, onClick, dragListeners, isDragging 
           width: 5, height: 5, borderRadius: '50%',
           background: 'var(--accent-live)', flexShrink: 0,
         }} />
-        {/* Drag handle — visible on hover */}
-        {hovered && dragListeners && (
-          <span
-            {...dragListeners}
-            onClick={(e) => e.stopPropagation()}
-            title="Drag to reorder"
-            style={{
-              cursor: 'grab', color: 'var(--text-3)', display: 'flex',
-              alignItems: 'center', flexShrink: 0, padding: '0 2px',
-            }}
-          >
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
-              <circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/>
-              <circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/>
-              <circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/>
-            </svg>
-          </span>
-        )}
       </div>
     </div>
-  )
-}
-
-// ── Switch mode prompt ────────────────────────────────────────────
-
-function SwitchModePrompt({ onSwitch, onDismiss }: { onSwitch: () => void; onDismiss: () => void }) {
-  return (
-    <div style={{
-      position: 'sticky', bottom: 0,
-      marginTop: 'auto',
-      background: 'var(--bg-2)',
-      border: '1px solid var(--border-default)',
-      borderRadius: 12,
-      padding: '14px 18px',
-      display: 'flex', alignItems: 'center', gap: 14,
-      boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
-      animation: 'slideUpPrompt 0.2s ease-out',
-    }}>
-      {/* Icon */}
-      <div style={{
-        width: 36, height: 36, borderRadius: 10, flexShrink: 0,
-        background: 'color-mix(in srgb, var(--accent-live) 14%, transparent)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}>
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent-live)" strokeWidth="2" strokeLinecap="round">
-          <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
-        </svg>
-      </div>
-
-      {/* Text */}
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-0)', marginBottom: 2 }}>
-          You have favorite channels saved
-        </div>
-        <div style={{ fontSize: 11, color: 'var(--text-1)', lineHeight: 1.4 }}>
-          Want your home screen to show your favorite channels instead?
-        </div>
-      </div>
-
-      {/* Actions */}
-      <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-        <button
-          onClick={onDismiss}
-          style={{
-            padding: '7px 14px', borderRadius: 7, fontSize: 12, cursor: 'pointer',
-            background: 'transparent',
-            border: '1px solid var(--border-default)',
-            color: 'var(--text-1)',
-            fontFamily: 'var(--font-ui)',
-            transition: 'background 0.1s',
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-3)' }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
-        >
-          Keep current
-        </button>
-        <button
-          onClick={onSwitch}
-          style={{
-            padding: '7px 14px', borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: 'pointer',
-            background: 'var(--accent-interactive)',
-            border: 'none',
-            color: '#fff',
-            fontFamily: 'var(--font-ui)',
-            transition: 'opacity 0.1s',
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.85' }}
-          onMouseLeave={(e) => { e.currentTarget.style.opacity = '1' }}
-        >
-          Switch
-        </button>
-      </div>
-    </div>
-  )
-}
-
-// ── Empty channels mode ───────────────────────────────────────────
-
-function EmptyChannelsMode({ onSwitchToDiscover, onBrowseLive }: {
-  onSwitchToDiscover: () => void
-  onBrowseLive: () => void
-}) {
-  return (
-    <div style={{
-      display: 'flex', flexDirection: 'column', alignItems: 'center',
-      justifyContent: 'center', gap: 12, padding: '48px 24px', textAlign: 'center',
-    }}>
-      <div style={{
-        width: 48, height: 48, borderRadius: 14,
-        background: 'color-mix(in srgb, var(--accent-live) 12%, transparent)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}>
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent-live)" strokeWidth="1.75" strokeLinecap="round">
-          <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
-        </svg>
-      </div>
-      <div>
-        <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-0)', marginBottom: 6 }}>
-          No favorite channels yet
-        </div>
-        <div style={{ fontSize: 12, color: 'var(--text-1)', lineHeight: 1.5, maxWidth: 320 }}>
-          Browse your channels and tap the heart icon to add favorites. They'll appear here for quick access.
-        </div>
-      </div>
-      <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-        <button
-          onClick={onBrowseLive}
-          style={{
-            padding: '9px 18px', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer',
-            background: 'var(--accent-interactive)', border: 'none', color: '#fff',
-            fontFamily: 'var(--font-ui)',
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.85' }}
-          onMouseLeave={(e) => { e.currentTarget.style.opacity = '1' }}
-        >
-          Browse channels
-        </button>
-        <button
-          onClick={onSwitchToDiscover}
-          style={{
-            padding: '9px 18px', borderRadius: 8, fontSize: 12, cursor: 'pointer',
-            background: 'transparent', border: '1px solid var(--border-default)',
-            color: 'var(--text-1)', fontFamily: 'var(--font-ui)',
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-2)' }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
-        >
-          Switch to Discover
-        </button>
-      </div>
-    </div>
-  )
-}
-
-// ── Content Row (Discover mode) ───────────────────────────────────
-
-interface RowProps {
-  title: string
-  type: 'live' | 'movie' | 'series'
-  accent: string
-  showLiveDot?: boolean
-  /** If set, use these items directly instead of fetching */
-  pinnedItems?: ContentItem[]
-  /** If true, fetch in-progress items (not completed) instead of latest */
-  continueWatching?: boolean
-  /** If true, fetch watchlisted items (movies + series combined) */
-  watchlist?: boolean
-  /** Filter results to these source IDs (empty = all) */
-  selectedSourceIds?: string[]
-  onSelectContent: (item: ContentItem) => void
-  onBrowseAll: () => void
-}
-
-function ContentRow({ title, type, accent, showLiveDot, pinnedItems, continueWatching: isContinueWatching, watchlist: isWatchlist, selectedSourceIds = [], onSelectContent, onBrowseAll }: RowProps) {
-  const [activeCat, setActiveCat] = useState<string | null>(null)
-  const [showCats, setShowCats] = useState(false)
-
-  const isSpecial = !!pinnedItems || isContinueWatching || isWatchlist
-
-  const { data: categories = [] } = useQuery({
-    queryKey: ['categories', type],
-    queryFn: () => api.categories.list({ type }),
-    staleTime: 60_000,
-    enabled: !isSpecial,
-  })
-
-  // Continue watching query (movies/series in progress)
-  const { data: continueData = [] } = useQuery<ContentItem[]>({
-    queryKey: ['home-continue', type],
-    queryFn: () => api.user.continueWatching({ type: type as 'movie' | 'series' }),
-    staleTime: 30_000,
-    enabled: !!isContinueWatching,
-  })
-
-  // Watchlist query — combined movies + series (ignores `type` param, fetches all)
-  const { data: watchlistData = [] } = useQuery<ContentItem[]>({
-    queryKey: ['home-watchlist'],
-    queryFn: () => api.user.watchlist(),
-    staleTime: 30_000,
-    enabled: !!isWatchlist,
-  })
-
-  // Default browse query (only when not pinned and not continue watching)
-  const { data: browseData } = useQuery({
-    queryKey: ['home-row', type, activeCat],
-    queryFn: () => api.content.browse({
-      type,
-      categoryName: activeCat ?? undefined,
-      sortBy: 'updated',
-      sortDir: 'desc',
-      limit: 20,
-      offset: 0,
-    }),
-    staleTime: 30_000,
-    enabled: !isSpecial,
-  })
-
-  // Determine which items to show
-  let items: ContentItem[]
-  if (pinnedItems) {
-    items = pinnedItems
-  } else if (isContinueWatching) {
-    // Apply source filter client-side
-    items = selectedSourceIds.length > 0
-      ? continueData.filter((item) => {
-          const srcId = item.primarySourceId ?? item.primary_source_id ?? (item as any).source_ids ?? item.id?.split(':')[0]
-          return srcId ? selectedSourceIds.includes(srcId) : true
-        })
-      : continueData
-  } else if (isWatchlist) {
-    items = selectedSourceIds.length > 0
-      ? watchlistData.filter((item) => {
-          const srcId = item.primarySourceId ?? item.primary_source_id ?? (item as any).source_ids ?? item.id?.split(':')[0]
-          return srcId ? selectedSourceIds.includes(srcId) : true
-        })
-      : watchlistData
-  } else {
-    items = (browseData?.items ?? []) as ContentItem[]
-  }
-
-  // Don't render the row at all if it's a special row with nothing to show
-  if ((isContinueWatching || isWatchlist) && items.length === 0) return null
-
-  const showGenreToggle = !isSpecial && (categories as any[]).length > 0
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {/* Row header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          {showLiveDot && (
-            <span style={{
-              width: 7, height: 7, borderRadius: '50%', background: accent,
-              display: 'inline-block', flexShrink: 0,
-              boxShadow: `0 0 6px ${accent}`,
-            }} />
-          )}
-          <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.09em', color: 'var(--text-0)' }}>
-            {title}
-          </span>
-          {/* Type badge for special rows */}
-          {isContinueWatching && (
-            <span style={{
-              fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em',
-              padding: '1px 5px', borderRadius: 3,
-              background: `color-mix(in srgb, ${accent} 14%, transparent)`,
-              color: accent,
-            }}>
-              {type === 'movie' ? 'Movies' : 'Series'}
-            </span>
-          )}
-          {isWatchlist && (
-            <span style={{
-              fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em',
-              padding: '1px 5px', borderRadius: 3,
-              background: `color-mix(in srgb, ${accent} 14%, transparent)`,
-              color: accent,
-            }}>
-              Movies &amp; Series
-            </span>
-          )}
-          {showGenreToggle && (
-            <button
-              onClick={() => setShowCats((v) => !v)}
-              style={{
-                padding: '2px 8px', borderRadius: 4, fontSize: 11,
-                background: showCats ? 'var(--bg-3)' : 'var(--bg-2)',
-                border: `1px solid ${showCats ? 'var(--border-strong)' : 'var(--border-default)'}`,
-                color: showCats ? 'var(--text-1)' : 'var(--text-2)',
-                cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3,
-              }}
-            >
-              {activeCat ?? 'Genre'} {showCats ? '▴' : '▾'}
-            </button>
-          )}
-        </div>
-        <button
-          onClick={onBrowseAll}
-          style={{ background: 'none', border: 'none', fontSize: 11, color: 'var(--text-1)', cursor: 'pointer', fontFamily: 'var(--font-ui)' }}
-          onMouseEnter={(e) => { e.currentTarget.style.color = accent }}
-          onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-1)' }}
-        >
-          Browse all →
-        </button>
-      </div>
-
-      {/* Category pills */}
-      {showCats && (
-        <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 2, scrollbarWidth: 'none' }}>
-          <Pill label="All" active={activeCat === null} accent={accent} onClick={() => setActiveCat(null)} />
-          {(categories as any[]).slice(0, 20).map((c: any) => (
-            <Pill key={c.name} label={c.name} active={activeCat === c.name} accent={accent} onClick={() => setActiveCat(c.name)} />
-          ))}
-        </div>
-      )}
-
-      {/* Cards */}
-      <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4, scrollbarWidth: 'none' }}>
-        {items.length === 0
-          ? Array.from({ length: 8 }).map((_, i) => (
-              type === 'live' ? <ChannelSkeleton key={i} /> : <PosterSkeleton key={i} />
-            ))
-          : items.map((item) => (
-              type === 'live'
-                ? <ChannelCard key={item.id} item={item} accent={accent} onClick={onSelectContent} />
-                : <PosterCard key={item.id} item={item} onClick={onSelectContent} />
-            ))
-        }
-      </div>
-    </div>
-  )
-}
-
-function Pill({ label, active, accent, onClick }: { label: string; active: boolean; accent: string; onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        flexShrink: 0, padding: '3px 11px', borderRadius: 20, fontSize: 11,
-        border: `1px solid ${active ? 'var(--border-strong)' : 'var(--border-default)'}`,
-        color: active ? accent : 'var(--text-1)',
-        background: active ? 'var(--bg-3)' : 'var(--bg-2)',
-        fontWeight: active ? 600 : 400,
-        cursor: 'pointer', whiteSpace: 'nowrap',
-      }}
-    >{label}</button>
   )
 }
 
 // ── Cards ─────────────────────────────────────────────────────────
 
-function PosterCard({ item, onClick }: { item: ContentItem; onClick: (i: ContentItem) => void }) {
-  const poster = item.posterUrl ?? item.poster_url
-  const [imgError, setImgError] = useState(false)
-  const isMovie = item.type === 'movie'
-
-  return (
-    <div
-      onClick={() => onClick(item)}
-      style={{ flexShrink: 0, width: 100, background: 'var(--bg-2)', borderRadius: 6, border: '1px solid var(--border-default)', overflow: 'hidden', cursor: 'pointer' }}
-      onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--border-strong)' }}
-      onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border-default)' }}
-    >
-      <div style={{ aspectRatio: '2/3', background: 'var(--bg-3)', position: 'relative' }}>
-        {poster && !imgError
-          ? <img src={poster} alt="" onError={() => setImgError(true)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-          : null}
-        <div style={{ position: 'absolute', bottom: 5, left: 5, fontSize: 8, fontWeight: 700, textTransform: 'uppercase', padding: '2px 5px', borderRadius: 3, background: `color-mix(in srgb, ${isMovie ? 'var(--accent-film)' : 'var(--accent-series)'} 18%, transparent)`, color: isMovie ? 'var(--accent-film)' : 'var(--accent-series)', letterSpacing: '0.04em' }}>
-          {isMovie ? 'Movie' : 'Series'}
-        </div>
-      </div>
-      <div style={{ padding: '5px 7px 7px' }}>
-        <p style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-0)', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.title}</p>
-        <p style={{ fontSize: 9, color: 'var(--text-2)', margin: '2px 0 0' }}>
-          {item.year}{(item.ratingTmdb ?? item.rating_tmdb) ? ` · ★${(item.ratingTmdb ?? item.rating_tmdb)!.toFixed(1)}` : ''}
-        </p>
-      </div>
-    </div>
-  )
-}
-
-function ChannelCard({ item, accent, onClick }: { item: ContentItem; accent: string; onClick: (i: ContentItem) => void }) {
-  const logo = item.posterUrl ?? item.poster_url
-  const [imgError, setImgError] = useState(false)
-
-  return (
-    <div
-      onClick={() => onClick(item)}
-      style={{ flexShrink: 0, width: 148, background: 'var(--bg-2)', borderRadius: 6, border: '1px solid var(--border-default)', overflow: 'hidden', cursor: 'pointer' }}
-      onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--border-strong)' }}
-      onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border-default)' }}
-    >
-      <div style={{ aspectRatio: '16/9', background: 'var(--bg-3)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        {logo && !imgError
-          ? <img src={logo} alt="" onError={() => setImgError(true)} style={{ width: '100%', height: '100%', objectFit: 'contain', padding: 8 }} />
-          : <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--text-3)', letterSpacing: '0.05em' }}>{item.title.slice(0, 4).toUpperCase()}</span>}
-      </div>
-      <div style={{ padding: '5px 8px 7px' }}>
-        <p style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-0)', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.title}</p>
-      </div>
-    </div>
-  )
-}
-
-// Suppress unused accent warning (used for hover color in ChannelCard row header)
-void ((_: string) => _)
-
 function PosterSkeleton() {
-  return <div style={{ flexShrink: 0, width: 100, borderRadius: 6, background: 'var(--bg-2)', border: '1px solid var(--border-default)' }}><div style={{ aspectRatio: '2/3' }} /><div style={{ height: 32 }} /></div>
+  return (
+    <div style={{ width: '100%', borderRadius: 6, background: 'var(--bg-2)', border: '1px solid var(--border-subtle)', overflow: 'hidden' }}>
+      <div style={{ aspectRatio: '2/3', background: 'linear-gradient(90deg, var(--bg-2) 25%, var(--bg-3) 50%, var(--bg-2) 75%)', backgroundSize: '200% 100%', animation: 'shimmer 1.4s infinite' }} />
+      <div style={{ padding: '6px 8px 8px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <div style={{ height: 10, borderRadius: 3, background: 'var(--bg-3)', width: '80%' }} />
+        <div style={{ height: 8, borderRadius: 3, background: 'var(--bg-3)', width: '50%' }} />
+      </div>
+    </div>
+  )
 }
 
 function ChannelSkeleton() {
-  return <div style={{ flexShrink: 0, width: 148, borderRadius: 6, background: 'var(--bg-2)', border: '1px solid var(--border-default)' }}><div style={{ aspectRatio: '16/9' }} /><div style={{ height: 28 }} /></div>
+  return (
+    <div style={{ width: '100%', borderRadius: 6, background: 'var(--bg-2)', border: '1px solid var(--border-subtle)', overflow: 'hidden' }}>
+      <div style={{ aspectRatio: '16/9', background: 'linear-gradient(90deg, var(--bg-2) 25%, var(--bg-3) 50%, var(--bg-2) 75%)', backgroundSize: '200% 100%', animation: 'shimmer 1.4s infinite' }} />
+      <div style={{ padding: '6px 8px 8px' }}>
+        <div style={{ height: 10, borderRadius: 3, background: 'var(--bg-3)', width: '70%' }} />
+      </div>
+    </div>
+  )
 }
 
 // ── Inline search results for Home view ──────────────────────────

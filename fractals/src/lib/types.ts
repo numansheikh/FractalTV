@@ -32,6 +32,9 @@ export interface ContentItem {
   // Catchup/timeshift — bypasses normal stream URL resolution
   _catchupUrl?: string
 
+  // Set when returned from channels:favorites (new schema)
+  canonical_id?: string
+
   // Continue-watching fields — present when returned from user:continue-watching
   last_position?: number
   last_watched_at?: number

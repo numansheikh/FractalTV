@@ -71,12 +71,8 @@ function AppShell() {
         const a = useAppStore.getState()
         // 1. Clear search query
         if (s.query) { s.setQuery(''); return }
-        // 2. Clear active category filter (back to All)
-        if (a.categoryFilter !== null) { a.setCategoryFilter(null); return }
-        // 3. Clear source filter
-        if (a.selectedSourceIds.length > 0) { a.clearSourceFilter(); return }
-        // 4. Navigate to Home
-        if (a.activeView !== 'home') { a.setView('home'); return }
+        // 2. Go back (previous view, or Home if none)
+        if (a.activeView !== 'home') { a.goBack(); return }
         return
       }
 
@@ -101,6 +97,17 @@ function AppShell() {
     })
   }, [updateSource])
 
+  const invalidateContentQueries = () => {
+    queryClient.invalidateQueries({ queryKey: ['browse'] })
+    queryClient.invalidateQueries({ queryKey: ['categories'] })
+    queryClient.invalidateQueries({ queryKey: ['home-latest-movies'] })
+    queryClient.invalidateQueries({ queryKey: ['home-latest-series'] })
+    queryClient.invalidateQueries({ queryKey: ['channels'] })
+    queryClient.invalidateQueries({ queryKey: ['home-watchlist'] })
+    queryClient.invalidateQueries({ queryKey: ['home-continue'] })
+    queryClient.invalidateQueries({ queryKey: ['search'] })
+  }
+
   // Sync progress events
   useEffect(() => {
     const lastPhase: Record<string, string> = {}
@@ -109,8 +116,7 @@ function AppShell() {
       if (p.phase === 'done') {
         setSyncProgress(p.sourceId, null)
         api.sources.list().then((list) => setSources(list as Source[]))
-        queryClient.invalidateQueries({ queryKey: ['browse'] })
-        queryClient.invalidateQueries({ queryKey: ['categories'] })
+        invalidateContentQueries()
       } else if (p.phase === 'error') {
         setSyncProgress(p.sourceId, null)
         updateSource(p.sourceId, { status: 'error', lastError: p.message })
@@ -118,8 +124,7 @@ function AppShell() {
         setSyncProgress(p.sourceId, { phase: p.phase, current: p.current, total: p.total, message: p.message })
         updateSource(p.sourceId, { status: 'syncing' })
         if (lastPhase[p.sourceId] && lastPhase[p.sourceId] !== p.phase) {
-          queryClient.invalidateQueries({ queryKey: ['browse'] })
-          queryClient.invalidateQueries({ queryKey: ['categories'] })
+          invalidateContentQueries()
         }
         lastPhase[p.sourceId] = p.phase
       }
@@ -133,23 +138,20 @@ function AppShell() {
     setSyncProgress(sourceId, null)
     const list = await api.sources.list()
     setSources(list as Source[])
-    queryClient.invalidateQueries({ queryKey: ['browse'] })
-    queryClient.invalidateQueries({ queryKey: ['categories'] })
+    invalidateContentQueries()
   }
 
   const handleRemove = async (sourceId: string) => {
     await api.sources.remove(sourceId)
     const list = await api.sources.list()
     setSources(list as Source[])
-    queryClient.invalidateQueries({ queryKey: ['browse'] })
-    queryClient.invalidateQueries({ queryKey: ['categories'] })
+    invalidateContentQueries()
   }
 
   const handleSourceAdded = async () => {
     const list = await api.sources.list()
     setSources(list as Source[])
-    queryClient.invalidateQueries({ queryKey: ['browse'] })
-    queryClient.invalidateQueries({ queryKey: ['categories'] })
+    invalidateContentQueries()
   }
 
   const handleSelectContent = (item: ContentItem) => {

@@ -69,7 +69,10 @@ export function PosterCard({ item, onClick }: Props) {
   const toggleWatchlist = (e: React.MouseEvent) => {
     e.stopPropagation()
     setWl(item.id, !isWatchlist)
-    api.user.toggleWatchlist(item.id)
+    api.user.toggleWatchlist(item.id).then(() => {
+      qc.invalidateQueries({ queryKey: ['home-watchlist'] })
+      qc.invalidateQueries({ queryKey: ['library', 'watchlist'] })
+    })
   }
 
   return (

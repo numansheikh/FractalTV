@@ -43,6 +43,15 @@ export const api = {
 
     totalCount: (): Promise<number> =>
       isElectron ? (window.api as any).sources.totalCount() : Promise.resolve(0),
+
+    exportBackup: (opts?: { includeUserData?: boolean }): Promise<{ canceled: boolean; count?: number }> =>
+      isElectron ? (window.api as any).sources.exportBackup(opts) : Promise.resolve({ canceled: true }),
+
+    import: (filePath: string): Promise<{ ok?: boolean; count?: number; error?: string }> =>
+      isElectron ? (window.api as any).sources.import(filePath) : Promise.resolve({ error: 'Not in Electron' }),
+
+    factoryReset: (): Promise<{ ok: boolean }> =>
+      isElectron ? (window.api as any).sources.factoryReset() : Promise.resolve({ ok: false }),
   },
 
   categories: {
@@ -113,6 +122,17 @@ export const api = {
 
     reorderFavorites: (order: { contentId: string; sortOrder: number }[]) =>
       isElectron ? (window.api as any).user.reorderFavorites(order) : Promise.resolve({ ok: true }),
+  },
+
+  channels: {
+    favorites: (args?: { profileId?: string }): Promise<any[]> =>
+      isElectron ? (window.api as any).channels.favorites(args) : Promise.resolve([]),
+    toggleFavorite: (canonicalId: string): Promise<{ favorite: boolean }> =>
+      isElectron ? (window.api as any).channels.toggleFavorite(canonicalId) : Promise.resolve({ favorite: false }),
+    reorderFavorites: (order: { canonicalId: string; sortOrder: number }[]): Promise<{ ok: boolean }> =>
+      isElectron ? (window.api as any).channels.reorderFavorites(order) : Promise.resolve({ ok: false }),
+    getData: (canonicalId: string) =>
+      isElectron ? (window.api as any).channels.getData(canonicalId) : Promise.resolve({ favorite: false, watchlisted: false, rating: null, position: 0, completed: false }),
   },
 
   player: {

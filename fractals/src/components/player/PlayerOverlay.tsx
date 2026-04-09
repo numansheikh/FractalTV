@@ -77,6 +77,11 @@ export function PlayerOverlay({ content, onClose, onSurfChannel }: Props) {
     }
 
     let cancelled = false
+    let loadingTimerId: ReturnType<typeof setTimeout> | null = null
+
+    const clearLoadingTimer = () => {
+      if (loadingTimerId !== null) { clearTimeout(loadingTimerId); loadingTimerId = null }
+    }
 
     setLoading(true)
     setError(null)
@@ -102,6 +107,14 @@ export function PlayerOverlay({ content, onClose, onSurfChannel }: Props) {
       const url: string = result.url
       setStreamUrl(url)
       if (content.type === 'live') liveStreamUrlRef.current = url
+
+      // Guard: if player never fires ready/error (e.g. 404 stream, dead server), stop spinning
+      loadingTimerId = setTimeout(() => {
+        if (!cancelled) {
+          setError('Stream not available')
+          setLoading(false)
+        }
+      }, 12000)
 
       // External player preference
       const pref = localStorage.getItem('fractals-player') as 'artplayer' | 'mpv' | 'vlc' | null
@@ -207,6 +220,7 @@ export function PlayerOverlay({ content, onClose, onSurfChannel }: Props) {
       artRef.current = art
 
       art.on('ready', () => {
+        clearLoadingTimer()
         if (!cancelled) setLoading(false)
 
         // Hide ArtPlayer's floating live-edge badge (top-right) — we have our own top bar
@@ -290,6 +304,7 @@ export function PlayerOverlay({ content, onClose, onSurfChannel }: Props) {
 
       // Clear error + loading if video actually starts playing
       art.on('video:playing', () => {
+        clearLoadingTimer()
         if (!cancelled) {
           setError(null)
           setLoading(false)
@@ -297,6 +312,7 @@ export function PlayerOverlay({ content, onClose, onSurfChannel }: Props) {
       })
 
       art.on('error', (_e: any, msg: string) => {
+        clearLoadingTimer()
         if (!cancelled) {
           // Only show error if video isn't actually playing
           const video = art.template?.$video as HTMLVideoElement | undefined
@@ -311,6 +327,7 @@ export function PlayerOverlay({ content, onClose, onSurfChannel }: Props) {
       // Skip teardown during in-place channel switch — HLS is being swapped directly
       if (suppressRebuildRef.current) return
       cancelled = true
+      clearLoadingTimer()
       if (artRef.current) {
         const hls = (artRef.current as any).hls
         hls?.destroy()

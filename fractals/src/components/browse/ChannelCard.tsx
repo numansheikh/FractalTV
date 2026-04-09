@@ -35,6 +35,7 @@ export function ChannelCard({ item, onClick }: Props) {
     await api.user.toggleFavorite(item.id)
     qc.invalidateQueries({ queryKey: ['browse-favorites'] })
     qc.invalidateQueries({ queryKey: ['library', 'favorites'] })
+    qc.invalidateQueries({ queryKey: ['channels', 'favorites'] })
   }
 
   return (

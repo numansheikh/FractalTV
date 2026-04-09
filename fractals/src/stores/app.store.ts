@@ -5,6 +5,7 @@ import { ContentItem, ActiveView, ContentType } from '@/lib/types'
 interface AppState {
   // Navigation
   activeView: ActiveView
+  previousView: ActiveView | null
 
   // Panel stack — topmost is active
   selectedContent: ContentItem | null
@@ -34,6 +35,7 @@ interface AppState {
   // Home screen mode
   homeMode: 'discover' | 'channels'
   hasSeenChannelsModePrompt: boolean
+  homeStripSize: number
 
   // Player settings
   minWatchSeconds: number
@@ -41,6 +43,7 @@ interface AppState {
 
   // Actions
   setView: (view: ActiveView) => void
+  goBack: () => void
   setViewMode: (mode: 'grid' | 'list') => void
   setPageSize: (n: number) => void
   setSort: (s: string) => void
@@ -57,6 +60,7 @@ interface AppState {
   clearSourceFilter: () => void
   clearFilters: () => void
   setHomeMode: (m: 'discover' | 'channels') => void
+  setHomeStripSize: (n: number) => void
   setHasSeenChannelsModePrompt: (v: boolean) => void
   setMinWatchSeconds: (n: number) => void
   setControlsMode: (m: 'never' | 'auto-2' | 'auto-3' | 'auto-5' | 'always') => void
@@ -66,6 +70,7 @@ export const useAppStore = create<AppState>()(
   persist(
     (set) => ({
       activeView: 'home',
+      previousView: null,
       selectedContent: null,
       playingContent: null,
       showSettings: false,
@@ -81,10 +86,12 @@ export const useAppStore = create<AppState>()(
       sort: 'updated:desc',
       homeMode: 'discover',
       hasSeenChannelsModePrompt: false,
+      homeStripSize: 10,
       minWatchSeconds: 5,
       controlsMode: 'auto-3',
 
-      setView: (activeView) => set({ activeView, categoryFilter: null }),
+      setView: (activeView) => set((s) => ({ activeView, previousView: s.activeView, categoryFilter: null })),
+      goBack: () => set((s) => ({ activeView: s.previousView ?? 'home', previousView: null, categoryFilter: null })),
       setViewMode: (viewMode) => set({ viewMode }),
       setPageSize: (pageSize) => set({ pageSize }),
       setSort: (sort) => set({ sort }),
@@ -116,6 +123,7 @@ export const useAppStore = create<AppState>()(
       clearSourceFilter: () => set({ selectedSourceIds: [] }),
       clearFilters: () => set({ typeFilter: 'all', categoryFilter: null, selectedSourceIds: [] }),
       setHomeMode: (homeMode) => set({ homeMode }),
+      setHomeStripSize: (homeStripSize) => set({ homeStripSize }),
       setHasSeenChannelsModePrompt: (hasSeenChannelsModePrompt) => set({ hasSeenChannelsModePrompt }),
       setMinWatchSeconds: (minWatchSeconds) => set({ minWatchSeconds }),
       setControlsMode: (controlsMode) => set({ controlsMode }),
@@ -130,6 +138,7 @@ export const useAppStore = create<AppState>()(
         sort: s.sort,
         homeMode: s.homeMode,
         hasSeenChannelsModePrompt: s.hasSeenChannelsModePrompt,
+        homeStripSize: s.homeStripSize,
         minWatchSeconds: s.minWatchSeconds,
         controlsMode: s.controlsMode,
       }),

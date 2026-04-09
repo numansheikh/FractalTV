@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { create } from 'zustand'
 
 export type ThemeId = 'dark' | 'fractals-day'
 export type FontId =
@@ -50,29 +50,32 @@ export function applyFont(font: FontId) {
   document.documentElement.style.setProperty('--font-sans', stack)
 }
 
-export function useTheme() {
-  const [theme, setThemeState] = useState<ThemeId>(() => {
+interface ThemeStore {
+  theme: ThemeId
+  font: FontId
+  setTheme: (t: ThemeId) => void
+  setFont: (f: FontId) => void
+}
+
+const useThemeStore = create<ThemeStore>((set) => ({
+  theme: (() => {
     const stored = localStorage.getItem(THEME_KEY) as ThemeId
     return stored === 'dark' || stored === 'fractals-day' ? stored : 'dark'
-  })
-
-  const [font, setFontState] = useState<FontId>(() => {
-    return (localStorage.getItem(FONT_KEY) as FontId) ?? 'DM Sans'
-  })
-
-  const setTheme = (t: ThemeId) => {
+  })(),
+  font: (localStorage.getItem(FONT_KEY) as FontId) ?? 'DM Sans',
+  setTheme: (t) => {
     localStorage.setItem(THEME_KEY, t)
-    setThemeState(t)
     applyTheme(t)
-  }
-
-  const setFont = (f: FontId) => {
+    set({ theme: t })
+  },
+  setFont: (f) => {
     localStorage.setItem(FONT_KEY, f)
-    setFontState(f)
     applyFont(f)
-  }
+    set({ font: f })
+  },
+}))
 
-  const isDark = theme === 'dark'
-
-  return { theme, font, setTheme, setFont, isDark }
+export function useTheme() {
+  const { theme, font, setTheme, setFont } = useThemeStore()
+  return { theme, font, setTheme, setFont, isDark: theme === 'dark' }
 }

@@ -1,20 +1,21 @@
 import { ActiveView } from '@/lib/types'
 import { useAppStore } from '@/stores/app.store'
 import { useSearchStore } from '@/stores/search.store'
+import { useTheme } from '@/hooks/useTheme'
 
-const NAV_ITEMS: { id: ActiveView; label: string; shortcut: string; icon: React.ReactNode }[] = [
-  { id: 'home',    label: 'Home',    shortcut: '⌘1', icon: <HomeIcon /> },
-  { id: 'live',    label: 'Live TV', shortcut: '⌘2', icon: <LiveIcon /> },
-  { id: 'films',   label: 'Films',   shortcut: '⌘3', icon: <FilmIcon /> },
-  { id: 'series',  label: 'Series',  shortcut: '⌘4', icon: <SeriesIcon /> },
-  { id: 'library', label: 'Library', shortcut: '⌘5', icon: <LibraryIcon /> },
+const NAV_ITEMS: { id: ActiveView; label: string; shortcut: string }[] = [
+  { id: 'home',    label: 'Home',    shortcut: '⌘1' },
+  { id: 'live',    label: 'Live TV', shortcut: '⌘2' },
+  { id: 'films',   label: 'Films',   shortcut: '⌘3' },
+  { id: 'series',  label: 'Series',  shortcut: '⌘4' },
+  { id: 'library', label: 'Library', shortcut: '⌘5' },
 ]
 
 const ACCENT: Record<ActiveView, string> = {
-  home: 'var(--accent-interactive)',
-  live: 'var(--accent-live)',
-  films: 'var(--accent-film)',
-  series: 'var(--accent-series)',
+  home:    'var(--accent-interactive)',
+  live:    'var(--accent-live)',
+  films:   'var(--accent-film)',
+  series:  'var(--accent-series)',
   library: 'var(--accent-interactive)',
 }
 
@@ -26,6 +27,7 @@ interface Props {
 export function NavRail({ onOpenSources, onOpenSettings }: Props) {
   const { activeView, setView } = useAppStore()
   const { setQuery } = useSearchStore()
+  const { theme, setTheme } = useTheme()
 
   return (
     <div style={{
@@ -45,27 +47,32 @@ export function NavRail({ onOpenSources, onOpenSettings }: Props) {
     }}>
       {NAV_ITEMS.map((item) => {
         const isActive = activeView === item.id
-        const color = isActive ? ACCENT[item.id] : 'var(--text-2)'
+        const accent = ACCENT[item.id]
         return (
           <RailButton
             key={item.id}
             label={item.label}
             shortcut={item.shortcut}
             isActive={isActive}
-            activeColor={ACCENT[item.id]}
+            activeColor={accent}
+            inactiveColor={accent}
             onClick={() => {
               setView(item.id)
               if (item.id === 'home') setQuery('')
-              // Close split view when navigating away from live
               if (item.id !== 'live') useAppStore.getState().setSplitViewChannel(null)
             }}
           >
-            <span style={{ color }}>{item.icon}</span>
+            <NavIcon id={item.id} />
           </RailButton>
         )
       })}
 
       <div style={{ flex: 1 }} />
+
+      {/* DEV: theme toggle — remove before ship */}
+      <RailButton label={theme === 'dark' ? 'Light mode' : 'Dark mode'} shortcut="" isActive={false} activeColor="var(--accent-interactive)" onClick={() => setTheme(theme === 'dark' ? 'fractals-day' : 'dark')}>
+        <span style={{ color: 'var(--text-2)' }}>{theme === 'dark' ? <SunIcon /> : <MoonIcon />}</span>
+      </RailButton>
 
       <RailButton label="Sources" shortcut="" isActive={false} activeColor="var(--accent-interactive)" onClick={onOpenSources}>
         <span style={{ color: 'var(--text-2)' }}><LayersIcon /></span>
@@ -78,9 +85,12 @@ export function NavRail({ onOpenSources, onOpenSettings }: Props) {
   )
 }
 
-function RailButton({ label, shortcut, isActive, activeColor, onClick, children }: {
-  label: string; shortcut: string; isActive: boolean; activeColor: string; onClick: () => void; children: React.ReactNode
+function RailButton({ label, shortcut, isActive, activeColor, inactiveColor, onClick, children }: {
+  label: string; shortcut: string; isActive: boolean; activeColor: string; inactiveColor?: string; onClick: () => void; children: React.ReactNode
 }) {
+  const idleColor = inactiveColor
+    ? `color-mix(in srgb, ${inactiveColor} 55%, var(--text-2))`
+    : 'var(--text-2)'
   return (
     <div
       onClick={onClick}
@@ -92,36 +102,42 @@ function RailButton({ label, shortcut, isActive, activeColor, onClick, children 
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        borderRadius: 8,
+        borderRadius: 10,
         cursor: 'pointer',
-        background: isActive ? `${activeColor}18` : 'transparent',
-        transition: 'background 0.1s',
+        background: isActive ? `color-mix(in srgb, ${activeColor} 16%, transparent)` : 'transparent',
+        border: isActive ? `1.5px solid color-mix(in srgb, ${activeColor} 40%, transparent)` : '1.5px solid transparent',
+        color: isActive ? activeColor : idleColor,
+        transition: 'background 0.12s, color 0.12s, border-color 0.12s',
       }}
-      onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = 'var(--bg-3)' }}
-      onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = 'transparent' }}
+      onMouseEnter={(e) => {
+        if (!isActive) e.currentTarget.style.color = inactiveColor ?? 'var(--text-1)'
+      }}
+      onMouseLeave={(e) => {
+        if (!isActive) e.currentTarget.style.color = idleColor
+      }}
     >
-      {/* Active left bar */}
-      {isActive && (
-        <div style={{
-          position: 'absolute',
-          left: -4,
-          top: 10, bottom: 10,
-          width: 3,
-          borderRadius: 2,
-          background: activeColor,
-        }} />
-      )}
       {children}
     </div>
   )
 }
 
-// ── Icons ──────────────────────────────────────────────────────
+// ── Per-view icon dispatcher ───────────────────────────────────
+function NavIcon({ id }: { id: ActiveView }) {
+  switch (id) {
+    case 'home':    return <HomeIcon />
+    case 'live':    return <LiveIcon />
+    case 'films':   return <FilmIcon />
+    case 'series':  return <SeriesIcon />
+    case 'library': return <LibraryIcon />
+  }
+}
+
+// ── Icons (original outlines) ──────────────────────────────────
 function HomeIcon() {
   return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
 }
 function LiveIcon() {
-  return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1" fill="currentColor"/></svg>
+  return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1" fill="currentColor" stroke="none"/></svg>
 }
 function FilmIcon() {
   return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg>
@@ -135,6 +151,22 @@ function LibraryIcon() {
 function LayersIcon() {
   return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
 }
+function SunIcon() {
+  return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+}
+function MoonIcon() {
+  return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+}
 function GearIcon() {
   return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
 }
+
+/*
+ * ── Filled icon variants (for future use) ──────────────────────
+ * When ready, pass filled={isActive} to NavIcon and swap in these.
+ *
+ * HomeIcon filled:   <svg fill="currentColor"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
+ * FilmIcon filled:   <svg fill="currentColor"><path d="M18 3H6a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3V6a3 3 0 0 0-3-3zM8 17H6v-2h2v2zm0-4H6v-2h2v2zm0-4H6V7h2v2zm10 8h-2v-2h2v2zm0-4h-2v-2h2v2zm0-4h-2V7h2v2z"/></svg>
+ * SeriesIcon filled: <svg fill="currentColor"><path d="M21 3H3a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h5v2h8v-2h5a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm0 14H3V5h18v12z"/></svg>
+ * LibraryIcon filled:<svg fill="currentColor"><path d="M17 3H7a2 2 0 0 0-2 2v16l7-3 7 3V5a2 2 0 0 0-2-2z"/></svg>
+ */

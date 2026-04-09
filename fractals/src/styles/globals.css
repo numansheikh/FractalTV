@@ -4,33 +4,33 @@
    V2 DESIGN TOKENS — new UI system
 ════════════════════════════════════════════════════════════════ */
 :root {
-  /* Foundation backgrounds */
-  --bg-0: #08080c;
-  --bg-1: #0e0e14;
-  --bg-2: #16161e;
-  --bg-3: #1e1e28;
-  --bg-4: #282834;
+  /* Foundation backgrounds — neutral dark, no tint */
+  --bg-0: #080808;
+  --bg-1: #0f0f0f;
+  --bg-2: #181818;
+  --bg-3: #222222;
+  --bg-4: #2e2e2e;
 
-  /* Borders — visible by default, not invisible hints */
-  --border-subtle: rgba(255,255,255,0.08);
-  --border-default: rgba(255,255,255,0.14);
+  /* Borders */
+  --border-subtle: rgba(255,255,255,0.07);
+  --border-default: rgba(255,255,255,0.13);
   --border-strong: rgba(255,255,255,0.24);
 
-  /* Text — high contrast, never washed out */
-  --text-0: #f5f3ff;
-  --text-1: #c4bfe8;
-  --text-2: #7a7590;
-  --text-3: #4a4760;
+  /* Text */
+  --text-0: #f8f8f8;
+  --text-1: #aaaaaa;
+  --text-2: #666666;
+  --text-3: #444444;
 
-  /* Semantic accents — vivid, saturated */
-  --accent-live: #f43f5e;
-  --accent-film: #60a5fa;
-  --accent-series: #34d399;
-  --accent-interactive: #8b5cf6;
-  --accent-interactive-dim: rgba(139,92,246,0.18);
-  --accent-warning: #fbbf24;
-  --accent-danger: #f87171;
-  --accent-success: #4ade80;
+  /* Semantic accents — full saturation */
+  --accent-live: #ff3355;
+  --accent-film: #3399ff;
+  --accent-series: #00dd77;
+  --accent-interactive: #7733ff;
+  --accent-interactive-dim: rgba(119,51,255,0.18);
+  --accent-warning: #ffaa00;
+  --accent-danger: #ff3355;
+  --accent-success: #00dd77;
 
   /* Typography */
   --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", sans-serif;
@@ -60,78 +60,78 @@
 ════════════════════════════════════════════════════════════════ */
 :root,
 [data-theme="dark"] {
-  --color-bg:            #0c0c18;
-  --color-surface:       #13131f;
-  --color-card:          #1c1c2c;
-  --color-card-hover:    #252540;
-  --color-border:        rgba(255,255,255,0.12);
-  --color-border-strong: rgba(255,255,255,0.22);
+  --color-bg:            #080808;
+  --color-surface:       #0f0f0f;
+  --color-card:          #181818;
+  --color-card-hover:    #222222;
+  --color-border:        rgba(255,255,255,0.09);
+  --color-border-strong: rgba(255,255,255,0.18);
 
-  --color-primary:       #8b5cf6;
-  --color-primary-hover: #a78bfa;
-  --color-primary-dim:   rgba(139,92,246,0.18);
-  --color-accent:        #c4b5fd;
-  --color-secondary:     #6b62a0;
-  --color-info:          #60a5fa;
+  --color-primary:       #7733ff;
+  --color-primary-hover: #9955ff;
+  --color-primary-dim:   rgba(119,51,255,0.18);
+  --color-accent:        #aa77ff;
+  --color-secondary:     #777777;
+  --color-info:          #3399ff;
 
-  --color-text-primary:  #f5f3ff;
-  --color-text-secondary:#c4bfe8;
-  --color-text-muted:    #7a7590;
+  --color-text-primary:  #f8f8f8;
+  --color-text-secondary:#aaaaaa;
+  --color-text-muted:    #666666;
 
-  --color-success:       #4ade80;
-  --color-warning:       #fbbf24;
-  --color-error:         #f87171;
-  --color-danger:        #f87171;
-  --color-live:          #f43f5e;
-  --color-movie:         #60a5fa;
-  --color-series:        #34d399;
+  --color-success:       #00dd77;
+  --color-warning:       #ffaa00;
+  --color-error:         #ff3355;
+  --color-danger:        #ff3355;
+  --color-live:          #ff3355;
+  --color-movie:         #3399ff;
+  --color-series:        #00dd77;
 
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
 }
 
-/* ── Fractals Day — crisp white, vivid violet/indigo, strong contrast ── */
+/* ── Fractals Day — pure white, neutral grey surfaces, vivid accents ── */
 [data-theme="fractals-day"] {
   --color-bg:            #ffffff;
-  --color-surface:       #f4f2ff;
-  --color-card:          #ebe8ff;
-  --color-card-hover:    #ddd9ff;
-  --color-border:        rgba(79,70,229,0.18);
-  --color-border-strong: rgba(79,70,229,0.32);
+  --color-surface:       #f5f5f5;
+  --color-card:          #eeeeee;
+  --color-card-hover:    #e4e4e4;
+  --color-border:        rgba(0,0,0,0.10);
+  --color-border-strong: rgba(0,0,0,0.20);
 
-  --color-primary:       #5b21b6;
-  --color-primary-hover: #4c1d95;
-  --color-primary-dim:   rgba(91,33,182,0.14);
-  --color-accent:        #7c3aed;
-  --color-secondary:     #4b5563;
-  --color-info:          #0369a1;
+  --color-primary:       #7733ff;
+  --color-primary-hover: #6600ee;
+  --color-primary-dim:   rgba(119,51,255,0.12);
+  --color-accent:        #7733ff;
+  --color-secondary:     #888888;
+  --color-info:          #0066ff;
 
-  --color-text-primary:  #09071a;
-  --color-text-secondary:#2e2a66;
-  --color-text-muted:    #5b5880;
+  --color-text-primary:  #0a0a0a;
+  --color-text-secondary:#444444;
+  --color-text-muted:    #888888;
 
-  --color-success:       #15803d;
-  --color-warning:       #b45309;
-  --color-error:         #be123c;
-  --color-danger:        #be123c;
-  --color-live:          #be123c;
-  --color-movie:         #1d4ed8;
-  --color-series:        #047857;
+  --color-success:       #00cc66;
+  --color-warning:       #ff9900;
+  --color-error:         #ee0033;
+  --color-danger:        #ee0033;
+  --color-live:          #ee0033;
+  --color-movie:         #0066ff;
+  --color-series:        #00cc66;
 
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
 }
 
-/* ── Source palette overrides for Fractals Day — slightly deeper for light bg ── */
+/* ── Source palette overrides for Fractals Day — deeper for readability on white ── */
 [data-theme="fractals-day"] {
-  --color-src-1: #0080b3;   /* sky blue    */
-  --color-src-2: #b87800;   /* amber       */
-  --color-src-3: #6a8700;   /* lime green  */
-  --color-src-4: #d93030;   /* red         */
-  --color-src-5: #c4b800;   /* yellow      */
-  --color-src-6: #4B0082;   /* purple      */
-  --color-src-7: #a8527e;   /* pink/mauve  */
-  --color-src-8: #008c85;   /* teal        */
+  --color-src-1: #0077cc;   /* sky blue    */
+  --color-src-2: #cc8800;   /* amber       */
+  --color-src-3: #558800;   /* lime green  */
+  --color-src-4: #dd2222;   /* red         */
+  --color-src-5: #aa9900;   /* yellow      */
+  --color-src-6: #6600cc;   /* purple      */
+  --color-src-7: #cc3388;   /* pink        */
+  --color-src-8: #009988;   /* teal        */
 }
 
 /* ════════════════════════════════════════════════════════════════
@@ -166,17 +166,20 @@
    Light mode: inverted — bg-2 = lightest body, bg-1 = slightly off-white panel/nav
    Also: borders need to use dark ink, not white; text-3 needs different derivation */
 [data-theme="fractals-day"] {
-  /* Remap bg hierarchy for light — panel/nav gets surface, content gets bg */
+  /* Remap bg hierarchy for light */
   --bg-0: var(--color-card);
   --bg-1: var(--color-surface);
   --bg-2: var(--color-bg);
   --bg-3: var(--color-card);
   /* Text */
-  --text-3: color-mix(in srgb, var(--color-text-muted) 60%, transparent);
+  --text-0: var(--color-text-primary);
+  --text-1: var(--color-text-secondary);
+  --text-2: var(--color-text-muted);
+  --text-3: rgba(0,0,0,0.30);
   /* Borders — visible on white */
-  --border-subtle: var(--color-border);
-  --border-default: var(--color-border-strong);
-  --border-strong: rgba(79,70,229,0.44);
+  --border-subtle: rgba(0,0,0,0.08);
+  --border-default: rgba(0,0,0,0.14);
+  --border-strong: rgba(0,0,0,0.24);
 }
 
 /* ════════════════════════════════════════════════════════════════

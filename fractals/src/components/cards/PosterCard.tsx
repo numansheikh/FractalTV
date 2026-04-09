@@ -26,8 +26,7 @@ export function PosterCard({ item, onClick }: Props) {
   const rating = item.ratingTmdb ?? item.rating_tmdb ?? item.ratingImdb ?? item.rating_imdb
   const primarySourceId = item.primarySourceId ?? item.primary_source_id ?? (item as any).source_ids ?? item.id?.split(':')[0]
   const sourceColor = primarySourceId ? colorMap[primarySourceId] : undefined
-  const sourceName = primarySourceId ? sources.find((s) => s.id === primarySourceId)?.name : undefined
-  const showSourceBadge = sources.length > 1 && sourceName
+  const showSourceBadge = sources.length > 1 && !!sourceColor
 
   const isFavorite = userData?.favorite === 1
   const isCompleted = userData?.completed === 1
@@ -71,24 +70,6 @@ export function PosterCard({ item, onClick }: Props) {
           <PosterPlaceholder id={item.id} title={item.title} style={{ position: 'absolute', inset: 0 }} />
         )}
 
-        {/* Series type badge — top left */}
-        {item.type === 'series' && (
-          <div style={{
-            position: 'absolute', top: 6, left: 6,
-            padding: '2px 5px',
-            borderRadius: 3,
-            background: 'rgba(16,185,129,0.18)',
-            border: '1px solid rgba(16,185,129,0.35)',
-            fontSize: 9,
-            fontWeight: 700,
-            letterSpacing: '0.07em',
-            color: 'var(--accent-series)',
-            lineHeight: 1,
-            zIndex: 1,
-          }}>
-            S
-          </div>
-        )}
 
         {/* Persistent favorite heart — top left (when not hovered) */}
         {isFavorite && !hovered && (
@@ -106,21 +87,6 @@ export function PosterCard({ item, onClick }: Props) {
           </div>
         )}
 
-        {/* Source name badge — top left, only when multiple sources */}
-        {showSourceBadge && (
-          <div style={{
-            position: 'absolute', top: 6, left: 6,
-            padding: '2px 5px', borderRadius: 3,
-            background: 'rgba(0,0,0,0.72)',
-            color: sourceColor ? sourceColor.accent : 'var(--text-1)',
-            fontSize: 9, fontWeight: 700, letterSpacing: '0.04em',
-            textTransform: 'uppercase',
-            zIndex: 1,
-            maxWidth: 80, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          }}>
-            {sourceName}
-          </div>
-        )}
 
         {/* Completed checkmark — top right */}
         {isCompleted && (
@@ -178,21 +144,34 @@ export function PosterCard({ item, onClick }: Props) {
         }}>
           {item.title}
         </p>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 3 }}>
-          {item.year && (
-            <span style={{ fontSize: 10, color: 'var(--text-2)' }}>{item.year}</span>
-          )}
-          {rating != null && rating > 0 && (
-            <span style={{
-              fontSize: 10, color: 'var(--text-2)',
-              display: 'flex', alignItems: 'center', gap: 2,
-            }}>
-              <svg width="7" height="7" viewBox="0 0 24 24" fill="var(--accent-warning)">
-                <path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
-              </svg>
-              {Number(rating).toFixed(1)}
-            </span>
-          )}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 3 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            {item.year && (
+              <span style={{ fontSize: 10, color: 'var(--text-2)' }}>{item.year}</span>
+            )}
+            {rating != null && rating > 0 && (
+              <span style={{ fontSize: 10, color: 'var(--text-2)', display: 'flex', alignItems: 'center', gap: 2 }}>
+                <svg width="7" height="7" viewBox="0 0 24 24" fill="var(--accent-warning)">
+                  <path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+                </svg>
+                {Number(rating).toFixed(1)}
+              </span>
+            )}
+          </div>
+          {(item.type === 'movie' || item.type === 'series') && (() => {
+            const isMovie = item.type === 'movie'
+            const color = isMovie ? 'var(--accent-film)' : 'var(--accent-series)'
+            return (
+              <span style={{
+                fontSize: 9, fontWeight: 700, letterSpacing: '0.08em',
+                color, border: `1px solid ${color}`,
+                borderRadius: 3, padding: '1px 4px', lineHeight: 1.4,
+                opacity: 0.85,
+              }}>
+                {isMovie ? 'MOVIE' : 'SERIES'}
+              </span>
+            )
+          })()}
         </div>
       </div>
     </div>

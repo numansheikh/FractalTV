@@ -3,6 +3,7 @@ import { useContextMenuStore } from '@/stores/contextMenu.store'
 import { useUserStore } from '@/stores/user.store'
 import { useAppStore } from '@/stores/app.store'
 import { useSearchStore } from '@/stores/search.store'
+import { useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 
 const VIEW_MAP = { live: 'live', movie: 'films', series: 'series' } as const
@@ -12,6 +13,7 @@ export function ContextMenu() {
   const userData = useUserStore((s) => item ? s.data[item.id] : undefined)
   const setFav = useUserStore((s) => s.setFavorite)
   const setWl = useUserStore((s) => s.setWatchlist)
+  const qc = useQueryClient()
 
   const isFavorite = userData?.favorite === 1
   const isWatchlist = userData?.watchlist === 1
@@ -42,9 +44,12 @@ export function ContextMenu() {
   const handleWatchlist = useCallback(() => {
     if (!item) return
     setWl(item.id, !isWatchlist)
-    api.user.toggleWatchlist(item.id)
+    api.user.toggleWatchlist(item.id).then(() => {
+      qc.invalidateQueries({ queryKey: ['home-watchlist'] })
+      qc.invalidateQueries({ queryKey: ['library', 'watchlist'] })
+    })
     hide()
-  }, [item, isWatchlist, setWl, hide])
+  }, [item, isWatchlist, setWl, qc, hide])
 
   const handleBrowseCategory = useCallback(async () => {
     if (!item) return

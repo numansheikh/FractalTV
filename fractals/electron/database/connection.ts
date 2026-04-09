@@ -190,6 +190,75 @@ function createTables(db: Database.Database) {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+
+    -- ── Two-layer data model (Phase A: channels) ──────────────────────────
+
+    -- Layer 2: Canonical identity — deduplicated, persistent, source-independent
+    -- Channels: id = 'ch:{tvg_id}' if tvg_id set, else 'ch:{sourceId}:{stream_id}'
+    CREATE TABLE IF NOT EXISTS canonical (
+      id             TEXT PRIMARY KEY,
+      type           TEXT NOT NULL,        -- 'channel' | 'movie' | 'series'
+      title          TEXT NOT NULL,
+      original_title TEXT,
+      year           INTEGER,
+      tmdb_id        INTEGER,
+      tvg_id         TEXT,                 -- for channel EPG matching
+      poster_path    TEXT,
+      vote_average   REAL,
+      genres_json    TEXT,
+      overview       TEXT,
+      cast_json      TEXT,
+      created_at     INTEGER DEFAULT (unixepoch()),
+      enriched_at    INTEGER
+    );
+
+    -- FTS5 on canonical — single search target, cross-language
+    CREATE VIRTUAL TABLE IF NOT EXISTS canonical_fts USING fts5(
+      canonical_id UNINDEXED,
+      title,
+      original_title,
+      tokenize = 'unicode61 remove_diacritics 2'
+    );
+
+    -- Layer 1: Provider streams — ephemeral, cascades on source delete
+    CREATE TABLE IF NOT EXISTS streams (
+      id                  TEXT PRIMARY KEY, -- '{sourceId}:live:{stream_id}'
+      canonical_id        TEXT REFERENCES canonical(id) ON DELETE SET NULL,
+      source_id           TEXT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+      type                TEXT NOT NULL,    -- 'live' | 'movie' | 'series'
+      stream_id           TEXT NOT NULL,
+      title               TEXT NOT NULL,
+      category_id         TEXT,
+      tvg_id              TEXT,
+      thumbnail_url       TEXT,
+      stream_url          TEXT,
+      container_extension TEXT,
+      added_at            INTEGER DEFAULT (unixepoch())
+    );
+
+    -- User data anchored to canonical — survives source deletion
+    CREATE TABLE IF NOT EXISTS user_data_v2 (
+      canonical_id    TEXT NOT NULL REFERENCES canonical(id) ON DELETE CASCADE,
+      profile_id      TEXT NOT NULL DEFAULT 'default',
+      is_favorite     INTEGER DEFAULT 0,
+      fav_sort_order  INTEGER,
+      is_watchlisted  INTEGER DEFAULT 0,
+      rating          INTEGER,
+      watch_position  INTEGER DEFAULT 0,
+      watch_duration  INTEGER,
+      last_watched_at INTEGER,
+      completed       INTEGER DEFAULT 0,
+      created_at      INTEGER DEFAULT (unixepoch()),
+      PRIMARY KEY (canonical_id, profile_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_canonical_type   ON canonical(type);
+    CREATE INDEX IF NOT EXISTS idx_canonical_tvg_id ON canonical(tvg_id);
+    CREATE INDEX IF NOT EXISTS idx_canonical_tmdb   ON canonical(tmdb_id);
+    CREATE INDEX IF NOT EXISTS idx_streams_canonical ON streams(canonical_id);
+    CREATE INDEX IF NOT EXISTS idx_streams_source    ON streams(source_id);
+    CREATE INDEX IF NOT EXISTS idx_streams_type      ON streams(type);
+    CREATE INDEX IF NOT EXISTS idx_udv2_profile_fav  ON user_data_v2(profile_id, is_favorite);
   `)
 
   // Migrations — safe to run on existing DBs
@@ -231,6 +300,40 @@ function createTables(db: Database.Database) {
     }
   } catch (e) {
     console.error('[DB] Migration FAILED:', e)
+  }
+
+  // Migrate existing channel favorites from user_data → user_data_v2
+  // Runs every startup; INSERT OR IGNORE is idempotent. Only migrates channels
+  // that have a corresponding streams row (i.e. were synced after new schema was added).
+  try {
+    db.exec(`
+      INSERT OR IGNORE INTO user_data_v2 (canonical_id, profile_id, is_favorite, fav_sort_order, last_watched_at)
+      SELECT s.canonical_id, ud.profile_id, ud.favorite, ud.fav_sort_order, ud.last_watched_at
+      FROM user_data ud
+      JOIN content c ON c.id = ud.content_id AND c.type = 'live'
+      JOIN streams s ON s.id = c.id AND s.canonical_id IS NOT NULL
+      WHERE ud.favorite = 1
+    `)
+  } catch {}
+
+  // Migrate source color from settings table → sources.color_index
+  try { db.exec(`ALTER TABLE sources ADD COLUMN color_index INTEGER`) } catch {}
+  try {
+    const migrated = db.prepare(`SELECT value FROM settings WHERE key = 'migration_source_color_column'`).get() as any
+    if (!migrated) {
+      const colorRows = db.prepare(`SELECT key, value FROM settings WHERE key LIKE 'source_color_%'`).all() as any[]
+      const update = db.prepare(`UPDATE sources SET color_index = ? WHERE id = ?`)
+      const upsert = db.transaction(() => {
+        for (const row of colorRows) {
+          const sourceId = row.key.replace('source_color_', '')
+          update.run(parseInt(row.value), sourceId)
+        }
+        db.prepare(`INSERT OR REPLACE INTO settings (key, value) VALUES ('migration_source_color_column', '1')`).run()
+      })
+      upsert()
+    }
+  } catch (e) {
+    console.error('[DB] source color migration failed:', e)
   }
 
   // Reset any sources stuck in 'syncing' from a previous crashed/killed run

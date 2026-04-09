@@ -1,6 +1,6 @@
 import { ipcMain, BrowserWindow, app, dialog } from 'electron'
 import { spawn } from 'child_process'
-import { existsSync } from 'fs'
+import { existsSync, writeFileSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { Worker } from 'worker_threads'
 import { getDb, getSqlite, getSetting, setSetting, rebuildFtsIfNeeded } from '../database/connection'
@@ -48,6 +48,16 @@ export function registerHandlers() {
     return { canceled: false, filePath: result.filePaths[0] }
   })
 
+  ipcMain.handle('dialog:save-file', async (event, args: { defaultPath?: string; filters?: { name: string; extensions: string[] }[] }) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const result = await dialog.showSaveDialog(win!, {
+      defaultPath: args?.defaultPath,
+      filters: args?.filters ?? [{ name: 'All Files', extensions: ['*'] }],
+    })
+    if (result.canceled || !result.filePath) return { canceled: true }
+    return { canceled: false, filePath: result.filePath }
+  })
+
   // ── DevTools ─────────────────────────────────────────────────────────────
   ipcMain.handle('devtools:toggle', (event) => {
     event.sender.toggleDevTools()
@@ -59,15 +69,145 @@ export function registerHandlers() {
     const db = getDb()
     const sqlite = getSqlite()
     const rows = await db.select().from(sources).all()
-    return rows.map((s) => {
-      const val = sqlite.prepare(`SELECT value FROM settings WHERE key = ?`).get(`source_color_${s.id}`) as any
-      return { ...s, colorIndex: val ? parseInt(val.value) : undefined }
-    })
+    return rows.map((s) => ({ ...s, colorIndex: (s as any).color_index ?? undefined }))
   })
 
   ipcMain.handle('sources:set-color', (_event, sourceId: string, colorIndex: number) => {
     const sqlite = getSqlite()
-    sqlite.prepare(`INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)`).run(`source_color_${sourceId}`, String(colorIndex))
+    sqlite.prepare(`UPDATE sources SET color_index = ? WHERE id = ?`).run(colorIndex, sourceId)
+    return { ok: true }
+  })
+
+  ipcMain.handle('sources:export', async (event, opts: { includeUserData?: boolean } = {}) => {
+    const sqlite = getSqlite()
+
+    const sources = sqlite.prepare(`
+      SELECT id, type, name, server_url, username, password, m3u_url, status, disabled, color_index
+      FROM sources ORDER BY created_at ASC
+    `).all()
+
+    // Settings: export non-UI keys (tmdb key + any future service keys)
+    const settingKeys = ['tmdb_api_key']
+    const settings: Record<string, string> = {}
+    for (const key of settingKeys) {
+      const row = sqlite.prepare(`SELECT value FROM settings WHERE key = ?`).get(key) as any
+      if (row?.value) settings[key] = row.value
+    }
+
+    const payload: any = {
+      version: 1,
+      exported_at: new Date().toISOString(),
+      sources,
+      settings,
+    }
+
+    if (opts.includeUserData) {
+      payload.user_data = sqlite.prepare(`SELECT * FROM user_data`).all()
+      payload.user_data_v2 = sqlite.prepare(`SELECT * FROM user_data_v2`).all()
+    }
+
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const result = await dialog.showSaveDialog(win!, {
+      defaultPath: `fractals-backup-${new Date().toISOString().slice(0, 10)}.json`,
+      filters: [{ name: 'JSON', extensions: ['json'] }],
+    })
+    if (result.canceled || !result.filePath) return { canceled: true }
+    writeFileSync(result.filePath, JSON.stringify(payload, null, 2), 'utf8')
+    return { canceled: false, count: (sources as any[]).length }
+  })
+
+  ipcMain.handle('sources:import', (_event, filePath: string) => {
+    const sqlite = getSqlite()
+    let parsed: any
+    try {
+      parsed = JSON.parse(readFileSync(filePath, 'utf8'))
+    } catch {
+      return { error: 'Invalid JSON file' }
+    }
+    if (!Array.isArray(parsed?.sources)) return { error: 'Invalid format — missing sources array' }
+
+    const insertSource = sqlite.prepare(`
+      INSERT INTO sources (id, type, name, server_url, username, password, m3u_url, status, disabled, color_index)
+      VALUES (@id, @type, @name, @server_url, @username, @password, @m3u_url, @status, @disabled, @color_index)
+      ON CONFLICT(id) DO UPDATE SET
+        type = excluded.type, name = excluded.name,
+        server_url = excluded.server_url, username = excluded.username,
+        password = excluded.password, m3u_url = excluded.m3u_url,
+        status = excluded.status, disabled = excluded.disabled,
+        color_index = excluded.color_index
+    `)
+    const insertUserData = sqlite.prepare(`
+      INSERT OR REPLACE INTO user_data (content_id, profile_id, favorite, watchlist, rating, last_position, last_watched_at, completed, fav_sort_order)
+      VALUES (@content_id, @profile_id, @favorite, @watchlist, @rating, @last_position, @last_watched_at, @completed, @fav_sort_order)
+    `)
+    const insertUserDataV2 = sqlite.prepare(`
+      INSERT OR REPLACE INTO user_data_v2 (canonical_id, profile_id, is_favorite, fav_sort_order, is_watchlisted, rating, watch_position, watch_duration, last_watched_at)
+      VALUES (@canonical_id, @profile_id, @is_favorite, @fav_sort_order, @is_watchlisted, @rating, @watch_position, @watch_duration, @last_watched_at)
+    `)
+
+    try {
+      sqlite.transaction(() => {
+        for (const s of parsed.sources) {
+          insertSource.run({
+            id:          s.id,
+            type:        s.type,
+            name:        s.name ?? 'Imported Source',
+            server_url:  s.server_url ?? null,
+            username:    s.username ?? null,
+            password:    s.password ?? null,
+            m3u_url:     s.m3u_url ?? null,
+            status:      s.status ?? 'active',
+            disabled:    s.disabled ?? 0,
+            color_index: s.color_index ?? null,
+          })
+        }
+
+        if (parsed.settings) {
+          const upsertSetting = sqlite.prepare(`INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)`)
+          for (const [key, value] of Object.entries(parsed.settings)) {
+            upsertSetting.run(key, value)
+          }
+          // Re-activate TMDB key if present
+          if (parsed.settings.tmdb_api_key) tmdbService.setApiKey(parsed.settings.tmdb_api_key)
+        }
+
+        if (Array.isArray(parsed.user_data)) {
+          for (const row of parsed.user_data) insertUserData.run(row)
+        }
+        if (Array.isArray(parsed.user_data_v2)) {
+          for (const row of parsed.user_data_v2) insertUserDataV2.run(row)
+        }
+      })()
+
+      return { ok: true, count: parsed.sources.length }
+    } catch (err: any) {
+      return { error: err.message }
+    }
+  })
+
+  ipcMain.handle('sources:factory-reset', () => {
+    const sqlite = getSqlite()
+    // Disable FK checks so we can delete in any order without cascade overhead
+    sqlite.pragma('foreign_keys = OFF')
+    try {
+      sqlite.transaction(() => {
+        sqlite.prepare(`DELETE FROM user_data`).run()
+        sqlite.prepare(`DELETE FROM user_data_v2`).run()
+        sqlite.prepare(`DELETE FROM epg`).run()
+        sqlite.prepare(`DELETE FROM content_sources`).run()
+        sqlite.prepare(`DELETE FROM content_fts`).run()
+        sqlite.prepare(`DELETE FROM content`).run()
+        sqlite.prepare(`DELETE FROM categories`).run()
+        sqlite.prepare(`DELETE FROM canonical`).run()
+        sqlite.prepare(`DELETE FROM streams`).run()
+        sqlite.prepare(`DELETE FROM sources`).run()
+        sqlite.prepare(`DELETE FROM settings WHERE key NOT IN ('migration_source_scoped_ids', 'migration_source_color_column')`).run()
+        try { sqlite.prepare(`DELETE FROM embeddings`).run() } catch {}
+        try { sqlite.prepare(`DELETE FROM content_categories`).run() } catch {}
+      })()
+    } finally {
+      sqlite.pragma('foreign_keys = ON')
+    }
     return { ok: true }
   })
 
@@ -718,7 +858,21 @@ export function registerHandlers() {
       ON CONFLICT(content_id) DO UPDATE SET favorite = NOT favorite
     `).run(contentId)
     const row = sqlite.prepare('SELECT favorite FROM user_data WHERE content_id = ?').get(contentId) as any
-    return { favorite: !!row?.favorite }
+    const isFavorite = !!row?.favorite
+
+    // Dual-write to user_data_v2 for live channels (new schema)
+    const stream = sqlite.prepare(
+      `SELECT canonical_id FROM streams WHERE id = ?`
+    ).get(contentId) as any
+    if (stream?.canonical_id) {
+      sqlite.prepare(`
+        INSERT INTO user_data_v2 (canonical_id, is_favorite)
+        VALUES (?, ?)
+        ON CONFLICT(canonical_id, profile_id) DO UPDATE SET is_favorite = excluded.is_favorite
+      `).run(stream.canonical_id, isFavorite ? 1 : 0)
+    }
+
+    return { favorite: isFavorite }
   })
 
   ipcMain.handle('user:toggle-watchlist', async (_event, contentId: string) => {
@@ -763,6 +917,84 @@ export function registerHandlers() {
     runAll(order)
     return { ok: true }
   })
+
+  // ── New schema: channel handlers (Phase A) ────────────────────────────
+
+  ipcMain.handle('channels:favorites', async (_event, args?: { profileId?: string }) => {
+    const sqlite = getSqlite()
+    const profileId = args?.profileId ?? 'default'
+    // Return stream-compatible rows: id = stream id (for playback), canonical_id attached for mutations
+    return sqlite.prepare(`
+      SELECT
+        COALESCE(s.id, c.id)          AS id,
+        'live'                         AS type,
+        c.title,
+        COALESCE(s.thumbnail_url, c.poster_path) AS poster_url,
+        s.source_id                    AS primary_source_id,
+        c.id                           AS canonical_id,
+        c.tvg_id,
+        s.category_id,
+        ud.fav_sort_order,
+        ud.last_watched_at,
+        1                              AS favorite
+      FROM user_data_v2 ud
+      JOIN canonical c ON c.id = ud.canonical_id
+      LEFT JOIN streams s ON s.canonical_id = c.id
+        AND s.source_id = (
+          SELECT s2.source_id FROM streams s2
+          JOIN sources src ON src.id = s2.source_id AND src.disabled = 0
+          WHERE s2.canonical_id = c.id
+          ORDER BY s2.added_at ASC LIMIT 1
+        )
+      WHERE ud.is_favorite = 1 AND ud.profile_id = ?
+        AND c.type = 'channel'
+      GROUP BY c.id
+      ORDER BY COALESCE(ud.fav_sort_order, 999999) ASC, ud.last_watched_at DESC
+    `).all(profileId)
+  })
+
+  ipcMain.handle('channels:toggle-favorite', async (_event, canonicalId: string) => {
+    const sqlite = getSqlite()
+    sqlite.prepare(`
+      INSERT INTO user_data_v2 (canonical_id, is_favorite)
+      VALUES (?, 1)
+      ON CONFLICT(canonical_id, profile_id) DO UPDATE SET is_favorite = NOT is_favorite
+    `).run(canonicalId)
+    const row = sqlite.prepare(
+      `SELECT is_favorite FROM user_data_v2 WHERE canonical_id = ? AND profile_id = 'default'`
+    ).get(canonicalId) as any
+    return { favorite: !!row?.is_favorite }
+  })
+
+  ipcMain.handle('channels:reorder-favorites', async (_event, order: { canonicalId: string; sortOrder: number }[]) => {
+    const sqlite = getSqlite()
+    const update = sqlite.prepare(
+      `UPDATE user_data_v2 SET fav_sort_order = ? WHERE canonical_id = ? AND profile_id = 'default'`
+    )
+    const runAll = sqlite.transaction((items: typeof order) => {
+      for (const { canonicalId, sortOrder } of items) {
+        update.run(sortOrder, canonicalId)
+      }
+    })
+    runAll(order)
+    return { ok: true }
+  })
+
+  ipcMain.handle('channels:get-data', async (_event, canonicalId: string) => {
+    const sqlite = getSqlite()
+    const row = sqlite.prepare(
+      `SELECT * FROM user_data_v2 WHERE canonical_id = ? AND profile_id = 'default'`
+    ).get(canonicalId) as any
+    return {
+      favorite:    !!row?.is_favorite,
+      watchlisted: !!row?.is_watchlisted,
+      rating:      row?.rating ?? null,
+      position:    row?.watch_position ?? 0,
+      completed:   !!row?.completed,
+    }
+  })
+
+  // ── End new schema handlers ────────────────────────────────────────────
 
   ipcMain.handle('user:watchlist', async (_event, args?: { type?: 'live' | 'movie' | 'series' }) => {
     const sqlite = getSqlite()
@@ -967,12 +1199,14 @@ export function registerHandlers() {
   ipcMain.handle('user:clear-favorites', async () => {
     const sqlite = getSqlite()
     sqlite.prepare(`UPDATE user_data SET favorite = 0, watchlist = 0`).run()
+    sqlite.prepare(`UPDATE user_data_v2 SET is_favorite = 0, is_watchlisted = 0`).run()
     return { success: true }
   })
 
   ipcMain.handle('user:clear-all-data', async () => {
     const sqlite = getSqlite()
     sqlite.prepare(`DELETE FROM user_data`).run()
+    sqlite.prepare(`DELETE FROM user_data_v2`).run()
     return { success: true }
   })
 

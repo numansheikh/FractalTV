@@ -65,7 +65,11 @@ export function ContentDetail({ item, onPlay, onClose, onNavigate, isPlaying }: 
   })
   const toggleWl = useMutation({
     mutationFn: () => api.user.toggleWatchlist(item.id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['user-data', item.id] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['user-data', item.id] })
+      qc.invalidateQueries({ queryKey: ['home-watchlist'] })
+      qc.invalidateQueries({ queryKey: ['library', 'watchlist'] })
+    },
   })
 
   const { data: full } = useQuery({

@@ -66,6 +66,7 @@ function ChannelListRow({ item, onClick }: ChannelListRowProps) {
     } catch { /* noop */ }
     qc.invalidateQueries({ queryKey: ['browse-favorites'] })
     qc.invalidateQueries({ queryKey: ['library', 'favorites'] })
+    if (item.type === 'live') qc.invalidateQueries({ queryKey: ['channels', 'favorites'] })
   }
 
   const primarySourceId = item.primarySourceId ?? item.primary_source_id ?? (item as any).source_ids ?? item.id?.split(':')[0]

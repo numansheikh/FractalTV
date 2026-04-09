@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useAppStore } from '@/stores/app.store'
 import { useUserStore } from '@/stores/user.store'
+import { useSourcesStore } from '@/stores/sources.store'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { SlidePanel } from '@/components/layout/SlidePanel'
@@ -228,7 +229,7 @@ function AppearanceTab({ theme, font, setTheme, setFont }: {
   theme: ThemeId; font: FontId
   setTheme: (t: ThemeId) => void; setFont: (f: FontId) => void
 }) {
-  const { pageSize, setPageSize, homeMode, setHomeMode } = useAppStore()
+  const { pageSize, setPageSize, homeMode, setHomeMode, homeStripSize, setHomeStripSize } = useAppStore()
   const [searchLive, setSearchLive] = useState(() => Number(localStorage.getItem('fractals-search-live-limit')) || 20)
   const [searchMovies, setSearchMovies] = useState(() => Number(localStorage.getItem('fractals-search-movie-limit')) || 45)
   const [searchSeries, setSearchSeries] = useState(() => Number(localStorage.getItem('fractals-search-series-limit')) || 35)
@@ -240,7 +241,7 @@ function AppearanceTab({ theme, font, setTheme, setFont }: {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
 
       <section>
         <SectionLabel>Theme</SectionLabel>
@@ -285,6 +286,43 @@ function AppearanceTab({ theme, font, setTheme, setFont }: {
       </section>
 
       <section>
+        <SectionLabel>Home Screen</SectionLabel>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {(['discover', 'channels'] as const).map((mode) => {
+              const active = homeMode === mode
+              const label = mode === 'discover' ? 'Discover' : 'TV'
+              const desc = mode === 'discover'
+                ? 'Strips of channels, movies & series'
+                : 'Your favourite channels, drag to reorder'
+              return (
+                <button
+                  key={mode}
+                  onClick={() => setHomeMode(mode)}
+                  style={{
+                    flex: 1, padding: '10px 12px', borderRadius: 8, cursor: 'pointer',
+                    border: `1px solid ${active ? 'var(--accent-interactive)' : 'var(--border-default)'}`,
+                    background: active ? 'var(--accent-interactive-dim)' : 'var(--bg-2)',
+                    textAlign: 'left', transition: 'all 0.1s',
+                    display: 'flex', flexDirection: 'column', gap: 3,
+                  }}
+                >
+                  <span style={{ fontSize: 12, fontWeight: 600, color: active ? 'var(--accent-interactive)' : 'var(--text-0)', fontFamily: 'var(--font-ui)' }}>
+                    {label}
+                  </span>
+                  <span style={{ fontSize: 10, color: 'var(--text-2)', fontFamily: 'var(--font-ui)' }}>
+                    {desc}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+          <PagingInput label="Strip width (cards per row)" value={homeStripSize} min={5} max={16} step={1}
+            onChange={(v) => setHomeStripSize(Math.max(5, Math.min(16, v)))} />
+        </div>
+      </section>
+
+      <section>
         <SectionLabel>Browse &amp; Search</SectionLabel>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <PagingInput label="Items per page" value={pageSize} min={100} max={5000} step={100}
@@ -299,42 +337,6 @@ function AppearanceTab({ theme, font, setTheme, setFont }: {
             Items per page: 100–5,000 (default 500). Pagination shown when total exceeds 1,000.
           </p>
         </div>
-      </section>
-
-      <section>
-        <SectionLabel>Home Screen</SectionLabel>
-        <div style={{ display: 'flex', gap: 8 }}>
-          {(['discover', 'channels'] as const).map((mode) => {
-            const active = homeMode === mode
-            const label = mode === 'discover' ? 'Discover' : 'My Channels'
-            const desc = mode === 'discover'
-              ? 'Channels, movies & series strips'
-              : 'Your favourite channels grid'
-            return (
-              <button
-                key={mode}
-                onClick={() => setHomeMode(mode)}
-                style={{
-                  flex: 1, padding: '10px 12px', borderRadius: 8, cursor: 'pointer',
-                  border: `1px solid ${active ? 'var(--accent-interactive)' : 'var(--border-default)'}`,
-                  background: active ? 'var(--accent-interactive-dim)' : 'var(--bg-2)',
-                  textAlign: 'left', transition: 'all 0.1s',
-                  display: 'flex', flexDirection: 'column', gap: 3,
-                }}
-              >
-                <span style={{ fontSize: 12, fontWeight: 600, color: active ? 'var(--accent-interactive)' : 'var(--text-0)', fontFamily: 'var(--font-ui)' }}>
-                  {label}
-                </span>
-                <span style={{ fontSize: 10, color: 'var(--text-2)', fontFamily: 'var(--font-ui)' }}>
-                  {desc}
-                </span>
-              </button>
-            )
-          })}
-        </div>
-        <p style={{ fontSize: 10, color: 'var(--text-2)', lineHeight: 1.5, marginTop: 6 }}>
-          My Channels shows your favourited channels. If the list is empty, you'll be prompted to switch back.
-        </p>
       </section>
     </div>
   )
@@ -584,17 +586,21 @@ function EnrichmentTab({ tmdbKey, setTmdbKey, enrichStatus, enrichProgress, enri
 /* ── Data tab ──────────────────────────────────────────────────── */
 function DataTab() {
   const qc = useQueryClient()
-  const [confirm, setConfirm] = useState<'history' | 'favorites' | 'all' | 'prefs' | null>(null)
+  const setSources = useSourcesStore((s) => s.setSources)
+  const [confirm, setConfirm] = useState<'history' | 'favorites' | 'all' | 'prefs' | 'factory' | null>(null)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
+  const [importMsg, setImportMsg] = useState<string | null>(null)
+  const [includeUserData, setIncludeUserData] = useState(false)
 
-  const run = async (action: 'history' | 'favorites' | 'all' | 'prefs') => {
+  const run = async (action: 'history' | 'favorites' | 'all' | 'prefs' | 'factory') => {
     setBusy(true)
     setMsg(null)
     try {
       if (action === 'history')   await api.user.clearHistory()
       if (action === 'favorites') await api.user.clearFavorites()
       if (action === 'all')       await api.user.clearAllData()
+      if (action === 'factory')   await api.sources.factoryReset()
       if (action === 'prefs') {
         // Reset persisted UI preferences to defaults
         useAppStore.setState({
@@ -614,20 +620,58 @@ function DataTab() {
       // Wipe the in-memory user store so stale data doesn't linger
       useUserStore.setState({ data: {} })
 
-      // Invalidate all user-data query caches
+      // Invalidate all caches
       qc.invalidateQueries({ queryKey: ['userdata'] })
       qc.invalidateQueries({ queryKey: ['browse-favorites'] })
       qc.invalidateQueries({ queryKey: ['library'] })
       qc.invalidateQueries({ queryKey: ['home-continue'] })
       qc.invalidateQueries({ queryKey: ['home-watchlist'] })
+      qc.invalidateQueries({ queryKey: ['channels', 'favorites'] })
+      if (action === 'factory') {
+        qc.invalidateQueries({ queryKey: ['sources'] })
+        qc.invalidateQueries({ queryKey: ['home-latest-movies'] })
+        qc.invalidateQueries({ queryKey: ['home-latest-series'] })
+        qc.invalidateQueries({ queryKey: ['browse'] })
+      }
 
-      const labels = { history: 'Watch history cleared.', favorites: 'Favorites & watchlist cleared.', all: 'All user data cleared.', prefs: '' }
+      const labels = { history: 'Watch history cleared.', favorites: 'Favorites & watchlist cleared.', all: 'All user data cleared.', prefs: '', factory: 'Factory reset complete. All data and sources removed.' }
       setMsg(labels[action])
     } catch (e) {
       setMsg(`Error: ${String(e)}`)
     }
     setBusy(false)
     setConfirm(null)
+  }
+
+  const handleExport = async () => {
+    setBusy(true)
+    setImportMsg(null)
+    try {
+      const result = await api.sources.exportBackup({ includeUserData })
+      if (!result.canceled) setImportMsg(`Exported ${result.count} source${result.count !== 1 ? 's' : ''}${includeUserData ? ' + user data' : ''}.`)
+    } catch (e) {
+      setImportMsg(`Export failed: ${String(e)}`)
+    }
+    setBusy(false)
+  }
+
+  const handleImport = async () => {
+    setImportMsg(null)
+    const fileResult = await (window.api as any).dialog.openFile({ filters: [{ name: 'JSON', extensions: ['json'] }] })
+    if (fileResult.canceled) return
+    setBusy(true)
+    try {
+      const result = await api.sources.import(fileResult.filePath)
+      if (result.error) setImportMsg(`Import failed: ${result.error}`)
+      else {
+        setImportMsg(`Imported ${result.count} source${result.count !== 1 ? 's' : ''}. Sync to load content.`)
+        const updated = await api.sources.list()
+        setSources(updated as any)
+      }
+    } catch (e) {
+      setImportMsg(`Import failed: ${String(e)}`)
+    }
+    setBusy(false)
   }
 
   const ACTIONS = [
@@ -658,7 +702,7 @@ function DataTab() {
   ]
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
       <section>
         <SectionLabel>User data</SectionLabel>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -721,6 +765,96 @@ function DataTab() {
           <p style={{ fontSize: 11, color: 'var(--accent-success)', marginTop: 8 }}>{msg}</p>
         )}
       </section>
+
+      <section>
+        <SectionLabel>Sources backup</SectionLabel>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ padding: '12px 14px', borderRadius: 8, background: 'var(--bg-2)', border: '1px solid var(--border-subtle)' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-0)', marginBottom: 6 }}>Export backup</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 11, color: 'var(--text-2)', cursor: 'default' }}>
+                    <input type="checkbox" checked disabled style={{ accentColor: 'var(--accent-interactive)' }} />
+                    Sources &amp; Settings (TMDB key, colors)
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 11, color: 'var(--text-2)', cursor: 'pointer' }}>
+                    <input type="checkbox" checked={includeUserData} onChange={(e) => setIncludeUserData(e.target.checked)} style={{ accentColor: 'var(--accent-interactive)', cursor: 'pointer' }} />
+                    User data (favourites, watchlist, history)
+                  </label>
+                </div>
+              </div>
+              <button
+                onClick={handleExport}
+                disabled={busy}
+                style={{ padding: '5px 12px', borderRadius: 6, fontSize: 11, cursor: 'pointer', flexShrink: 0, background: 'var(--bg-3)', color: 'var(--text-1)', border: '1px solid var(--border-default)', opacity: busy ? 0.6 : 1 }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-4)' }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--bg-3)' }}
+              >
+                Export
+              </button>
+            </div>
+          </div>
+          <div style={{ padding: '12px 14px', borderRadius: 8, background: 'var(--bg-2)', border: '1px solid var(--border-subtle)' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-0)', marginBottom: 3 }}>Import sources</div>
+                <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.45 }}>Restore sources from a previously exported JSON file. Existing sources with the same ID will be updated.</div>
+              </div>
+              <button
+                onClick={handleImport}
+                disabled={busy}
+                style={{ padding: '5px 12px', borderRadius: 6, fontSize: 11, cursor: 'pointer', flexShrink: 0, background: 'var(--bg-3)', color: 'var(--text-1)', border: '1px solid var(--border-default)', opacity: busy ? 0.6 : 1 }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-4)' }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--bg-3)' }}
+              >
+                Import
+              </button>
+            </div>
+          </div>
+        </div>
+        {importMsg && (
+          <p style={{ fontSize: 11, color: importMsg.includes('failed') ? 'var(--accent-danger)' : 'var(--accent-success)', marginTop: 8 }}>{importMsg}</p>
+        )}
+      </section>
+
+      <section>
+        <SectionLabel>Factory reset</SectionLabel>
+        <div style={{ padding: '12px 14px', borderRadius: 8, background: 'var(--bg-2)', border: `1px solid ${confirm === 'factory' ? 'rgba(239,68,68,0.35)' : 'var(--border-subtle)'}` }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent-danger)', marginBottom: 3 }}>Factory reset</div>
+              <div style={{ fontSize: 11, color: 'var(--text-2)', lineHeight: 1.45 }}>Removes all sources, content, user data, and history. The app will be completely empty. Export your sources first if you want to restore them.</div>
+            </div>
+            {confirm === 'factory' ? (
+              <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                <button
+                  onClick={() => run('factory')}
+                  disabled={busy}
+                  style={{ padding: '5px 12px', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer', background: 'var(--accent-danger)', color: '#fff', border: 'none', opacity: busy ? 0.6 : 1 }}
+                >
+                  {busy ? '…' : 'Confirm'}
+                </button>
+                <button
+                  onClick={() => setConfirm(null)}
+                  style={{ padding: '5px 10px', borderRadius: 6, fontSize: 11, cursor: 'pointer', background: 'var(--bg-3)', color: 'var(--text-1)', border: '1px solid var(--border-default)' }}
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setConfirm('factory')}
+                style={{ padding: '5px 12px', borderRadius: 6, fontSize: 11, cursor: 'pointer', flexShrink: 0, background: 'var(--bg-3)', color: 'var(--accent-danger)', border: '1px solid rgba(239,68,68,0.25)' }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-4)' }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--bg-3)' }}
+              >
+                Reset
+              </button>
+            )}
+          </div>
+        </div>
+      </section>
     </div>
   )
 }
@@ -780,13 +914,20 @@ function AboutTab() {
 /* ── Shared helpers ────────────────────────────────────────────── */
 function SectionLabel({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
   return (
-    <p style={{
-      fontSize: 10, fontWeight: 700, letterSpacing: '0.06em',
-      textTransform: 'uppercase', color: 'var(--text-2)', marginBottom: 8,
-      fontFamily: 'var(--font-ui)', ...style,
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 8,
+      marginBottom: 12, ...style,
     }}>
-      {children}
-    </p>
+      <span style={{
+        fontSize: 11, fontWeight: 600,
+        color: 'var(--text-1)',
+        fontFamily: 'var(--font-ui)',
+        letterSpacing: '0.01em',
+      }}>
+        {children}
+      </span>
+      <div style={{ flex: 1, height: 1, background: 'var(--border-subtle)' }} />
+    </div>
   )
 }
 

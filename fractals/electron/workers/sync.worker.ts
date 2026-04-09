@@ -117,14 +117,47 @@ async function run() {
     const insertFts = db.prepare(`INSERT OR REPLACE INTO content_fts (content_id, title) VALUES (?, ?)`)
     const insertCC = db.prepare(`INSERT OR IGNORE INTO content_categories (content_id, category_id) SELECT ?, ? WHERE EXISTS (SELECT 1 FROM categories WHERE id = ?)`)
 
+    // New schema double-write — canonical + streams + canonical_fts
+    const insertCanonical = db.prepare(`
+      INSERT INTO canonical (id, type, title, tvg_id, poster_path)
+      VALUES (?, 'channel', ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        title = excluded.title,
+        tvg_id = COALESCE(excluded.tvg_id, canonical.tvg_id),
+        poster_path = COALESCE(excluded.poster_path, canonical.poster_path)
+    `)
+    const insertStream = db.prepare(`
+      INSERT INTO streams (id, canonical_id, source_id, type, stream_id, title, category_id, tvg_id, thumbnail_url)
+      VALUES (?, ?, ?, 'live', ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        canonical_id  = excluded.canonical_id,
+        title         = excluded.title,
+        category_id   = excluded.category_id,
+        tvg_id        = excluded.tvg_id,
+        thumbnail_url = excluded.thumbnail_url
+    `)
+    const insertCanonicalFts = db.prepare(`
+      INSERT OR REPLACE INTO canonical_fts (canonical_id, title) VALUES (?, ?)
+    `)
+
     const BATCH = 500
     const batchLive = db.transaction((items: any[]) => {
       for (const s of items) {
         const cid = `${sourceId}:live:${s.stream_id}`
-        insertLive.run(cid, sourceId, String(s.stream_id), s.name || `Channel ${s.stream_id}`, s.category_id || null, s.stream_icon || null, s.tv_archive ? 1 : 0, s.tv_archive_duration || 0, s.epg_channel_id || null)
+        const title = s.name || `Channel ${s.stream_id}`
+        const tvgId = s.epg_channel_id || null
+
+        // Old schema (unchanged)
+        insertLive.run(cid, sourceId, String(s.stream_id), title, s.category_id || null, s.stream_icon || null, s.tv_archive ? 1 : 0, s.tv_archive_duration || 0, tvgId)
         insertSource.run(cid, cid, sourceId, String(s.stream_id))
-        insertFts.run(cid, normalize(s.name))
+        insertFts.run(cid, normalize(title))
         if (s.category_id) { const catId = `${sourceId}:live:${s.category_id}`; insertCC.run(cid, catId, catId) }
+
+        // New schema double-write
+        const canonicalId = tvgId ? `ch:${tvgId}` : `ch:${sourceId}:${s.stream_id}`
+        insertCanonical.run(canonicalId, title, tvgId, s.stream_icon || null)
+        insertStream.run(cid, canonicalId, sourceId, String(s.stream_id), title, s.category_id || null, tvgId, s.stream_icon || null)
+        insertCanonicalFts.run(canonicalId, normalize(title))
       }
     })
     for (let i = 0; i < (liveStreams?.length ?? 0); i += BATCH) {
