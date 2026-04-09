@@ -12,7 +12,7 @@ interface UserData {
 
 interface UserStore {
   data: Record<string, UserData>
-  loadBulk: (ids: string[]) => Promise<void>
+  loadBulk: (ids: string[], force?: boolean) => Promise<void>
   setFavorite: (id: string, val: boolean) => void
   setWatchlist: (id: string, val: boolean) => void
   setPosition: (id: string, pos: number) => void
@@ -24,11 +24,10 @@ interface UserStore {
 export const useUserStore = create<UserStore>((set, get) => ({
   data: {},
 
-  loadBulk: async (ids: string[]) => {
+  loadBulk: async (ids: string[], force?: boolean) => {
     if (!ids.length) return
-    // Only fetch IDs we don't already have
     const existing = get().data
-    const missing = ids.filter((id) => !(id in existing))
+    const missing = force ? ids : ids.filter((id) => !(id in existing))
     if (!missing.length) return
     const result = await api.user.bulkGetData(missing)
     set((state) => ({ data: { ...state.data, ...result } }))

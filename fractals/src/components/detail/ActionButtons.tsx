@@ -37,9 +37,9 @@ export function ActionButtons({ item, onPlay, episodeToPlay, overridePlayLabel }
         store.setFavorite(item.id, !!(d as any).favorite)
         store.setWatchlist(item.id, !!(d as any).watchlist)
         if ((d as any).rating != null) store.setRating(item.id, (d as any).rating)
-        // Always sync position and completed (even when 0/false)
-        store.setPosition(item.id, (d as any).last_position ?? 0)
-        if ((d as any).completed === 0) store.clearItemHistory(item.id)
+        // Sync position — setPosition sets last_watched_at to now, so only call for nonzero
+        if ((d as any).last_position > 0) store.setPosition(item.id, (d as any).last_position)
+        if ((d as any).completed) store.setCompleted(item.id)
       }
       return d
     },

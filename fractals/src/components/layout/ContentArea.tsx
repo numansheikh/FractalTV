@@ -178,8 +178,8 @@ export function ContentArea({ sort, onSelectContent, onAddSource }: Props) {
   const total: number = query ? items.length : isFavoritesFilter ? favData.length : (browseData?.total ?? 0)
 
   useEffect(() => {
-    if (items.length > 0) loadBulk(items.map((i) => i.id))
-  }, [items, loadBulk])
+    if (items.length > 0) loadBulk(items.map((i) => i.id), isFavoritesFilter)
+  }, [items, loadBulk, isFavoritesFilter])
 
   const isEmpty = !isLoading && items.length === 0
 
