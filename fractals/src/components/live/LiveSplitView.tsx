@@ -58,6 +58,11 @@ export function LiveSplitView({ channel, onFullscreen, onSwitchChannel, onClose 
 
   // Keyboard shortcuts (capture phase, before App.tsx bubble handler)
   const { surfChannel } = useAppStore()
+  // Track mount time — ignore Escape for a brief window so a held/repeated Escape
+  // from closing the player doesn't immediately close the split view too.
+  const mountTimeRef = useRef(Date.now())
+  useEffect(() => { mountTimeRef.current = Date.now() }, [])
+
   useEffect(() => {
     const isTyping = () => {
       const el = document.activeElement
@@ -65,7 +70,13 @@ export function LiveSplitView({ channel, onFullscreen, onSwitchChannel, onClose 
     }
     const handler = (e: KeyboardEvent) => {
       // Escape works regardless of focus — closes guide or split view
-      if (e.key === 'Escape') { e.stopImmediatePropagation(); if (showGuide) { setShowGuide(false) } else { onClose() } return }
+      // Guard: ignore for 300ms after mount (key-repeat from closing player)
+      if (e.key === 'Escape') {
+        e.stopImmediatePropagation()
+        if (Date.now() - mountTimeRef.current < 300) return
+        if (showGuide) { setShowGuide(false) } else { onClose() }
+        return
+      }
       // All other shortcuts are suppressed while typing
       if (isTyping()) return
       if (e.key === 'f' || e.key === 'F') { e.stopImmediatePropagation(); onFullscreen(channel); return }

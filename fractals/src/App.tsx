@@ -1,4 +1,4 @@
-import { useEffect, useState, lazy, Suspense } from 'react'
+import { useEffect, useState, useRef, lazy, Suspense } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { useSourcesStore, Source, SyncProgress } from '@/stores/sources.store'
@@ -46,13 +46,18 @@ function AppShell() {
     playerMode, setPlayerMode,
   } = useAppStore()
 
+  // Guard against StrictMode double-mount triggering duplicate syncs
+  const syncingIds = useRef(new Set<string>())
+
   // Load sources + auto-sync new ones
   useEffect(() => {
     api.sources.list().then((list) => {
       const loaded = list as Source[]
       setSources(loaded)
       for (const src of loaded) {
-        if (!src.disabled && !src.lastSync) handleSync(src.id)
+        if (!src.disabled && !src.lastSync) {
+          handleSync(src.id)
+        }
       }
       if (loaded.length > 0) api.sources.startupCheck()
     })
@@ -134,9 +139,15 @@ function AppShell() {
   }, [setSources, updateSource, setSyncProgress])
 
   const handleSync = async (sourceId: string) => {
+    if (syncingIds.current.has(sourceId)) return
+    syncingIds.current.add(sourceId)
     updateSource(sourceId, { status: 'syncing' })
     setSyncProgress(sourceId, { phase: 'categories', current: 0, total: 0, message: 'Connecting…' })
-    await api.sources.sync(sourceId)
+    try {
+      await api.sources.sync(sourceId)
+    } finally {
+      syncingIds.current.delete(sourceId)
+    }
     setSyncProgress(sourceId, null)
     const list = await api.sources.list()
     setSources(list as Source[])

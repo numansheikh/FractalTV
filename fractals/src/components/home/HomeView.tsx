@@ -67,10 +67,11 @@ export function HomeView({ onSelectContent }: Props) {
   const handleSelectContent = useCallback((item: ContentItem) => {
     if (item.type === 'live') {
       const idx = favChannels.findIndex((c) => c.id === item.id)
-      setChannelSurfContext(favChannels, idx >= 0 ? idx : 0, 'home-discover')
+      const action = effectiveMode === 'channels' ? 'home-channels' : 'home-discover'
+      setChannelSurfContext(favChannels, idx >= 0 ? idx : 0, action)
     }
     onSelectContent(item)
-  }, [favChannels, onSelectContent, setChannelSurfContext])
+  }, [favChannels, effectiveMode, onSelectContent, setChannelSurfContext])
 
   // No auto-fallback — let My Channels show an empty state instead
 

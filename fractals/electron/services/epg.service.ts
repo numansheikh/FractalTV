@@ -176,14 +176,15 @@ export function getNowNext(contentId: string): NowNext {
   const sqlite = getSqlite()
   const now = Math.floor(Date.now() / 1000)
 
-  // Get the channel's epg_channel_id
-  const channel = sqlite.prepare(
-    `SELECT epg_channel_id, primary_source_id FROM content WHERE id = ?`
-  ).get(contentId) as { epg_channel_id: string | null; primary_source_id: string } | undefined
+  // Get the channel's epg_channel_id from streams table (v2)
+  const stream = sqlite.prepare(
+    `SELECT epg_channel_id, source_id FROM streams WHERE id = ?`
+  ).get(contentId) as { epg_channel_id: string | null; source_id: string } | undefined
 
-  if (!channel?.epg_channel_id) return { now: null, next: null }
+  if (!stream?.epg_channel_id) return { now: null, next: null }
 
-  const { epg_channel_id, primary_source_id } = channel
+  const { epg_channel_id } = stream
+  const primary_source_id = stream.source_id
 
   const rows = sqlite.prepare(`
     SELECT * FROM epg

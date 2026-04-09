@@ -4,10 +4,11 @@
  * Fetches metadata for movies and series from The Movie Database API.
  * Rate-limited to 35 req/s (TMDB allows 40, we stay a bit under).
  *
- * To use: set TMDB_API_KEY environment variable, or call setApiKey() before enriching.
+ * Writes enriched data to the `canonical` table (v2 schema).
  */
 
 import { getSqlite } from '../database/connection'
+import { normalizeForSearch } from '../lib/normalize'
 
 // ─── Rate limiter ─────────────────────────────────────────────────────────────
 
@@ -29,7 +30,6 @@ class RateLimiter {
       this.tokens--
       return
     }
-    // Wait for next refill window
     const wait = 1000 - (Date.now() - this.lastRefill)
     await new Promise((r) => setTimeout(r, wait + 10))
     return this.acquire()
@@ -174,21 +174,21 @@ export class TmdbService {
   }
 
   /**
-   * Enrich a batch of content items from the DB.
-   * Skips already-enriched items. Updates DB in place.
+   * Enrich a batch of canonical items from the DB.
+   * Skips already-enriched items. Updates canonical table in place.
    */
   async enrichBatch(
-    contentIds: string[],
+    canonicalIds: string[],
     onProgress?: (done: number, total: number) => void
   ): Promise<void> {
     const sqlite = getSqlite()
-    const total = contentIds.length
+    const total = canonicalIds.length
     let done = 0
 
-    for (const contentId of contentIds) {
-      const item = sqlite.prepare('SELECT * FROM content WHERE id = ?').get(contentId) as any
+    for (const canonicalId of canonicalIds) {
+      const item = sqlite.prepare('SELECT * FROM canonical WHERE id = ?').get(canonicalId) as any
       if (!item || item.enriched) { done++; continue }
-      if (item.type === 'live') { done++; continue } // skip live channels
+      if (item.type === 'channel' || item.type === 'episode') { done++; continue }
 
       const { titles, year } = this.buildSearchCandidates(item.title, item.year)
 
@@ -208,22 +208,11 @@ export class TmdbService {
   }
 
   /**
-   * Build progressively cleaned title candidates from an IPTV title.
-   * Returns unique candidates in order of specificity (most specific first).
-   *
-   * Examples:
-   *   "EN - Henry Danger: The Movie (2025)" → ["Henry Danger: The Movie", "Henry Danger"]
-   *   "GR – Synchronicity (2015)"           → ["Synchronicity"]
-   *   "AR - WWESmackdownLive12-02-"         → ["WWESmackdownLive12-02-"]
-   *   "The Dark Knight (2008)"              → ["The Dark Knight"]
+   * Enrich a single canonical item using a user-provided search title.
    */
-  /**
-   * Enrich a single content item using a user-provided search title.
-   * Used for manual retry when automatic title cleaning fails.
-   */
-  async enrichWithTitle(contentId: string, searchTitle: string, type: string, year?: number): Promise<void> {
+  async enrichWithTitle(canonicalId: string, searchTitle: string, type: string, year?: number): Promise<void> {
     const sqlite = getSqlite()
-    const item = sqlite.prepare('SELECT * FROM content WHERE id = ?').get(contentId) as any
+    const item = sqlite.prepare('SELECT * FROM canonical WHERE id = ?').get(canonicalId) as any
     if (!item) return
 
     if (type === 'movie') {
@@ -234,19 +223,19 @@ export class TmdbService {
   }
 
   /**
-   * Enrich a content item with a specific TMDB ID chosen by the user.
+   * Enrich a canonical item with a specific TMDB ID chosen by the user.
    */
-  async enrichById(contentId: string, tmdbId: number, type: string): Promise<void> {
+  async enrichById(canonicalId: string, tmdbId: number, type: string): Promise<void> {
     const sqlite = getSqlite()
-    const item = sqlite.prepare('SELECT * FROM content WHERE id = ?').get(contentId) as any
+    const item = sqlite.prepare('SELECT * FROM canonical WHERE id = ?').get(canonicalId) as any
     if (!item) return
 
     // Reset enriched flag so the enrichment writes
-    sqlite.prepare('UPDATE content SET enriched = 0 WHERE id = ?').run(contentId)
+    sqlite.prepare('UPDATE canonical SET enriched = 0 WHERE id = ?').run(canonicalId)
 
     if (type === 'movie') {
       const details = await this.getMovieDetails(tmdbId)
-      if (!details) { this.markEnriched(sqlite, contentId); return }
+      if (!details) { this.markEnriched(sqlite, canonicalId); return }
 
       const cast = details.credits?.cast?.sort((a, b) => a.order - b.order).slice(0, 12).map(c => c.name) ?? []
       const director = details.credits?.crew.find(c => c.job === 'Director')?.name ?? null
@@ -254,11 +243,11 @@ export class TmdbService {
       const keywords = details.keywords?.keywords.slice(0, 20).map(k => k.name) ?? []
 
       sqlite.prepare(`
-        UPDATE content SET
-          tmdb_id = ?, original_title = ?, year = ?, plot = ?,
-          poster_url = ?, backdrop_url = ?,
-          rating_tmdb = ?, genres = ?, languages = ?,
-          director = ?, cast = ?, keywords = ?,
+        UPDATE canonical SET
+          tmdb_id = ?, original_title = ?, year = ?, overview = ?,
+          poster_path = ?, backdrop_path = ?,
+          vote_average = ?, genres = ?, languages = ?,
+          director = ?, cast_json = ?, keywords = ?,
           runtime = ?, enriched = 1, enriched_at = unixepoch()
         WHERE id = ?
       `).run(
@@ -275,28 +264,28 @@ export class TmdbService {
         cast.length ? JSON.stringify(cast) : null,
         keywords.length ? JSON.stringify(keywords) : null,
         details.runtime || null,
-        contentId,
+        canonicalId,
       )
 
-      this.updateFts(sqlite, contentId, {
+      this.updateFts(sqlite, canonicalId, {
         title: details.title, originalTitle: details.original_title,
-        plot: details.overview, cast: cast.join(' '), director,
+        overview: details.overview, cast: cast.join(' '), director,
         genres: genres.join(' '), keywords: keywords.join(' '),
       })
     } else if (type === 'series') {
       const details = await this.getTvDetails(tmdbId)
-      if (!details) { this.markEnriched(sqlite, contentId); return }
+      if (!details) { this.markEnriched(sqlite, canonicalId); return }
 
       const cast = details.credits?.cast?.sort((a, b) => a.order - b.order).slice(0, 12).map(c => c.name) ?? []
       const genres = details.genres.map(g => g.name)
       const keywords = details.keywords?.results.slice(0, 20).map(k => k.name) ?? []
 
       sqlite.prepare(`
-        UPDATE content SET
-          tmdb_id = ?, original_title = ?, year = ?, plot = ?,
-          poster_url = ?, backdrop_url = ?,
-          rating_tmdb = ?, genres = ?, languages = ?,
-          cast = ?, keywords = ?, runtime = ?,
+        UPDATE canonical SET
+          tmdb_id = ?, original_title = ?, year = ?, overview = ?,
+          poster_path = ?, backdrop_path = ?,
+          vote_average = ?, genres = ?, languages = ?,
+          cast_json = ?, keywords = ?, runtime = ?,
           enriched = 1, enriched_at = unixepoch()
         WHERE id = ?
       `).run(
@@ -312,25 +301,26 @@ export class TmdbService {
         cast.length ? JSON.stringify(cast) : null,
         keywords.length ? JSON.stringify(keywords) : null,
         details.episode_run_time?.[0] ?? null,
-        contentId,
+        canonicalId,
       )
 
-      this.updateFts(sqlite, contentId, {
+      this.updateFts(sqlite, canonicalId, {
         title: details.name, originalTitle: details.original_name,
-        plot: details.overview, cast: cast.join(' '), director: null,
+        overview: details.overview, cast: cast.join(' '), director: null,
         genres: genres.join(' '), keywords: keywords.join(' '),
       })
     }
   }
 
+  /**
+   * Build progressively cleaned title candidates from an IPTV title.
+   */
   private buildSearchCandidates(rawTitle: string, dbYear?: number | null): { titles: string[]; year?: number } {
-    // Step 1: strip language prefix "XX - ", "XX | ", "XX: ", "XXX - ", etc.
     let base = rawTitle
       .replace(/^[A-Z]{2,4}[\s]*[\-–:|][\s]*/i, '')
       .replace(/\s*(HD|FHD|4K|SD|UHD)\s*$/i, '')
       .trim()
 
-    // Step 2: extract year from title if DB year is null
     let year = dbYear ?? undefined
     if (!year) {
       const yearMatch = base.match(/\((\d{4})\)\s*$/)
@@ -342,19 +332,16 @@ export class TmdbService {
 
     const candidates: string[] = [base]
 
-    // Step 3: strip subtitle after colon — "Henry Danger: The Movie" → "Henry Danger"
     const colonIdx = base.indexOf(':')
     if (colonIdx > 2) {
       candidates.push(base.substring(0, colonIdx).trim())
     }
 
-    // Step 4: strip subtitle after dash (surrounded by spaces) — "Avengers - Endgame" → "Avengers"
     const dashIdx = base.indexOf(' - ')
     if (dashIdx > 2) {
       candidates.push(base.substring(0, dashIdx).trim())
     }
 
-    // Deduplicate while preserving order
     const seen = new Set<string>()
     const unique = candidates.filter(t => {
       if (!t || seen.has(t)) return false
@@ -366,7 +353,6 @@ export class TmdbService {
   }
 
   private async enrichMovie(sqlite: any, item: any, titles: string[], year?: number) {
-    // Try each title candidate with year, then without
     let match: TmdbMovie | null = null
     for (const title of titles) {
       match = await this.searchMovie(title, year)
@@ -390,11 +376,11 @@ export class TmdbService {
     const keywords = details.keywords?.keywords.slice(0, 20).map((k) => k.name) ?? []
 
     sqlite.prepare(`
-      UPDATE content SET
-        tmdb_id = ?, original_title = ?, year = ?, plot = ?,
-        poster_url = ?, backdrop_url = ?,
-        rating_tmdb = ?, genres = ?, languages = ?,
-        director = ?, cast = ?, keywords = ?,
+      UPDATE canonical SET
+        tmdb_id = ?, original_title = ?, year = ?, overview = ?,
+        poster_path = ?, backdrop_path = ?,
+        vote_average = ?, genres = ?, languages = ?,
+        director = ?, cast_json = ?, keywords = ?,
         runtime = ?, enriched = 1, enriched_at = unixepoch()
       WHERE id = ?
     `).run(
@@ -417,7 +403,7 @@ export class TmdbService {
     this.updateFts(sqlite, item.id, {
       title: details.title,
       originalTitle: details.original_title,
-      plot: details.overview,
+      overview: details.overview,
       cast: cast.join(' '),
       director,
       genres: genres.join(' '),
@@ -446,11 +432,11 @@ export class TmdbService {
     const runtime = details.episode_run_time?.[0] ?? null
 
     sqlite.prepare(`
-      UPDATE content SET
-        tmdb_id = ?, original_title = ?, year = ?, plot = ?,
-        poster_url = ?, backdrop_url = ?,
-        rating_tmdb = ?, genres = ?, languages = ?,
-        cast = ?, keywords = ?, runtime = ?,
+      UPDATE canonical SET
+        tmdb_id = ?, original_title = ?, year = ?, overview = ?,
+        poster_path = ?, backdrop_path = ?,
+        vote_average = ?, genres = ?, languages = ?,
+        cast_json = ?, keywords = ?, runtime = ?,
         enriched = 1, enriched_at = unixepoch()
       WHERE id = ?
     `).run(
@@ -472,7 +458,7 @@ export class TmdbService {
     this.updateFts(sqlite, item.id, {
       title: details.name,
       originalTitle: details.original_name,
-      plot: details.overview,
+      overview: details.overview,
       cast: cast.join(' '),
       director: null,
       genres: genres.join(' '),
@@ -480,30 +466,26 @@ export class TmdbService {
     })
   }
 
-  private markEnriched(sqlite: any, contentId: string) {
-    sqlite.prepare('UPDATE content SET enriched = 1, enriched_at = unixepoch() WHERE id = ?').run(contentId)
+  private markEnriched(sqlite: any, canonicalId: string) {
+    sqlite.prepare('UPDATE canonical SET enriched = 1, enriched_at = unixepoch() WHERE id = ?').run(canonicalId)
   }
 
-  private updateFts(sqlite: any, contentId: string, fields: {
-    title: string; originalTitle?: string; plot?: string
+  private updateFts(sqlite: any, canonicalId: string, fields: {
+    title: string; originalTitle?: string; overview?: string
     cast?: string; director?: string | null; genres?: string; keywords?: string
   }) {
-    function norm(s?: string | null): string | null {
-      if (!s) return null
-      return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    }
     sqlite.prepare(`
-      INSERT OR REPLACE INTO content_fts (content_id, title, original_title, plot, cast, director, genres, keywords)
+      INSERT OR REPLACE INTO canonical_fts (canonical_id, title, original_title, overview, cast_json, director, genres, keywords)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
-      contentId,
-      norm(fields.title),
-      norm(fields.originalTitle),
-      norm(fields.plot),
-      norm(fields.cast),
-      norm(fields.director),
-      norm(fields.genres),
-      norm(fields.keywords),
+      canonicalId,
+      normalizeForSearch(fields.title ?? ''),
+      normalizeForSearch(fields.originalTitle ?? ''),
+      normalizeForSearch(fields.overview ?? ''),
+      normalizeForSearch(fields.cast ?? ''),
+      normalizeForSearch(fields.director ?? ''),
+      normalizeForSearch(fields.genres ?? ''),
+      normalizeForSearch(fields.keywords ?? ''),
     )
   }
 }

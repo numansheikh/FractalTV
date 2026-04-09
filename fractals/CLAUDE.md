@@ -370,14 +370,12 @@ The data model has two distinct layers, loosely coupled via a bridge:
 - Background job: lazy batch enrichment after sync
 - Free key: 40 req/sec → full library enriched in minutes
 
-## Implementation status (as of 2026-04-09)
+## Implementation status (as of 2026-04-10)
 
-> **⚠ Redesign in progress.** Current implementation (snapshot branch: `snapshot/v0.2.1-pre-redesign`) is organically evolved and does not reflect the data model above. Redesign starts from master, UI-first components are preserved, data layer will be rebuilt.
-
-**Phase 0 — Complete (pre-redesign).** Core scaffold, DB + Xtream sync, TMDB enrichment, FTS5 search, browse/search UI, video player, EPG, settings, user data.
-**Phase 1 — UI polish complete.** UX refinement (pagination nav, escape behavior, library search). Snapshot preserved.
-**Phase 2 — Data model redesign (active).** Rebuild DB schema around canonical identity + bridge. New search on canonical layer. Eviction policy. Loose coupling between provider and enriched data.
-**Phase 3 — Multi-platform (not started).** Capacitor for Android/iOS/TV, Tizen.
+**Phase 0 — Complete.** Core scaffold, DB + Xtream sync, TMDB enrichment, FTS5 search, browse/search UI, video player, EPG, settings, user data.
+**Phase 1 — Complete.** UX refinement (pagination nav, escape behavior, library search).
+**Phase 2 — Complete.** V2 data model cutover: canonical + streams schema, all IPC handlers on v2, v1 tables dropped, TMDB enrichment writes to canonical, M3U sync worker rewritten, dead code removed (xtream.service.ts v1 sync methods, schema.ts v1 tables). DB renamed `fractaltv.db`. All known bugs fixed.
+**Phase 3 — Not started.** Capacitor for Android/iOS/TV, Tizen.
 
 ### v0.2.0 — completed features
 

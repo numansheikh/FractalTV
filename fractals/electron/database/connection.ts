@@ -8,7 +8,7 @@ import { normalizeForSearch } from '../lib/normalize'
 
 const DB_NAME = process.env.FRACTALS_DB
   ? `fractals-${process.env.FRACTALS_DB}.db`
-  : 'fractals.db'
+  : 'fractaltv.db'
 const DB_DIR = join(app.getPath('userData'), 'data')
 const DB_PATH = join(DB_DIR, DB_NAME)
 
@@ -41,6 +41,21 @@ export function getSqlite() {
 }
 
 function createTables(db: Database.Database) {
+  // V2 cutover migration — must run BEFORE CREATE TABLE statements
+  // Drop old user_data (content_id PK) if it exists, then rename user_data_v2 → user_data
+  try {
+    const hasOldUD = db.prepare(`SELECT 1 FROM pragma_table_info('user_data') WHERE name = 'content_id'`).get()
+    if (hasOldUD) db.exec(`DROP TABLE user_data`)
+  } catch {}
+
+  // Drop v1 tables (safe on fresh DBs — IF EXISTS)
+  db.exec(`
+    DROP TABLE IF EXISTS content_categories;
+    DROP TABLE IF EXISTS content_sources;
+    DROP TABLE IF EXISTS content_fts;
+    DROP TABLE IF EXISTS content;
+  `)
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS sources (
       id TEXT PRIMARY KEY,
@@ -66,50 +81,6 @@ function createTables(db: Database.Database) {
       type TEXT NOT NULL CHECK(type IN ('live', 'movie', 'series'))
     );
 
-    CREATE TABLE IF NOT EXISTS content (
-      id TEXT PRIMARY KEY,
-      primary_source_id TEXT NOT NULL REFERENCES sources(id),
-      external_id TEXT NOT NULL,
-      type TEXT NOT NULL CHECK(type IN ('live', 'movie', 'series', 'episode')),
-      title TEXT NOT NULL,
-      category_id TEXT,
-      tmdb_id INTEGER,
-      original_title TEXT,
-      year INTEGER,
-      plot TEXT,
-      poster_url TEXT,
-      backdrop_url TEXT,
-      rating_imdb REAL,
-      rating_tmdb REAL,
-      genres TEXT,
-      languages TEXT,
-      country TEXT,
-      director TEXT,
-      cast TEXT,
-      keywords TEXT,
-      runtime INTEGER,
-      parent_id TEXT REFERENCES content(id),
-      season_number INTEGER,
-      episode_number INTEGER,
-      container_extension TEXT,
-      catchup_supported INTEGER NOT NULL DEFAULT 0,
-      catchup_days INTEGER NOT NULL DEFAULT 0,
-      enriched INTEGER NOT NULL DEFAULT 0,
-      enriched_at INTEGER,
-      created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-      updated_at INTEGER NOT NULL DEFAULT (unixepoch())
-    );
-
-    CREATE TABLE IF NOT EXISTS content_sources (
-      id TEXT PRIMARY KEY,
-      content_id TEXT NOT NULL REFERENCES content(id) ON DELETE CASCADE,
-      source_id TEXT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
-      external_id TEXT NOT NULL,
-      stream_url TEXT,
-      quality TEXT,
-      priority INTEGER NOT NULL DEFAULT 0
-    );
-
     CREATE TABLE IF NOT EXISTS epg (
       id TEXT PRIMARY KEY,
       channel_external_id TEXT NOT NULL,
@@ -122,21 +93,10 @@ function createTables(db: Database.Database) {
     );
 
     CREATE TABLE IF NOT EXISTS embeddings (
-      content_id TEXT PRIMARY KEY REFERENCES content(id) ON DELETE CASCADE,
+      canonical_id TEXT PRIMARY KEY REFERENCES canonical(id) ON DELETE CASCADE,
       vector BLOB NOT NULL,
       model TEXT NOT NULL DEFAULT 'all-MiniLM-L6-v2',
       created_at INTEGER NOT NULL DEFAULT (unixepoch())
-    );
-
-    CREATE TABLE IF NOT EXISTS user_data (
-      content_id TEXT PRIMARY KEY REFERENCES content(id) ON DELETE CASCADE,
-      profile_id TEXT NOT NULL DEFAULT 'default',
-      favorite INTEGER NOT NULL DEFAULT 0,
-      watchlist INTEGER NOT NULL DEFAULT 0,
-      last_position INTEGER NOT NULL DEFAULT 0,
-      completed INTEGER NOT NULL DEFAULT 0,
-      last_watched_at INTEGER,
-      rating INTEGER
     );
 
     CREATE TABLE IF NOT EXISTS profiles (
@@ -147,67 +107,35 @@ function createTables(db: Database.Database) {
       created_at INTEGER NOT NULL DEFAULT (unixepoch())
     );
 
-    -- FTS5 virtual table for full-text search
-    -- unicode61 with remove_diacritics=2 strips accents at index AND query time
-    -- so "o" matches "ò ô œ ö ó ø" etc, "e" matches "é è ê ë", etc.
-    CREATE VIRTUAL TABLE IF NOT EXISTS content_fts USING fts5(
-      content_id UNINDEXED,
-      title,
-      original_title,
-      plot,
-      cast,
-      director,
-      genres,
-      keywords,
-      tokenize = 'unicode61 remove_diacritics 2'
-    );
-
-    -- Junction table: content can belong to multiple categories
-    CREATE TABLE IF NOT EXISTS content_categories (
-      content_id TEXT NOT NULL REFERENCES content(id) ON DELETE CASCADE,
-      category_id TEXT NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
-      PRIMARY KEY (content_id, category_id)
-    );
-
-    -- Indexes
-    CREATE INDEX IF NOT EXISTS idx_cc_category ON content_categories(category_id);
-    CREATE INDEX IF NOT EXISTS idx_content_type ON content(type);
-    CREATE INDEX IF NOT EXISTS idx_content_tmdb ON content(tmdb_id);
-    CREATE INDEX IF NOT EXISTS idx_content_enriched ON content(enriched);
-    CREATE INDEX IF NOT EXISTS idx_content_source ON content(primary_source_id);
-    CREATE INDEX IF NOT EXISTS idx_content_source_type ON content(primary_source_id, type);
-    CREATE INDEX IF NOT EXISTS idx_content_category ON content(category_id, primary_source_id);
-    CREATE INDEX IF NOT EXISTS idx_content_updated ON content(updated_at);
-    CREATE INDEX IF NOT EXISTS idx_categories_name ON categories(name, source_id, external_id);
-    CREATE INDEX IF NOT EXISTS idx_content_sources_content ON content_sources(content_id);
-    CREATE INDEX IF NOT EXISTS idx_content_sources_source ON content_sources(source_id);
-    CREATE INDEX IF NOT EXISTS idx_epg_channel ON epg(channel_external_id);
-    CREATE INDEX IF NOT EXISTS idx_epg_time ON epg(start_time, end_time);
-    CREATE INDEX IF NOT EXISTS idx_user_data_profile ON user_data(profile_id);
-
     -- Settings: simple key-value store for app preferences
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
 
-    -- ── Two-layer data model (Phase A: channels) ──────────────────────────
+    -- ── Canonical identity — deduplicated, persistent, source-independent ──
 
-    -- Layer 2: Canonical identity — deduplicated, persistent, source-independent
-    -- Channels: id = 'ch:{tvg_id}' if tvg_id set, else 'ch:{sourceId}:{stream_id}'
     CREATE TABLE IF NOT EXISTS canonical (
       id             TEXT PRIMARY KEY,
-      type           TEXT NOT NULL,        -- 'channel' | 'movie' | 'series'
+      type           TEXT NOT NULL,        -- 'channel' | 'movie' | 'series' | 'episode'
       title          TEXT NOT NULL,
       original_title TEXT,
       year           INTEGER,
       tmdb_id        INTEGER,
       tvg_id         TEXT,                 -- for channel EPG matching
       poster_path    TEXT,
+      backdrop_path  TEXT,
       vote_average   REAL,
-      genres_json    TEXT,
+      rating_imdb    REAL,
+      genres         TEXT,
       overview       TEXT,
       cast_json      TEXT,
+      director       TEXT,
+      keywords       TEXT,
+      languages      TEXT,
+      country        TEXT,
+      runtime        INTEGER,
+      enriched       INTEGER NOT NULL DEFAULT 0,
       created_at     INTEGER DEFAULT (unixepoch()),
       enriched_at    INTEGER
     );
@@ -217,27 +145,46 @@ function createTables(db: Database.Database) {
       canonical_id UNINDEXED,
       title,
       original_title,
+      overview,
+      cast_json,
+      director,
+      genres,
+      keywords,
       tokenize = 'unicode61 remove_diacritics 2'
     );
 
-    -- Layer 1: Provider streams — ephemeral, cascades on source delete
+    -- ── Provider streams — ephemeral, cascades on source delete ────────────
+
     CREATE TABLE IF NOT EXISTS streams (
-      id                  TEXT PRIMARY KEY, -- '{sourceId}:live:{stream_id}'
-      canonical_id        TEXT REFERENCES canonical(id) ON DELETE SET NULL,
-      source_id           TEXT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
-      type                TEXT NOT NULL,    -- 'live' | 'movie' | 'series'
-      stream_id           TEXT NOT NULL,
-      title               TEXT NOT NULL,
-      category_id         TEXT,
-      tvg_id              TEXT,
-      thumbnail_url       TEXT,
-      stream_url          TEXT,
-      container_extension TEXT,
-      added_at            INTEGER DEFAULT (unixepoch())
+      id                    TEXT PRIMARY KEY,  -- '{sourceId}:{type}:{stream_id}'
+      canonical_id          TEXT REFERENCES canonical(id) ON DELETE SET NULL,
+      source_id             TEXT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+      type                  TEXT NOT NULL,     -- 'live' | 'movie' | 'series' | 'episode'
+      stream_id             TEXT NOT NULL,
+      title                 TEXT NOT NULL,
+      category_id           TEXT,
+      tvg_id                TEXT,
+      thumbnail_url         TEXT,
+      stream_url            TEXT,
+      container_extension   TEXT,
+      catchup_supported     INTEGER NOT NULL DEFAULT 0,
+      catchup_days          INTEGER NOT NULL DEFAULT 0,
+      epg_channel_id        TEXT,
+      parent_canonical_id   TEXT REFERENCES canonical(id) ON DELETE CASCADE,
+      season_number         INTEGER,
+      episode_number        INTEGER,
+      added_at              INTEGER DEFAULT (unixepoch())
+    );
+
+    -- Junction table: streams can belong to multiple categories
+    CREATE TABLE IF NOT EXISTS stream_categories (
+      stream_id TEXT NOT NULL REFERENCES streams(id) ON DELETE CASCADE,
+      category_id TEXT NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+      PRIMARY KEY (stream_id, category_id)
     );
 
     -- User data anchored to canonical — survives source deletion
-    CREATE TABLE IF NOT EXISTS user_data_v2 (
+    CREATE TABLE IF NOT EXISTS user_data (
       canonical_id    TEXT NOT NULL REFERENCES canonical(id) ON DELETE CASCADE,
       profile_id      TEXT NOT NULL DEFAULT 'default',
       is_favorite     INTEGER DEFAULT 0,
@@ -252,72 +199,61 @@ function createTables(db: Database.Database) {
       PRIMARY KEY (canonical_id, profile_id)
     );
 
-    CREATE INDEX IF NOT EXISTS idx_canonical_type   ON canonical(type);
-    CREATE INDEX IF NOT EXISTS idx_canonical_tvg_id ON canonical(tvg_id);
-    CREATE INDEX IF NOT EXISTS idx_canonical_tmdb   ON canonical(tmdb_id);
-    CREATE INDEX IF NOT EXISTS idx_streams_canonical ON streams(canonical_id);
-    CREATE INDEX IF NOT EXISTS idx_streams_source    ON streams(source_id);
-    CREATE INDEX IF NOT EXISTS idx_streams_type      ON streams(type);
-    CREATE INDEX IF NOT EXISTS idx_udv2_profile_fav  ON user_data_v2(profile_id, is_favorite);
+    -- Indexes (only columns guaranteed in original CREATE TABLE)
+    CREATE INDEX IF NOT EXISTS idx_canonical_type     ON canonical(type);
+    CREATE INDEX IF NOT EXISTS idx_canonical_tvg_id   ON canonical(tvg_id);
+    CREATE INDEX IF NOT EXISTS idx_canonical_tmdb     ON canonical(tmdb_id);
+    CREATE INDEX IF NOT EXISTS idx_streams_canonical  ON streams(canonical_id);
+    CREATE INDEX IF NOT EXISTS idx_streams_source     ON streams(source_id);
+    CREATE INDEX IF NOT EXISTS idx_streams_type       ON streams(type);
+    CREATE INDEX IF NOT EXISTS idx_sc_category        ON stream_categories(category_id);
+    CREATE INDEX IF NOT EXISTS idx_categories_name    ON categories(name, source_id, external_id);
+    CREATE INDEX IF NOT EXISTS idx_epg_channel        ON epg(channel_external_id);
+    CREATE INDEX IF NOT EXISTS idx_epg_time           ON epg(start_time, end_time);
+    CREATE INDEX IF NOT EXISTS idx_ud_profile_fav     ON user_data(profile_id, is_favorite);
   `)
 
-  // Migrations — safe to run on existing DBs
+  // Migrations — safe to run on existing DBs (columns already in CREATE TABLE for fresh DBs)
   try { db.exec(`ALTER TABLE sources ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0`) } catch {}
   try { db.exec(`ALTER TABLE sources ADD COLUMN exp_date TEXT`) } catch {}
   try { db.exec(`ALTER TABLE sources ADD COLUMN max_connections INTEGER`) } catch {}
   try { db.exec(`ALTER TABLE sources ADD COLUMN subscription_type TEXT`) } catch {}
-  // content_synced: 0 = not yet fetched, 1 = fetched
-  try { db.exec(`ALTER TABLE categories ADD COLUMN content_synced INTEGER NOT NULL DEFAULT 0`) } catch {}
-  // position: order as returned by the provider API (0-based index)
-  try { db.exec(`ALTER TABLE categories ADD COLUMN position INTEGER NOT NULL DEFAULT 0`) } catch {}
-  // fav_sort_order: manual ordering for favorite channels in My Channels home mode
-  try { db.exec(`ALTER TABLE user_data ADD COLUMN fav_sort_order INTEGER`) } catch {}
-  // epg_channel_id: tvg-id from Xtream API, used to match EPG entries to channels
-  try { db.exec(`ALTER TABLE content ADD COLUMN epg_channel_id TEXT`) } catch {}
-  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_content_epg_channel ON content(epg_channel_id)`) } catch {}
-  // last_epg_sync: unix timestamp of last EPG XMLTV fetch per source
   try { db.exec(`ALTER TABLE sources ADD COLUMN last_epg_sync INTEGER`) } catch {}
+  try { db.exec(`ALTER TABLE sources ADD COLUMN color_index INTEGER`) } catch {}
+  try { db.exec(`ALTER TABLE categories ADD COLUMN content_synced INTEGER NOT NULL DEFAULT 0`) } catch {}
+  try { db.exec(`ALTER TABLE categories ADD COLUMN position INTEGER NOT NULL DEFAULT 0`) } catch {}
 
-  // Migration: content IDs changed from `movie:{id}` to `{sourceId}:movie:{id}`
-  // Clear content data so re-sync creates fresh rows. Sources/settings preserved.
-  try {
-    const migrated = db.prepare(`SELECT value FROM settings WHERE key = 'migration_source_scoped_ids'`).get() as any
-    console.log('[DB] Migration check: migrated =', migrated)
-    if (!migrated) {
-      console.log('[DB] Running migration: clearing content for source-scoped IDs...')
-      db.exec(`
-        DELETE FROM content_categories;
-        DELETE FROM content_sources;
-        DELETE FROM embeddings;
-        DELETE FROM user_data;
-        DELETE FROM content;
-        DELETE FROM content_fts;
-        UPDATE sources SET item_count = 0, status = 'active';
-        UPDATE categories SET content_synced = 0;
-        INSERT OR REPLACE INTO settings (key, value) VALUES ('migration_source_scoped_ids', '1');
-      `)
-      console.log('[DB] Migration complete. Re-sync required.')
-    }
-  } catch (e) {
-    console.error('[DB] Migration FAILED:', e)
-  }
+  // Canonical table migrations (columns added during v2 cutover)
+  try { db.exec(`ALTER TABLE canonical ADD COLUMN backdrop_path TEXT`) } catch {}
+  try { db.exec(`ALTER TABLE canonical ADD COLUMN rating_imdb REAL`) } catch {}
+  try { db.exec(`ALTER TABLE canonical ADD COLUMN genres TEXT`) } catch {}
+  try { db.exec(`ALTER TABLE canonical ADD COLUMN overview TEXT`) } catch {}
+  try { db.exec(`ALTER TABLE canonical ADD COLUMN cast_json TEXT`) } catch {}
+  try { db.exec(`ALTER TABLE canonical ADD COLUMN director TEXT`) } catch {}
+  try { db.exec(`ALTER TABLE canonical ADD COLUMN keywords TEXT`) } catch {}
+  try { db.exec(`ALTER TABLE canonical ADD COLUMN languages TEXT`) } catch {}
+  try { db.exec(`ALTER TABLE canonical ADD COLUMN country TEXT`) } catch {}
+  try { db.exec(`ALTER TABLE canonical ADD COLUMN runtime INTEGER`) } catch {}
+  try { db.exec(`ALTER TABLE canonical ADD COLUMN enriched INTEGER NOT NULL DEFAULT 0`) } catch {}
+  try { db.exec(`ALTER TABLE canonical ADD COLUMN enriched_at INTEGER`) } catch {}
 
-  // Migrate existing channel favorites from user_data → user_data_v2
-  // Runs every startup; INSERT OR IGNORE is idempotent. Only migrates channels
-  // that have a corresponding streams row (i.e. were synced after new schema was added).
-  try {
-    db.exec(`
-      INSERT OR IGNORE INTO user_data_v2 (canonical_id, profile_id, is_favorite, fav_sort_order, last_watched_at)
-      SELECT s.canonical_id, ud.profile_id, ud.favorite, ud.fav_sort_order, ud.last_watched_at
-      FROM user_data ud
-      JOIN content c ON c.id = ud.content_id AND c.type = 'live'
-      JOIN streams s ON s.id = c.id AND s.canonical_id IS NOT NULL
-      WHERE ud.favorite = 1
-    `)
-  } catch {}
+  // Streams table migrations
+  try { db.exec(`ALTER TABLE streams ADD COLUMN catchup_supported INTEGER NOT NULL DEFAULT 0`) } catch {}
+  try { db.exec(`ALTER TABLE streams ADD COLUMN catchup_days INTEGER NOT NULL DEFAULT 0`) } catch {}
+  try { db.exec(`ALTER TABLE streams ADD COLUMN epg_channel_id TEXT`) } catch {}
+  try { db.exec(`ALTER TABLE streams ADD COLUMN parent_canonical_id TEXT REFERENCES canonical(id) ON DELETE CASCADE`) } catch {}
+  try { db.exec(`ALTER TABLE streams ADD COLUMN season_number INTEGER`) } catch {}
+  try { db.exec(`ALTER TABLE streams ADD COLUMN episode_number INTEGER`) } catch {}
+
+  // Indexes on migrated columns (must come after ALTER TABLEs above)
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_canonical_enriched ON canonical(enriched)`) } catch {}
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_streams_source_type ON streams(source_id, type)`) } catch {}
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_streams_category ON streams(category_id, source_id)`) } catch {}
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_streams_epg ON streams(epg_channel_id)`) } catch {}
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_streams_parent ON streams(parent_canonical_id)`) } catch {}
+
 
   // Migrate source color from settings table → sources.color_index
-  try { db.exec(`ALTER TABLE sources ADD COLUMN color_index INTEGER`) } catch {}
   try {
     const migrated = db.prepare(`SELECT value FROM settings WHERE key = 'migration_source_color_column'`).get() as any
     if (!migrated) {
@@ -371,29 +307,28 @@ export function setSetting(key: string, value: string): void {
 export async function rebuildFtsIfNeeded(): Promise<void> {
   if (!_sqlite) return
   const db = _sqlite
-  const done = (db.prepare('SELECT value FROM settings WHERE key = ?').get('fts_normalized_v1') as any)?.value
+  const done = (db.prepare('SELECT value FROM settings WHERE key = ?').get('fts_normalized_v2') as any)?.value
   if (done) return
 
   console.log('[FTS] Starting background index rebuild with Unicode normalization…')
-  const rows = db.prepare(`SELECT id, title, original_title, plot, "cast", director, genres, keywords FROM content`).all() as any[]
-  db.exec(`DELETE FROM content_fts`)
+  const rows = db.prepare(`SELECT id, title, original_title, overview, cast_json, director, genres, keywords FROM canonical`).all() as any[]
+  db.exec(`DELETE FROM canonical_fts`)
 
-  const ins = db.prepare(`INSERT INTO content_fts (content_id, title, original_title, plot, "cast", director, genres, keywords) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+  const ins = db.prepare(`INSERT INTO canonical_fts (canonical_id, title, original_title, overview, cast_json, director, genres, keywords) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
   const BATCH = 500
 
   for (let i = 0; i < rows.length; i += BATCH) {
     const chunk = rows.slice(i, i + BATCH)
     const writeBatch = db.transaction(() => {
       for (const r of chunk) {
-        ins.run(r.id, normalizeForSearch(r.title ?? ''), normalizeForSearch(r.original_title ?? ''), normalizeForSearch(r.plot ?? ''), normalizeForSearch(r.cast ?? ''), normalizeForSearch(r.director ?? ''), normalizeForSearch(r.genres ?? ''), normalizeForSearch(r.keywords ?? ''))
+        ins.run(r.id, normalizeForSearch(r.title ?? ''), normalizeForSearch(r.original_title ?? ''), normalizeForSearch(r.overview ?? ''), normalizeForSearch(r.cast_json ?? ''), normalizeForSearch(r.director ?? ''), normalizeForSearch(r.genres ?? ''), normalizeForSearch(r.keywords ?? ''))
       }
     })
     writeBatch()
-    // Yield to event loop between batches so the main process stays responsive
     await new Promise(resolve => setImmediate(resolve))
   }
 
-  db.prepare(`INSERT OR REPLACE INTO settings (key, value) VALUES ('fts_normalized_v1', '1')`).run()
+  db.prepare(`INSERT OR REPLACE INTO settings (key, value) VALUES ('fts_normalized_v2', '1')`).run()
   console.log(`[FTS] Rebuild complete — ${rows.length} rows normalized.`)
 }
 

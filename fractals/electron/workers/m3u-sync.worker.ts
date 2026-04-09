@@ -1,6 +1,6 @@
 /**
  * M3U sync worker — fetches M3U playlist, parses entries, inserts into DB.
- * Follows the same pattern as sync.worker.ts (Xtream).
+ * Writes to v2 schema: canonical + streams + canonical_fts + stream_categories.
  */
 
 import { parentPort, workerData } from 'worker_threads'
@@ -46,7 +46,6 @@ function normalize(text: string | null | undefined): string | null {
 }
 
 function guessType(url: string): 'live' | 'movie' | 'series' {
-  // Only trust the URL itself — group-title "Movies" in M3U = linear movie channel, not VOD
   if (url.match(/\/series\//i)) return 'series'
   if (url.match(/\/movie\//i) || url.match(/\.(mp4|mkv|avi|mov)(\?|$)/i)) return 'movie'
   return 'live'
@@ -134,7 +133,6 @@ async function run() {
     send('parsing', entries.length, entries.length, `Found ${entries.length.toLocaleString()} entries`)
 
     // ── Categories ───────────────────────────────────────────────────────
-    // Collect unique categories per type
     const catMap = new Map<string, { name: string; type: string }>()
     for (const entry of entries) {
       const catKey = `${entry.type}:${entry.groupTitle}`
@@ -160,42 +158,54 @@ async function run() {
 
     send('categories', catMap.size, catMap.size, `${catMap.size} categories`)
 
-    // ── Content ──────────────────────────────────────────────────────────
+    // ── Content (v2 schema) ─────────────────────────────────────────────
     send('content', 0, entries.length, `Saving ${entries.length.toLocaleString()} items…`)
 
-    const insertContent = db.prepare(`
-      INSERT INTO content (id, primary_source_id, external_id, type, title, category_id, poster_url, epg_channel_id, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, unixepoch())
+    const insertCanonical = db.prepare(`
+      INSERT INTO canonical (id, type, title, tvg_id, poster_path)
+      VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
-        title = excluded.title, category_id = excluded.category_id,
-        poster_url = excluded.poster_url,
-        epg_channel_id = excluded.epg_channel_id, updated_at = excluded.updated_at
+        title = excluded.title,
+        tvg_id = COALESCE(excluded.tvg_id, canonical.tvg_id),
+        poster_path = COALESCE(excluded.poster_path, canonical.poster_path)
     `)
-    const insertSource = db.prepare(`
-      INSERT INTO content_sources (id, content_id, source_id, external_id, stream_url, quality)
-      VALUES (?, ?, ?, ?, ?, 'HD')
-      ON CONFLICT(id) DO UPDATE SET stream_url = excluded.stream_url
+    const insertStream = db.prepare(`
+      INSERT INTO streams (id, canonical_id, source_id, type, stream_id, title, category_id, tvg_id, thumbnail_url, stream_url, epg_channel_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        canonical_id  = excluded.canonical_id,
+        title         = excluded.title,
+        category_id   = excluded.category_id,
+        tvg_id        = excluded.tvg_id,
+        thumbnail_url = excluded.thumbnail_url,
+        stream_url    = excluded.stream_url,
+        epg_channel_id = excluded.epg_channel_id
     `)
-    const insertFts = db.prepare(`INSERT OR REPLACE INTO content_fts (content_id, title) VALUES (?, ?)`)
-    const insertCC = db.prepare(`INSERT OR IGNORE INTO content_categories (content_id, category_id) SELECT ?, ? WHERE EXISTS (SELECT 1 FROM categories WHERE id = ?)`)
+    const insertFts = db.prepare(`INSERT OR REPLACE INTO canonical_fts (canonical_id, title) VALUES (?, ?)`)
+    const insertSC = db.prepare(`INSERT OR IGNORE INTO stream_categories (stream_id, category_id) SELECT ?, ? WHERE EXISTS (SELECT 1 FROM categories WHERE id = ?)`)
 
     const BATCH = 500
     const batchInsert = db.transaction((items: M3uEntry[]) => {
       for (const entry of items) {
         const urlHash = hashUrl(entry.url)
-        const cid = `${sourceId}:${entry.type}:${urlHash}`
+        const streamId = `${sourceId}:${entry.type}:${urlHash}`
         const catKey = `${entry.type}:${entry.groupTitle}`
         const catId = `${sourceId}:${entry.type}:${hashUrl(catKey)}`
 
-        insertContent.run(
-          cid, sourceId, urlHash, entry.type,
-          entry.title, null,
-          entry.tvgLogo || null,
-          entry.tvgId || null,
+        // Canonical ID: channels use tvg_id for dedup, others use anon prefix
+        const canonicalType = entry.type === 'live' ? 'channel' : entry.type
+        const canonicalId = entry.type === 'live' && entry.tvgId
+          ? `ch:${entry.tvgId}`
+          : `anon:${canonicalType}:${sourceId}:${urlHash}`
+
+        insertCanonical.run(canonicalId, canonicalType, entry.title, entry.tvgId || null, entry.tvgLogo || null)
+        insertStream.run(
+          streamId, canonicalId, sourceId, entry.type, urlHash,
+          entry.title, null, entry.tvgId || null,
+          entry.tvgLogo || null, entry.url, entry.tvgId || null,
         )
-        insertSource.run(cid, cid, sourceId, urlHash, entry.url)
-        insertFts.run(cid, normalize(entry.title))
-        insertCC.run(cid, catId, catId)
+        insertFts.run(canonicalId, normalize(entry.title))
+        insertSC.run(streamId, catId, catId)
       }
     })
 
@@ -207,7 +217,7 @@ async function run() {
 
     // ── Finalize ─────────────────────────────────────────────────────────
     db.prepare('UPDATE categories SET content_synced = 1 WHERE source_id = ?').run(sourceId)
-    const totalItems = (db.prepare('SELECT COUNT(*) as n FROM content WHERE primary_source_id = ?').get(sourceId) as any).n
+    const totalItems = (db.prepare('SELECT COUNT(*) as n FROM streams WHERE source_id = ?').get(sourceId) as any).n
 
     db.prepare(`
       UPDATE sources SET status = 'active', last_sync = unixepoch(), last_error = NULL, item_count = ?

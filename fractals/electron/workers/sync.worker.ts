@@ -101,23 +101,6 @@ async function run() {
     const liveStreams: any[] = await fetchJson(`${apiBase}&action=get_live_streams`, FETCH_TIMEOUT, 'live_streams')
     send('live', 0, liveStreams?.length ?? 0, `Saving ${(liveStreams?.length ?? 0).toLocaleString()} channels…`)
 
-    const insertLive = db.prepare(`
-      INSERT INTO content (id, primary_source_id, external_id, type, title, category_id, poster_url, catchup_supported, catchup_days, epg_channel_id, updated_at)
-      VALUES (?, ?, ?, 'live', ?, ?, ?, ?, ?, ?, unixepoch())
-      ON CONFLICT(id) DO UPDATE SET
-        title = excluded.title, category_id = excluded.category_id,
-        poster_url = excluded.poster_url, catchup_supported = excluded.catchup_supported,
-        catchup_days = excluded.catchup_days, epg_channel_id = excluded.epg_channel_id,
-        updated_at = excluded.updated_at
-    `)
-    const insertSource = db.prepare(`
-      INSERT OR IGNORE INTO content_sources (id, content_id, source_id, external_id, quality)
-      VALUES (?, ?, ?, ?, 'HD')
-    `)
-    const insertFts = db.prepare(`INSERT OR REPLACE INTO content_fts (content_id, title) VALUES (?, ?)`)
-    const insertCC = db.prepare(`INSERT OR IGNORE INTO content_categories (content_id, category_id) SELECT ?, ? WHERE EXISTS (SELECT 1 FROM categories WHERE id = ?)`)
-
-    // New schema double-write — canonical + streams + canonical_fts
     const insertCanonical = db.prepare(`
       INSERT INTO canonical (id, type, title, tvg_id, poster_path)
       VALUES (?, 'channel', ?, ?, ?)
@@ -127,27 +110,29 @@ async function run() {
         poster_path = COALESCE(excluded.poster_path, canonical.poster_path)
     `)
     const insertStream = db.prepare(`
-      INSERT INTO streams (id, canonical_id, source_id, type, stream_id, title, category_id, tvg_id, thumbnail_url)
-      VALUES (?, ?, ?, 'live', ?, ?, ?, ?, ?)
+      INSERT INTO streams (id, canonical_id, source_id, type, stream_id, title, category_id, tvg_id, thumbnail_url, catchup_supported, catchup_days, epg_channel_id)
+      VALUES (?, ?, ?, 'live', ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
-        canonical_id  = excluded.canonical_id,
-        title         = excluded.title,
-        category_id   = excluded.category_id,
-        tvg_id        = excluded.tvg_id,
-        thumbnail_url = excluded.thumbnail_url
+        canonical_id      = excluded.canonical_id,
+        title             = excluded.title,
+        category_id       = excluded.category_id,
+        tvg_id            = excluded.tvg_id,
+        thumbnail_url     = excluded.thumbnail_url,
+        catchup_supported = excluded.catchup_supported,
+        catchup_days      = excluded.catchup_days,
+        epg_channel_id    = excluded.epg_channel_id
     `)
-    const insertCanonicalFts = db.prepare(`
-      INSERT OR REPLACE INTO canonical_fts (canonical_id, title) VALUES (?, ?)
-    `)
+    const insertFts = db.prepare(`INSERT OR REPLACE INTO canonical_fts (canonical_id, title) VALUES (?, ?)`)
+    const insertSC = db.prepare(`INSERT OR IGNORE INTO stream_categories (stream_id, category_id) SELECT ?, ? WHERE EXISTS (SELECT 1 FROM categories WHERE id = ?)`)
 
-    // New schema double-write — movies
     const insertCanonicalMovie = db.prepare(`
-      INSERT INTO canonical (id, type, title, year, poster_path)
-      VALUES (?, 'movie', ?, ?, ?)
+      INSERT INTO canonical (id, type, title, year, poster_path, vote_average)
+      VALUES (?, 'movie', ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         title       = excluded.title,
         year        = COALESCE(excluded.year, canonical.year),
-        poster_path = COALESCE(excluded.poster_path, canonical.poster_path)
+        poster_path = COALESCE(excluded.poster_path, canonical.poster_path),
+        vote_average = COALESCE(excluded.vote_average, canonical.vote_average)
     `)
     const insertStreamMovie = db.prepare(`
       INSERT INTO streams (id, canonical_id, source_id, type, stream_id, title, category_id, thumbnail_url, container_extension)
@@ -160,15 +145,17 @@ async function run() {
         container_extension = excluded.container_extension
     `)
 
-    // New schema double-write — series
     const insertCanonicalSeries = db.prepare(`
-      INSERT INTO canonical (id, type, title, year, poster_path, overview)
-      VALUES (?, 'series', ?, ?, ?, ?)
+      INSERT INTO canonical (id, type, title, year, poster_path, overview, director, cast_json, vote_average)
+      VALUES (?, 'series', ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         title       = excluded.title,
         year        = COALESCE(excluded.year, canonical.year),
         poster_path = COALESCE(excluded.poster_path, canonical.poster_path),
-        overview    = COALESCE(excluded.overview, canonical.overview)
+        overview    = COALESCE(excluded.overview, canonical.overview),
+        director    = COALESCE(excluded.director, canonical.director),
+        cast_json   = COALESCE(excluded.cast_json, canonical.cast_json),
+        vote_average = COALESCE(excluded.vote_average, canonical.vote_average)
     `)
     const insertStreamSeries = db.prepare(`
       INSERT INTO streams (id, canonical_id, source_id, type, stream_id, title, category_id, thumbnail_url)
@@ -180,24 +167,23 @@ async function run() {
         thumbnail_url = excluded.thumbnail_url
     `)
 
+    const insertFtsSeries = db.prepare(`
+      INSERT OR REPLACE INTO canonical_fts (canonical_id, title, overview, cast_json, director)
+      VALUES (?, ?, ?, ?, ?)
+    `)
+
     const BATCH = 500
     const batchLive = db.transaction((items: any[]) => {
       for (const s of items) {
         const cid = `${sourceId}:live:${s.stream_id}`
         const title = s.name || `Channel ${s.stream_id}`
         const tvgId = s.epg_channel_id || null
-
-        // Old schema (unchanged)
-        insertLive.run(cid, sourceId, String(s.stream_id), title, s.category_id || null, s.stream_icon || null, s.tv_archive ? 1 : 0, s.tv_archive_duration || 0, tvgId)
-        insertSource.run(cid, cid, sourceId, String(s.stream_id))
-        insertFts.run(cid, normalize(title))
-        if (s.category_id) { const catId = `${sourceId}:live:${s.category_id}`; insertCC.run(cid, catId, catId) }
-
-        // New schema double-write
         const canonicalId = tvgId ? `ch:${tvgId}` : `ch:${sourceId}:${s.stream_id}`
+
         insertCanonical.run(canonicalId, title, tvgId, s.stream_icon || null)
-        insertStream.run(cid, canonicalId, sourceId, String(s.stream_id), title, s.category_id || null, tvgId, s.stream_icon || null)
-        insertCanonicalFts.run(canonicalId, normalize(title))
+        insertStream.run(cid, canonicalId, sourceId, String(s.stream_id), title, s.category_id || null, tvgId, s.stream_icon || null, s.tv_archive ? 1 : 0, s.tv_archive_duration || 0, tvgId)
+        insertFts.run(canonicalId, normalize(title))
+        if (s.category_id) { const catId = `${sourceId}:live:${s.category_id}`; insertSC.run(cid, catId, catId) }
       }
     })
     for (let i = 0; i < (liveStreams?.length ?? 0); i += BATCH) {
@@ -210,33 +196,17 @@ async function run() {
     const vodStreams: any[] = await fetchJson(`${apiBase}&action=get_vod_streams`, FETCH_TIMEOUT, 'vod_streams')
     send('movies', 0, vodStreams?.length ?? 0, `Saving ${(vodStreams?.length ?? 0).toLocaleString()} movies…`)
 
-    const insertVod = db.prepare(`
-      INSERT INTO content (id, primary_source_id, external_id, type, title, category_id, poster_url, rating_tmdb, container_extension, updated_at)
-      VALUES (?, ?, ?, 'movie', ?, ?, ?, ?, ?, unixepoch())
-      ON CONFLICT(id) DO UPDATE SET
-        title = excluded.title, category_id = excluded.category_id,
-        poster_url = excluded.poster_url, rating_tmdb = excluded.rating_tmdb,
-        container_extension = excluded.container_extension, updated_at = excluded.updated_at
-    `)
-    const insertVodSource = db.prepare(`INSERT OR IGNORE INTO content_sources (id, content_id, source_id, external_id) VALUES (?, ?, ?, ?)`)
-
     const batchVod = db.transaction((items: any[]) => {
       for (const s of items) {
         const cid = `${sourceId}:movie:${s.stream_id}`
         const title = s.name || `Movie ${s.stream_id}`
         const year = s.year ? parseInt(s.year) : null
-
-        // Old schema (unchanged)
-        insertVod.run(cid, sourceId, String(s.stream_id), title, s.category_id || null, s.stream_icon || null, s.rating_5based ? s.rating_5based * 2 : null, s.container_extension || null)
-        insertVodSource.run(cid, cid, sourceId, String(s.stream_id))
-        insertFts.run(cid, normalize(title))
-        if (s.category_id) { const catId = `${sourceId}:movie:${s.category_id}`; insertCC.run(cid, catId, catId) }
-
-        // New schema double-write
         const canonicalId = `anon:movie:${sourceId}:${s.stream_id}`
-        insertCanonicalMovie.run(canonicalId, title, year, s.stream_icon || null)
+
+        insertCanonicalMovie.run(canonicalId, title, year, s.stream_icon || null, s.rating_5based ? s.rating_5based * 2 : null)
         insertStreamMovie.run(cid, canonicalId, sourceId, String(s.stream_id), title, s.category_id || null, s.stream_icon || null, s.container_extension || null)
-        insertCanonicalFts.run(canonicalId, normalize(title))
+        insertFts.run(canonicalId, normalize(title))
+        if (s.category_id) { const catId = `${sourceId}:movie:${s.category_id}`; insertSC.run(cid, catId, catId) }
       }
     })
     for (let i = 0; i < (vodStreams?.length ?? 0); i += BATCH) {
@@ -249,32 +219,17 @@ async function run() {
     const seriesList: any[] = await fetchJson(`${apiBase}&action=get_series`, FETCH_TIMEOUT, 'series')
     send('series', 0, seriesList?.length ?? 0, `Saving ${(seriesList?.length ?? 0).toLocaleString()} series…`)
 
-    const insertSeries = db.prepare(`
-      INSERT INTO content (id, primary_source_id, external_id, type, title, category_id, poster_url, plot, director, cast, rating_tmdb, updated_at)
-      VALUES (?, ?, ?, 'series', ?, ?, ?, ?, ?, ?, ?, unixepoch())
-      ON CONFLICT(id) DO UPDATE SET
-        title = excluded.title, category_id = excluded.category_id,
-        poster_url = excluded.poster_url, updated_at = excluded.updated_at
-    `)
-    const insertFtsSeries = db.prepare(`INSERT OR REPLACE INTO content_fts (content_id, title, plot, cast, director) VALUES (?, ?, ?, ?, ?)`)
-
     const batchSeries = db.transaction((items: any[]) => {
       for (const s of items) {
         const cid = `${sourceId}:series:${s.series_id}`
         const title = s.name || `Series ${s.series_id}`
         const year = s.year ? parseInt(s.year) : null
-
-        // Old schema (unchanged)
-        insertSeries.run(cid, sourceId, String(s.series_id), title, s.category_id || null, s.cover || null, s.plot || null, s.director || null, s.cast || null, s.rating_5based ? s.rating_5based * 2 : null)
-        insertVodSource.run(cid, cid, sourceId, String(s.series_id))
-        insertFtsSeries.run(cid, normalize(title), normalize(s.plot), normalize(s.cast), normalize(s.director))
-        if (s.category_id) { const catId = `${sourceId}:series:${s.category_id}`; insertCC.run(cid, catId, catId) }
-
-        // New schema double-write
         const canonicalId = `anon:series:${sourceId}:${s.series_id}`
-        insertCanonicalSeries.run(canonicalId, title, year, s.cover || null, s.plot || null)
+
+        insertCanonicalSeries.run(canonicalId, title, year, s.cover || null, s.plot || null, s.director || null, s.cast || null, s.rating_5based ? s.rating_5based * 2 : null)
         insertStreamSeries.run(cid, canonicalId, sourceId, String(s.series_id), title, s.category_id || null, s.cover || null)
-        insertCanonicalFts.run(canonicalId, normalize(title))
+        insertFtsSeries.run(canonicalId, normalize(title), normalize(s.plot), normalize(s.cast), normalize(s.director))
+        if (s.category_id) { const catId = `${sourceId}:series:${s.category_id}`; insertSC.run(cid, catId, catId) }
       }
     })
     for (let i = 0; i < (seriesList?.length ?? 0); i += BATCH) {
@@ -299,7 +254,7 @@ async function run() {
 
     // ── Finalize ──────────────────────────────────────────────────────────
     db.prepare('UPDATE categories SET content_synced = 1 WHERE source_id = ?').run(sourceId)
-    const totalItems = (db.prepare('SELECT COUNT(*) as n FROM content WHERE primary_source_id = ?').get(sourceId) as any).n
+    const totalItems = (db.prepare('SELECT COUNT(*) as n FROM streams WHERE source_id = ?').get(sourceId) as any).n
 
     db.prepare(`
       UPDATE sources SET status = 'active', last_sync = unixepoch(), last_error = NULL, item_count = ?

@@ -1,5 +1,7 @@
 /**
  * Delete worker — removes a source and all its content off the main thread.
+ * Deletes streams (cascades stream_categories), categories, epg, and the source row.
+ * Canonical + user_data rows survive (source-independent).
  */
 
 import { parentPort, workerData } from 'worker_threads'
@@ -14,12 +16,8 @@ try {
   db.pragma('foreign_keys = ON')
 
   db.transaction(() => {
-    db.prepare(`DELETE FROM content_fts WHERE content_id IN (SELECT id FROM content WHERE primary_source_id = ?)`).run(sourceId)
-    db.prepare(`DELETE FROM content_categories WHERE content_id IN (SELECT id FROM content WHERE primary_source_id = ?)`).run(sourceId)
-    db.prepare(`DELETE FROM user_data WHERE content_id IN (SELECT id FROM content WHERE primary_source_id = ?)`).run(sourceId)
-    db.prepare(`DELETE FROM embeddings WHERE content_id IN (SELECT id FROM content WHERE primary_source_id = ?)`).run(sourceId)
-    db.prepare(`DELETE FROM content_sources WHERE source_id = ?`).run(sourceId)
-    db.prepare(`DELETE FROM content WHERE primary_source_id = ?`).run(sourceId)
+    // stream_categories cascade from streams via FK ON DELETE CASCADE
+    db.prepare(`DELETE FROM streams WHERE source_id = ?`).run(sourceId)
     db.prepare(`DELETE FROM categories WHERE source_id = ?`).run(sourceId)
     db.prepare(`DELETE FROM epg WHERE source_id = ?`).run(sourceId)
     db.prepare(`DELETE FROM sources WHERE id = ?`).run(sourceId)

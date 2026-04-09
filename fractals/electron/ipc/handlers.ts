@@ -6,7 +6,7 @@ import { Worker } from 'worker_threads'
 import { getDb, getSqlite, getSetting, setSetting, rebuildFtsIfNeeded } from '../database/connection'
 import { sources } from '../database/schema'
 import { eq } from 'drizzle-orm'
-import { xtreamService, SyncProgress } from '../services/xtream.service'
+import { xtreamService } from '../services/xtream.service'
 import { m3uService } from '../services/m3u.service'
 import { tmdbService } from '../services/tmdb.service'
 import { syncEpg, getNowNext } from '../services/epg.service'
@@ -103,7 +103,6 @@ export function registerHandlers() {
 
     if (opts.includeUserData) {
       payload.user_data = sqlite.prepare(`SELECT * FROM user_data`).all()
-      payload.user_data_v2 = sqlite.prepare(`SELECT * FROM user_data_v2`).all()
     }
 
     const win = BrowserWindow.fromWebContents(event.sender)
@@ -137,12 +136,8 @@ export function registerHandlers() {
         color_index = excluded.color_index
     `)
     const insertUserData = sqlite.prepare(`
-      INSERT OR REPLACE INTO user_data (content_id, profile_id, favorite, watchlist, rating, last_position, last_watched_at, completed, fav_sort_order)
-      VALUES (@content_id, @profile_id, @favorite, @watchlist, @rating, @last_position, @last_watched_at, @completed, @fav_sort_order)
-    `)
-    const insertUserDataV2 = sqlite.prepare(`
-      INSERT OR REPLACE INTO user_data_v2 (canonical_id, profile_id, is_favorite, fav_sort_order, is_watchlisted, rating, watch_position, watch_duration, last_watched_at)
-      VALUES (@canonical_id, @profile_id, @is_favorite, @fav_sort_order, @is_watchlisted, @rating, @watch_position, @watch_duration, @last_watched_at)
+      INSERT OR REPLACE INTO user_data (canonical_id, profile_id, is_favorite, fav_sort_order, is_watchlisted, rating, watch_position, watch_duration, last_watched_at, completed)
+      VALUES (@canonical_id, @profile_id, @is_favorite, @fav_sort_order, @is_watchlisted, @rating, @watch_position, @watch_duration, @last_watched_at, @completed)
     `)
 
     try {
@@ -174,9 +169,6 @@ export function registerHandlers() {
         if (Array.isArray(parsed.user_data)) {
           for (const row of parsed.user_data) insertUserData.run(row)
         }
-        if (Array.isArray(parsed.user_data_v2)) {
-          for (const row of parsed.user_data_v2) insertUserDataV2.run(row)
-        }
       })()
 
       return { ok: true, count: parsed.sources.length }
@@ -187,23 +179,19 @@ export function registerHandlers() {
 
   ipcMain.handle('sources:factory-reset', () => {
     const sqlite = getSqlite()
-    // Disable FK checks so we can delete in any order without cascade overhead
     sqlite.pragma('foreign_keys = OFF')
     try {
       sqlite.transaction(() => {
         sqlite.prepare(`DELETE FROM user_data`).run()
-        sqlite.prepare(`DELETE FROM user_data_v2`).run()
         sqlite.prepare(`DELETE FROM epg`).run()
-        sqlite.prepare(`DELETE FROM content_sources`).run()
-        sqlite.prepare(`DELETE FROM content_fts`).run()
-        sqlite.prepare(`DELETE FROM content`).run()
-        sqlite.prepare(`DELETE FROM categories`).run()
-        sqlite.prepare(`DELETE FROM canonical`).run()
+        sqlite.prepare(`DELETE FROM stream_categories`).run()
         sqlite.prepare(`DELETE FROM streams`).run()
+        sqlite.prepare(`DELETE FROM canonical_fts`).run()
+        sqlite.prepare(`DELETE FROM canonical`).run()
+        sqlite.prepare(`DELETE FROM categories`).run()
         sqlite.prepare(`DELETE FROM sources`).run()
         sqlite.prepare(`DELETE FROM settings WHERE key NOT IN ('migration_source_scoped_ids', 'migration_source_color_column')`).run()
         try { sqlite.prepare(`DELETE FROM embeddings`).run() } catch {}
-        try { sqlite.prepare(`DELETE FROM content_categories`).run() } catch {}
       })()
     } finally {
       sqlite.pragma('foreign_keys = ON')
@@ -215,8 +203,8 @@ export function registerHandlers() {
   ipcMain.handle('sources:total-count', () => {
     const sqlite = getSqlite()
     const row = sqlite.prepare(`
-      SELECT COUNT(*) as n FROM content c
-      JOIN sources s ON s.id = c.primary_source_id AND s.disabled = 0
+      SELECT COUNT(*) as n FROM streams s
+      JOIN sources src ON src.id = s.source_id AND src.disabled = 0
     `).get() as any
     return row?.n ?? 0
   })
@@ -247,7 +235,7 @@ export function registerHandlers() {
   })
 
   ipcMain.handle('sources:remove', async (_event, sourceId: string) => {
-    const dbPath = join(app.getPath('userData'), 'data', process.env.FRACTALS_DB ? `fractals-${process.env.FRACTALS_DB}.db` : 'fractals.db')
+    const dbPath = join(app.getPath('userData'), 'data', process.env.FRACTALS_DB ? `fractals-${process.env.FRACTALS_DB}.db` : 'fractaltv.db')
     const workerPath = join(__dirname, 'delete.worker.js')
 
     return new Promise((resolve) => {
@@ -355,7 +343,7 @@ export function registerHandlers() {
     if (!source) return { success: false, error: 'Source not found' }
 
     // DB path — same as what connection.ts uses
-    const dbPath = join(app.getPath('userData'), 'data', process.env.FRACTALS_DB ? `fractals-${process.env.FRACTALS_DB}.db` : 'fractals.db')
+    const dbPath = join(app.getPath('userData'), 'data', process.env.FRACTALS_DB ? `fractals-${process.env.FRACTALS_DB}.db` : 'fractaltv.db')
 
     // Pick worker + workerData based on source type
     const isM3u = source.type === 'm3u'
@@ -457,12 +445,14 @@ export function registerHandlers() {
 
     const placeholders = args.contentIds.map(() => '?').join(',')
     const rows = sqlite.prepare(`
-      SELECT c.id, c.title, c.poster_url, c.epg_channel_id, c.primary_source_id,
-             c.catchup_supported, c.catchup_days,
-             cs.external_id
-      FROM content c
-      LEFT JOIN content_sources cs ON cs.content_id = c.id AND cs.source_id = c.primary_source_id
-      WHERE c.id IN (${placeholders}) AND c.type = 'live'
+      SELECT s.id, COALESCE(c.title, s.title) as title,
+             COALESCE(c.poster_path, s.thumbnail_url) as poster_url,
+             s.epg_channel_id, s.source_id as primary_source_id,
+             s.catchup_supported, s.catchup_days,
+             s.stream_id as external_id
+      FROM streams s
+      LEFT JOIN canonical c ON c.id = s.canonical_id
+      WHERE s.id IN (${placeholders}) AND s.type = 'live'
     `).all(...args.contentIds) as any[]
 
     const programmes: Record<string, any[]> = {}
@@ -535,19 +525,16 @@ export function registerHandlers() {
 
   ipcMain.handle('content:get-catchup-url', async (_event, args: { contentId: string; startTime: number; duration: number }) => {
     const sqlite = getSqlite()
-    const item = sqlite.prepare('SELECT * FROM content WHERE id = ?').get(args.contentId) as any
-    if (!item) return { error: 'Content not found' }
-
-    const sourceRow = sqlite.prepare('SELECT * FROM content_sources WHERE content_id = ? ORDER BY priority DESC LIMIT 1').get(args.contentId) as any
-    if (!sourceRow) return { error: 'No source found' }
+    const stream = sqlite.prepare('SELECT * FROM streams WHERE id = ?').get(args.contentId) as any
+    if (!stream) return { error: 'Stream not found' }
 
     const db = getDb()
-    const [source] = await db.select().from(sources).where(eq(sources.id, sourceRow.source_id))
+    const [source] = await db.select().from(sources).where(eq(sources.id, stream.source_id))
     if (!source?.serverUrl || !source.username || !source.password) return { error: 'Source credentials missing' }
 
     const url = xtreamService.buildCatchupUrl(
       source.serverUrl, source.username, source.password,
-      sourceRow.external_id,
+      stream.stream_id,
       new Date(args.startTime * 1000),
       args.duration
     )
@@ -570,32 +557,46 @@ export function registerHandlers() {
     const rawQuery = args.query
     const query = rawQuery.trim()
 
-    // Source filter — simple WHERE on primary_source_id
+    // Map API types to canonical types
+    const canonicalType = type === 'live' ? 'channel' : type
+
+    // Source filter — simple WHERE on streams.source_id
     const enabledSources = (sqlite.prepare(`SELECT id FROM sources WHERE disabled = 0`).all() as { id: string }[]).map(r => r.id)
     const filterIds = sourceIds && sourceIds.length > 0
       ? sourceIds.filter(id => enabledSources.includes(id))
       : enabledSources
     if (!filterIds.length) return []
-    const sourceFilter = `AND c.primary_source_id IN (${filterIds.map(() => '?').join(',')})`
+    const sourceFilter = `AND s.source_id IN (${filterIds.map(() => '?').join(',')})`
 
-    // Category filter via junction table (supports multi-category membership)
+    // Category filter via junction table
     const catJoin = categoryName
-      ? `JOIN content_categories cc ON cc.content_id = c.id JOIN categories cat ON cat.id = cc.category_id AND cat.name = ?`
+      ? `JOIN stream_categories sc ON sc.stream_id = s.id JOIN categories cat ON cat.id = sc.category_id AND cat.name = ?`
       : ''
     const catParams: any[] = categoryName ? [categoryName] : []
 
+    // Type filter on canonical (channel/movie/series)
+    const typeFilter = canonicalType ? `AND c.type = '${canonicalType}'` : ''
+
     if (!query || query.trim().length === 0) {
       const sql = `
-        SELECT DISTINCT c.*, c.primary_source_id as source_ids,
-          CASE WHEN c.epg_channel_id IS NOT NULL AND EXISTS (
-            SELECT 1 FROM epg e WHERE e.channel_external_id = c.epg_channel_id AND e.source_id = c.primary_source_id LIMIT 1
+        SELECT DISTINCT s.id, s.source_id as primary_source_id, s.source_id as source_ids,
+          s.stream_id as external_id, s.type, COALESCE(c.title, s.title) as title,
+          s.category_id, s.thumbnail_url as poster_url, s.container_extension,
+          s.catchup_supported, s.catchup_days, s.epg_channel_id,
+          c.id as canonical_id, c.original_title, c.year, c.overview as plot,
+          c.poster_path, c.backdrop_path as backdrop_url, c.vote_average as rating_tmdb,
+          c.rating_imdb, c.genres, c.director, c.cast_json as cast, c.keywords,
+          c.runtime, c.tmdb_id, c.enriched, c.enriched_at, c.tvg_id,
+          CASE WHEN s.epg_channel_id IS NOT NULL AND EXISTS (
+            SELECT 1 FROM epg e WHERE e.channel_external_id = s.epg_channel_id AND e.source_id = s.source_id LIMIT 1
           ) THEN 1 ELSE 0 END as has_epg_data
-        FROM content c
+        FROM streams s
+        JOIN canonical c ON c.id = s.canonical_id
         ${catJoin}
         WHERE 1=1
-        ${type ? `AND c.type = '${type}'` : ''}
+        ${typeFilter}
         ${sourceFilter}
-        ORDER BY c.updated_at DESC
+        ORDER BY s.added_at DESC
         LIMIT ? OFFSET ?
       `
       return sqlite.prepare(sql).all(...catParams, ...filterIds, limit, offset)
@@ -650,61 +651,72 @@ export function registerHandlers() {
     // Query contains special chars that FTS5 strips → LIKE should run first
     const hasSpecialChars = /[[\]()_\-]/.test(query)
 
-    const runSearch = (typeFilter: string, typeLimit: number): any[] => {
+    // Common SELECT columns for search results
+    const searchSelect = `
+      s.id, s.source_id as primary_source_id, s.source_id as source_ids,
+      s.stream_id as external_id, s.type, COALESCE(c.title, s.title) as title,
+      s.category_id, s.thumbnail_url as poster_url, s.container_extension,
+      s.catchup_supported, s.catchup_days, s.epg_channel_id,
+      c.id as canonical_id, c.original_title, c.year, c.overview as plot,
+      c.poster_path, c.backdrop_path as backdrop_url, c.vote_average as rating_tmdb,
+      c.rating_imdb, c.genres, c.director, c.cast_json as cast, c.keywords,
+      c.runtime, c.tmdb_id, c.enriched, c.enriched_at, c.tvg_id,
+      CASE WHEN s.epg_channel_id IS NOT NULL AND EXISTS (
+        SELECT 1 FROM epg e WHERE e.channel_external_id = s.epg_channel_id AND e.source_id = s.source_id LIMIT 1
+      ) THEN 1 ELSE 0 END as has_epg_data
+    `
+
+    const runSearch = (searchTypeFilter: string, typeLimit: number): any[] => {
       // ── LIKE search (substring, preserves special characters) ──────────
       const words = query.split(/\s+/).filter(Boolean)
-      const likeConditions = words.map(() => `c.title LIKE ?`).join(' AND ')
+      const likeConditions = words.map(() => `COALESCE(c.title, s.title) LIKE ?`).join(' AND ')
       const likeParams = words.map(w => `%${w}%`)
-      const runLike = (limit: number, excludeIds?: Set<string>): any[] => {
+      const runLike = (lim: number, excludeIds?: Set<string>): any[] => {
         const likeSql = `
-          SELECT DISTINCT c.*, c.primary_source_id as source_ids,
-          CASE WHEN c.epg_channel_id IS NOT NULL AND EXISTS (
-            SELECT 1 FROM epg e WHERE e.channel_external_id = c.epg_channel_id AND e.source_id = c.primary_source_id LIMIT 1
-          ) THEN 1 ELSE 0 END as has_epg_data
-          FROM content c
+          SELECT DISTINCT ${searchSelect}
+          FROM streams s
+          JOIN canonical c ON c.id = s.canonical_id
           ${catJoin}
           WHERE ${likeConditions}
-          ${typeFilter}
+          ${searchTypeFilter}
           ${sourceFilter}
-          ORDER BY c.updated_at DESC
+          ORDER BY s.added_at DESC
           LIMIT ? OFFSET ?
         `
-        const rows = sqlite.prepare(likeSql).all(...catParams, ...likeParams, ...filterIds, limit + (excludeIds?.size ?? 0), offset) as any[]
-        if (!excludeIds) return rows.slice(0, limit)
+        const rows = sqlite.prepare(likeSql).all(...catParams, ...likeParams, ...filterIds, lim + (excludeIds?.size ?? 0), offset) as any[]
+        if (!excludeIds) return rows.slice(0, lim)
         const filtered: any[] = []
         for (const r of rows) {
           if (!excludeIds.has(r.id)) {
             filtered.push(r)
-            if (filtered.length >= limit) break
+            if (filtered.length >= lim) break
           }
         }
         return filtered
       }
 
       // ── FTS5 search (ranked word matching) ─────────────────────────────
-      const runFts = (limit: number, excludeIds?: Set<string>): any[] => {
+      const runFts = (lim: number, excludeIds?: Set<string>): any[] => {
         try {
           const ftsSql = `
-            SELECT DISTINCT c.*, fts.rank, c.primary_source_id as source_ids,
-            CASE WHEN c.epg_channel_id IS NOT NULL AND EXISTS (
-              SELECT 1 FROM epg e WHERE e.channel_external_id = c.epg_channel_id AND e.source_id = c.primary_source_id LIMIT 1
-            ) THEN 1 ELSE 0 END as has_epg_data
-            FROM content_fts fts
-            JOIN content c ON c.id = fts.content_id
+            SELECT DISTINCT ${searchSelect}, fts.rank
+            FROM canonical_fts fts
+            JOIN canonical c ON c.id = fts.canonical_id
+            JOIN streams s ON s.canonical_id = c.id
             ${catJoin}
-            WHERE content_fts MATCH ?
-            ${typeFilter}
+            WHERE canonical_fts MATCH ?
+            ${searchTypeFilter}
             ${sourceFilter}
             ORDER BY fts.rank
             LIMIT ? OFFSET ?
           `
-          const rows = sqlite.prepare(ftsSql).all(...catParams, ftsQuery, ...filterIds, limit + (excludeIds?.size ?? 0), offset) as any[]
-          if (!excludeIds) return rows.slice(0, limit)
+          const rows = sqlite.prepare(ftsSql).all(...catParams, ftsQuery, ...filterIds, lim + (excludeIds?.size ?? 0), offset) as any[]
+          if (!excludeIds) return rows.slice(0, lim)
           const filtered: any[] = []
           for (const r of rows) {
             if (!excludeIds.has(r.id)) {
               filtered.push(r)
-              if (filtered.length >= limit) break
+              if (filtered.length >= lim) break
             }
           }
           return filtered
@@ -724,7 +736,7 @@ export function registerHandlers() {
       return [...primary, ...secondary]
     }
 
-    return runSearch(type ? `AND c.type = '${type}'` : '', limit)
+    return runSearch(typeFilter, limit)
   })
 
   // ── Content ──────────────────────────────────────────────────────────────
@@ -732,13 +744,25 @@ export function registerHandlers() {
   ipcMain.handle('content:get', async (_event, contentId: string) => {
     const sqlite = getSqlite()
     const item = sqlite.prepare(`
-      SELECT c.*, c.primary_source_id as source_ids,
-             GROUP_CONCAT(DISTINCT cat.name) as category_name
-      FROM content c
-      LEFT JOIN content_categories cc ON cc.content_id = c.id
-      LEFT JOIN categories cat ON cat.id = cc.category_id
-      WHERE c.id = ?
-      GROUP BY c.id
+      SELECT s.id, s.source_id as primary_source_id, s.source_id as source_ids,
+        s.stream_id as external_id, s.type, COALESCE(c.title, s.title) as title,
+        s.category_id, s.thumbnail_url as poster_url, s.container_extension,
+        s.catchup_supported, s.catchup_days, s.epg_channel_id,
+        c.id as canonical_id, c.original_title, c.year, c.overview as plot,
+        c.poster_path, c.backdrop_path as backdrop_url, c.vote_average as rating_tmdb,
+        c.rating_imdb, c.genres, c.director, c.cast_json as cast, c.keywords,
+        c.runtime, c.tmdb_id, c.enriched, c.enriched_at, c.tvg_id,
+        s.parent_canonical_id as parent_id, s.season_number, s.episode_number,
+        GROUP_CONCAT(DISTINCT cat.name) as category_name,
+        CASE WHEN s.epg_channel_id IS NOT NULL AND EXISTS (
+          SELECT 1 FROM epg e WHERE e.channel_external_id = s.epg_channel_id AND e.source_id = s.source_id LIMIT 1
+        ) THEN 1 ELSE 0 END as has_epg_data
+      FROM streams s
+      LEFT JOIN canonical c ON c.id = s.canonical_id
+      LEFT JOIN stream_categories sc ON sc.stream_id = s.id
+      LEFT JOIN categories cat ON cat.id = sc.category_id
+      WHERE s.id = ?
+      GROUP BY s.id
     `).get(contentId)
     return item
   })
@@ -750,31 +774,27 @@ export function registerHandlers() {
     const db = getDb()
     const sqlite = getSqlite()
 
-    const item = sqlite.prepare('SELECT * FROM content WHERE id = ?').get(args.contentId) as any
-    if (!item) return { error: 'Content not found' }
+    const stream = sqlite.prepare('SELECT * FROM streams WHERE id = ?').get(args.contentId) as any
+    if (!stream) return { error: 'Content not found' }
 
-    const sourceRow = args.sourceId
-      ? sqlite.prepare('SELECT * FROM content_sources WHERE content_id = ? AND source_id = ?').get(args.contentId, args.sourceId) as any
-      : sqlite.prepare('SELECT * FROM content_sources WHERE content_id = ? ORDER BY priority DESC LIMIT 1').get(args.contentId) as any
+    const sourceId = args.sourceId ?? stream.source_id
+    const [source] = await db.select().from(sources).where(eq(sources.id, sourceId))
+    if (!source) return { error: 'No stream source found' }
 
-    if (!sourceRow) return { error: 'No stream source found' }
-
-    const [source] = await db.select().from(sources).where(eq(sources.id, sourceRow.source_id))
-
-    // M3U sources: URL stored on content_sources row
-    if (source?.type === 'm3u') {
-      if (!sourceRow.stream_url) return { error: 'Stream URL missing for M3U content' }
-      return { url: sourceRow.stream_url, sourceId: source.id }
+    // M3U sources: URL stored directly on streams row
+    if (source.type === 'm3u') {
+      if (!stream.stream_url) return { error: 'Stream URL missing for M3U content' }
+      return { url: stream.stream_url, sourceId: source.id }
     }
 
-    if (!source?.serverUrl || !source.username || !source.password) return { error: 'Source credentials missing' }
+    if (!source.serverUrl || !source.username || !source.password) return { error: 'Source credentials missing' }
 
-    const streamType = item.type === 'live' ? 'live' : item.type === 'series' ? 'series' : 'movie'
+    const streamType = stream.type === 'live' ? 'live' : (stream.type === 'series' || stream.type === 'episode') ? 'series' : 'movie'
     const url = xtreamService.buildStreamUrl(
       source.serverUrl, source.username, source.password,
       streamType,
-      sourceRow.external_id,
-      item.container_extension
+      stream.stream_id,
+      stream.container_extension
     )
 
     return { url, sourceId: source.id }
@@ -784,42 +804,41 @@ export function registerHandlers() {
     const db = getDb()
     const sqlite = getSqlite()
 
-    const item = sqlite.prepare('SELECT * FROM content WHERE id = ?').get(args.contentId) as any
-    if (!item) return { error: 'Content not found' }
+    const stream = sqlite.prepare('SELECT * FROM streams WHERE id = ?').get(args.contentId) as any
+    if (!stream) return { error: 'Content not found' }
 
-    const sourceRow = sqlite.prepare('SELECT * FROM content_sources WHERE content_id = ? ORDER BY priority DESC LIMIT 1').get(args.contentId) as any
-    if (!sourceRow) return { error: 'No source found' }
-
-    const [source] = await db.select().from(sources).where(eq(sources.id, sourceRow.source_id))
+    const [source] = await db.select().from(sources).where(eq(sources.id, stream.source_id))
     if (!source?.serverUrl || !source.username || !source.password) return { error: 'Source credentials missing' }
 
     try {
-      const info = await xtreamService.getSeriesInfo(source.serverUrl, source.username, source.password, sourceRow.external_id)
+      const info = await xtreamService.getSeriesInfo(source.serverUrl, source.username, source.password, stream.stream_id)
 
-      // Persist episodes into content + content_sources so position saves work
-      // (user_data.content_id FK references content.id — episodes must exist in DB)
-      const upsertEp = sqlite.prepare(`
-        INSERT INTO content (id, primary_source_id, external_id, type, title, parent_id, season_number, episode_number, container_extension, plot, updated_at)
-        VALUES (?, ?, ?, 'episode', ?, ?, ?, ?, ?, ?, unixepoch())
+      // Persist episodes into canonical + streams so position saves work
+      // (user_data FK references canonical.id — episodes must exist in DB)
+      const upsertCanonical = sqlite.prepare(`
+        INSERT INTO canonical (id, type, title, overview)
+        VALUES (?, 'episode', ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          title = excluded.title,
+          overview = COALESCE(excluded.overview, canonical.overview)
+      `)
+      const upsertStream = sqlite.prepare(`
+        INSERT INTO streams (id, canonical_id, source_id, type, stream_id, title, parent_canonical_id, season_number, episode_number, container_extension)
+        VALUES (?, ?, ?, 'episode', ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           title = excluded.title,
           season_number = excluded.season_number,
           episode_number = excluded.episode_number,
-          container_extension = excluded.container_extension,
-          plot = excluded.plot,
-          updated_at = excluded.updated_at
+          container_extension = excluded.container_extension
       `)
-      const upsertEpSource = sqlite.prepare(`
-        INSERT INTO content_sources (id, content_id, source_id, external_id)
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT(id) DO NOTHING
-      `)
+      const parentCanonicalId = stream.canonical_id
       const insertEpisodes = sqlite.transaction((seasons: Record<string, any[]>) => {
         for (const [, eps] of Object.entries(seasons)) {
           for (const ep of eps) {
-            const epId = `${source.id}:episode:${ep.id}`
-            upsertEp.run(epId, source.id, String(ep.id), ep.title, args.contentId, ep.season, ep.episode_num, ep.container_extension ?? 'mkv', ep.plot ?? null)
-            upsertEpSource.run(epId, epId, source.id, String(ep.id))
+            const epStreamId = `${source.id}:episode:${ep.id}`
+            const epCanonicalId = `ep:${source.id}:${ep.id}`
+            upsertCanonical.run(epCanonicalId, ep.title, ep.plot ?? null)
+            upsertStream.run(epStreamId, epCanonicalId, source.id, String(ep.id), ep.title, parentCanonicalId, ep.season, ep.episode_num, ep.container_extension ?? 'mkv')
           }
         }
       })
@@ -835,108 +854,110 @@ export function registerHandlers() {
 
   ipcMain.handle('user:get-data', async (_event, contentId: string) => {
     const sqlite = getSqlite()
-    return sqlite.prepare('SELECT * FROM user_data WHERE content_id = ?').get(contentId)
+    const stream = sqlite.prepare('SELECT canonical_id FROM streams WHERE id = ?').get(contentId) as any
+    if (!stream?.canonical_id) return null
+    const row = sqlite.prepare('SELECT * FROM user_data WHERE canonical_id = ? AND profile_id = ?').get(stream.canonical_id, 'default') as any
+    if (!row) return null
+    // Alias columns to v1-compatible names for frontend
+    return {
+      content_id: contentId,
+      favorite: row.is_favorite ?? 0,
+      watchlist: row.is_watchlisted ?? 0,
+      rating: row.rating,
+      last_position: row.watch_position ?? 0,
+      last_watched_at: row.last_watched_at,
+      completed: row.completed ?? 0,
+      fav_sort_order: row.fav_sort_order,
+    }
   })
 
   ipcMain.handle('user:set-position', async (_event, args: { contentId: string; position: number }) => {
     const sqlite = getSqlite()
+    const stream = sqlite.prepare('SELECT canonical_id FROM streams WHERE id = ?').get(args.contentId) as any
+    if (!stream?.canonical_id) return { success: false }
     sqlite.prepare(`
-      INSERT INTO user_data (content_id, last_position, last_watched_at)
+      INSERT INTO user_data (canonical_id, watch_position, last_watched_at)
       VALUES (?, ?, unixepoch())
-      ON CONFLICT(content_id) DO UPDATE SET
-        last_position = excluded.last_position,
+      ON CONFLICT(canonical_id, profile_id) DO UPDATE SET
+        watch_position  = excluded.watch_position,
         last_watched_at = excluded.last_watched_at
-    `).run(args.contentId, args.position)
-
-    // Dual-write to user_data_v2 (new schema)
-    const stream = sqlite.prepare(`SELECT canonical_id FROM streams WHERE id = ?`).get(args.contentId) as any
-    if (stream?.canonical_id) {
-      sqlite.prepare(`
-        INSERT INTO user_data_v2 (canonical_id, watch_position, last_watched_at)
-        VALUES (?, ?, unixepoch())
-        ON CONFLICT(canonical_id, profile_id) DO UPDATE SET
-          watch_position  = excluded.watch_position,
-          last_watched_at = excluded.last_watched_at
-      `).run(stream.canonical_id, args.position)
-    }
-
+    `).run(stream.canonical_id, args.position)
     return { success: true }
   })
 
   ipcMain.handle('user:toggle-favorite', async (_event, contentId: string) => {
     const sqlite = getSqlite()
+    const stream = sqlite.prepare('SELECT canonical_id FROM streams WHERE id = ?').get(contentId) as any
+    if (!stream?.canonical_id) return { favorite: false }
     sqlite.prepare(`
-      INSERT INTO user_data (content_id, favorite)
+      INSERT INTO user_data (canonical_id, is_favorite)
       VALUES (?, 1)
-      ON CONFLICT(content_id) DO UPDATE SET favorite = NOT favorite
-    `).run(contentId)
-    const row = sqlite.prepare('SELECT favorite FROM user_data WHERE content_id = ?').get(contentId) as any
-    const isFavorite = !!row?.favorite
-
-    // Dual-write to user_data_v2 (new schema — all types: channels, movies, series)
-    const stream = sqlite.prepare(
-      `SELECT canonical_id FROM streams WHERE id = ?`
-    ).get(contentId) as any
-    if (stream?.canonical_id) {
-      sqlite.prepare(`
-        INSERT INTO user_data_v2 (canonical_id, is_favorite)
-        VALUES (?, ?)
-        ON CONFLICT(canonical_id, profile_id) DO UPDATE SET is_favorite = excluded.is_favorite
-      `).run(stream.canonical_id, isFavorite ? 1 : 0)
-    }
-
-    return { favorite: isFavorite }
+      ON CONFLICT(canonical_id, profile_id) DO UPDATE SET is_favorite = NOT is_favorite
+    `).run(stream.canonical_id)
+    const row = sqlite.prepare('SELECT is_favorite FROM user_data WHERE canonical_id = ? AND profile_id = ?').get(stream.canonical_id, 'default') as any
+    return { favorite: !!row?.is_favorite }
   })
 
   ipcMain.handle('user:toggle-watchlist', async (_event, contentId: string) => {
     const sqlite = getSqlite()
+    const stream = sqlite.prepare('SELECT canonical_id FROM streams WHERE id = ?').get(contentId) as any
+    if (!stream?.canonical_id) return { watchlist: false }
     sqlite.prepare(`
-      INSERT INTO user_data (content_id, watchlist)
+      INSERT INTO user_data (canonical_id, is_watchlisted)
       VALUES (?, 1)
-      ON CONFLICT(content_id) DO UPDATE SET watchlist = NOT watchlist
-    `).run(contentId)
-    const row = sqlite.prepare('SELECT watchlist FROM user_data WHERE content_id = ?').get(contentId) as any
-    const isWatchlisted = !!row?.watchlist
-
-    // Dual-write to user_data_v2 (new schema)
-    const stream = sqlite.prepare(`SELECT canonical_id FROM streams WHERE id = ?`).get(contentId) as any
-    if (stream?.canonical_id) {
-      sqlite.prepare(`
-        INSERT INTO user_data_v2 (canonical_id, is_watchlisted)
-        VALUES (?, ?)
-        ON CONFLICT(canonical_id, profile_id) DO UPDATE SET is_watchlisted = excluded.is_watchlisted
-      `).run(stream.canonical_id, isWatchlisted ? 1 : 0)
-    }
-
-    return { watchlist: isWatchlisted }
+      ON CONFLICT(canonical_id, profile_id) DO UPDATE SET is_watchlisted = NOT is_watchlisted
+    `).run(stream.canonical_id)
+    const row = sqlite.prepare('SELECT is_watchlisted FROM user_data WHERE canonical_id = ? AND profile_id = ?').get(stream.canonical_id, 'default') as any
+    return { watchlist: !!row?.is_watchlisted }
   })
 
   ipcMain.handle('user:favorites', async (_event, args?: { type?: 'live' | 'movie' | 'series' }) => {
     const sqlite = getSqlite()
-    const typeFilter = args?.type ? `AND c.type = ?` : ''
-    const params: any[] = args?.type ? [args.type] : []
+    // Map API type to canonical type
+    const canonicalType = args?.type === 'live' ? 'channel' : args?.type
+    const typeFilter = canonicalType ? `AND c.type = ?` : ''
+    const params: any[] = canonicalType ? [canonicalType] : []
     return sqlite.prepare(`
-      SELECT c.*, c.primary_source_id as source_ids,
-        CASE WHEN c.epg_channel_id IS NOT NULL AND EXISTS (
-          SELECT 1 FROM epg e WHERE e.channel_external_id = c.epg_channel_id AND e.source_id = c.primary_source_id LIMIT 1
+      SELECT s.id, s.source_id as primary_source_id, s.source_id as source_ids,
+        s.stream_id as external_id, s.type, COALESCE(c.title, s.title) as title,
+        s.category_id, s.thumbnail_url as poster_url, s.container_extension,
+        s.catchup_supported, s.catchup_days, s.epg_channel_id,
+        c.id as canonical_id, c.original_title, c.year, c.overview as plot,
+        c.poster_path, c.backdrop_path as backdrop_url, c.vote_average as rating_tmdb,
+        c.rating_imdb, c.genres, c.director, c.cast_json as cast, c.keywords,
+        c.runtime, c.tmdb_id, c.enriched, c.enriched_at, c.tvg_id,
+        ud.fav_sort_order, ud.last_watched_at, 1 as favorite,
+        CASE WHEN s.epg_channel_id IS NOT NULL AND EXISTS (
+          SELECT 1 FROM epg e WHERE e.channel_external_id = s.epg_channel_id AND e.source_id = s.source_id LIMIT 1
         ) THEN 1 ELSE 0 END as has_epg_data
       FROM user_data ud
-      JOIN content c ON c.id = ud.content_id
-      JOIN sources s ON s.id = c.primary_source_id AND s.disabled = 0
-      WHERE ud.favorite = 1 AND ud.profile_id = 'default'
+      JOIN canonical c ON c.id = ud.canonical_id
+      LEFT JOIN streams s ON s.canonical_id = c.id
+        AND s.source_id = (
+          SELECT s2.source_id FROM streams s2
+          JOIN sources src ON src.id = s2.source_id AND src.disabled = 0
+          WHERE s2.canonical_id = c.id
+          ORDER BY s2.added_at ASC LIMIT 1
+        )
+      WHERE ud.is_favorite = 1 AND ud.profile_id = 'default'
       ${typeFilter}
+      GROUP BY c.id
       ORDER BY COALESCE(ud.fav_sort_order, 999999) ASC, ud.last_watched_at DESC
     `).all(...params)
   })
 
   ipcMain.handle('user:reorder-favorites', async (_event, order: { contentId: string; sortOrder: number }[]) => {
     const sqlite = getSqlite()
+    // Look up canonical_id from stream id, then update user_data
+    const getCanonical = sqlite.prepare('SELECT canonical_id FROM streams WHERE id = ?')
     const update = sqlite.prepare(
-      `UPDATE user_data SET fav_sort_order = ? WHERE content_id = ? AND profile_id = 'default'`
+      `UPDATE user_data SET fav_sort_order = ? WHERE canonical_id = ? AND profile_id = 'default'`
     )
     const runAll = sqlite.transaction((items: typeof order) => {
       for (const { contentId, sortOrder } of items) {
-        update.run(sortOrder, contentId)
+        const stream = getCanonical.get(contentId) as any
+        const cid = stream?.canonical_id ?? contentId
+        update.run(sortOrder, cid)
       }
     })
     runAll(order)
@@ -962,7 +983,7 @@ export function registerHandlers() {
         ud.fav_sort_order,
         ud.last_watched_at,
         1                              AS favorite
-      FROM user_data_v2 ud
+      FROM user_data ud
       JOIN canonical c ON c.id = ud.canonical_id
       LEFT JOIN streams s ON s.canonical_id = c.id
         AND s.source_id = (
@@ -981,12 +1002,12 @@ export function registerHandlers() {
   ipcMain.handle('channels:toggle-favorite', async (_event, canonicalId: string) => {
     const sqlite = getSqlite()
     sqlite.prepare(`
-      INSERT INTO user_data_v2 (canonical_id, is_favorite)
+      INSERT INTO user_data (canonical_id, is_favorite)
       VALUES (?, 1)
       ON CONFLICT(canonical_id, profile_id) DO UPDATE SET is_favorite = NOT is_favorite
     `).run(canonicalId)
     const row = sqlite.prepare(
-      `SELECT is_favorite FROM user_data_v2 WHERE canonical_id = ? AND profile_id = 'default'`
+      `SELECT is_favorite FROM user_data WHERE canonical_id = ? AND profile_id = 'default'`
     ).get(canonicalId) as any
     return { favorite: !!row?.is_favorite }
   })
@@ -994,7 +1015,7 @@ export function registerHandlers() {
   ipcMain.handle('channels:reorder-favorites', async (_event, order: { canonicalId: string; sortOrder: number }[]) => {
     const sqlite = getSqlite()
     const update = sqlite.prepare(
-      `UPDATE user_data_v2 SET fav_sort_order = ? WHERE canonical_id = ? AND profile_id = 'default'`
+      `UPDATE user_data SET fav_sort_order = ? WHERE canonical_id = ? AND profile_id = 'default'`
     )
     const runAll = sqlite.transaction((items: typeof order) => {
       for (const { canonicalId, sortOrder } of items) {
@@ -1008,7 +1029,7 @@ export function registerHandlers() {
   ipcMain.handle('channels:get-data', async (_event, canonicalId: string) => {
     const sqlite = getSqlite()
     const row = sqlite.prepare(
-      `SELECT * FROM user_data_v2 WHERE canonical_id = ? AND profile_id = 'default'`
+      `SELECT * FROM user_data WHERE canonical_id = ? AND profile_id = 'default'`
     ).get(canonicalId) as any
     return {
       favorite:    !!row?.is_favorite,
@@ -1023,15 +1044,29 @@ export function registerHandlers() {
 
   ipcMain.handle('user:watchlist', async (_event, args?: { type?: 'live' | 'movie' | 'series' }) => {
     const sqlite = getSqlite()
-    const typeFilter = args?.type ? `AND c.type = ?` : ''
-    const params: any[] = args?.type ? [args.type] : []
+    const canonicalType = args?.type === 'live' ? 'channel' : args?.type
+    const typeFilter = canonicalType ? `AND c.type = ?` : ''
+    const params: any[] = canonicalType ? [canonicalType] : []
     return sqlite.prepare(`
-      SELECT c.*, c.primary_source_id as source_ids
+      SELECT s.id, s.source_id as primary_source_id, s.source_id as source_ids,
+        s.stream_id as external_id, s.type, COALESCE(c.title, s.title) as title,
+        s.category_id, s.thumbnail_url as poster_url, s.container_extension,
+        c.id as canonical_id, c.original_title, c.year, c.overview as plot,
+        c.poster_path, c.backdrop_path as backdrop_url, c.vote_average as rating_tmdb,
+        c.genres, c.director, c.cast_json as cast, c.keywords,
+        c.runtime, c.tmdb_id, c.enriched, c.tvg_id
       FROM user_data ud
-      JOIN content c ON c.id = ud.content_id
-      JOIN sources s ON s.id = c.primary_source_id AND s.disabled = 0
-      WHERE ud.watchlist = 1 AND ud.profile_id = 'default'
+      JOIN canonical c ON c.id = ud.canonical_id
+      LEFT JOIN streams s ON s.canonical_id = c.id
+        AND s.source_id = (
+          SELECT s2.source_id FROM streams s2
+          JOIN sources src ON src.id = s2.source_id AND src.disabled = 0
+          WHERE s2.canonical_id = c.id
+          ORDER BY s2.added_at ASC LIMIT 1
+        )
+      WHERE ud.is_watchlisted = 1 AND ud.profile_id = 'default'
       ${typeFilter}
+      GROUP BY c.id
       ORDER BY ud.last_watched_at DESC
     `).all(...params)
   })
@@ -1039,45 +1074,66 @@ export function registerHandlers() {
   ipcMain.handle('user:continue-watching', async (_event, args?: { type?: 'movie' | 'series' }) => {
     const sqlite = getSqlite()
 
-    // In-progress movies: straightforward
+    // In-progress movies
     const moviesSql = `
-      SELECT c.*, c.primary_source_id as source_ids, ud.last_position, ud.last_watched_at
+      SELECT s.id, s.source_id as primary_source_id, s.source_id as source_ids,
+        s.stream_id as external_id, s.type, COALESCE(c.title, s.title) as title,
+        s.category_id, s.thumbnail_url as poster_url, s.container_extension,
+        c.id as canonical_id, c.original_title, c.year, c.overview as plot,
+        c.poster_path, c.backdrop_path as backdrop_url, c.vote_average as rating_tmdb,
+        c.genres, c.director, c.cast_json as cast, c.keywords,
+        c.runtime, c.tmdb_id, c.enriched, c.tvg_id,
+        ud.watch_position as last_position, ud.last_watched_at
       FROM user_data ud
-      JOIN content c ON c.id = ud.content_id
-      JOIN sources s ON s.id = c.primary_source_id AND s.disabled = 0
-      WHERE ud.last_position > 0 AND ud.completed = 0
+      JOIN canonical c ON c.id = ud.canonical_id
+      LEFT JOIN streams s ON s.canonical_id = c.id
+        AND s.source_id = (
+          SELECT s2.source_id FROM streams s2
+          JOIN sources src ON src.id = s2.source_id AND src.disabled = 0
+          WHERE s2.canonical_id = c.id
+          ORDER BY s2.added_at ASC LIMIT 1
+        )
+      WHERE ud.watch_position > 0 AND ud.completed = 0
         AND c.type = 'movie'
         AND ud.profile_id = 'default'
+      GROUP BY c.id
       ORDER BY ud.last_watched_at DESC
       LIMIT 20
     `
 
-    // In-progress series: find the most recently watched episode per series,
+    // In-progress series: find most recently watched episode per series,
     // return the parent series row enriched with episode resume info.
     const seriesSql = `
       WITH ranked_episodes AS (
         SELECT
-          ep.parent_id,
-          ep.id          AS resume_episode_id,
-          ep.season_number  AS resume_season_number,
-          ep.episode_number AS resume_episode_number,
-          ep.title          AS resume_episode_title,
-          ud.last_position,
+          ep_s.parent_canonical_id,
+          ep_s.id              AS resume_episode_id,
+          ep_s.season_number   AS resume_season_number,
+          ep_s.episode_number  AS resume_episode_number,
+          COALESCE(ep_c.title, ep_s.title) AS resume_episode_title,
+          ud.watch_position    AS last_position,
           ud.last_watched_at,
           ROW_NUMBER() OVER (
-            PARTITION BY ep.parent_id
+            PARTITION BY ep_s.parent_canonical_id
             ORDER BY ud.last_watched_at DESC
           ) AS rn
         FROM user_data ud
-        JOIN content ep ON ep.id = ud.content_id
-        WHERE ud.last_position > 0
+        JOIN canonical ep_c ON ep_c.id = ud.canonical_id
+        JOIN streams ep_s ON ep_s.canonical_id = ep_c.id
+        WHERE ud.watch_position > 0
           AND ud.completed = 0
-          AND ep.type = 'episode'
-          AND ep.parent_id IS NOT NULL
+          AND ep_c.type = 'episode'
+          AND ep_s.parent_canonical_id IS NOT NULL
           AND ud.profile_id = 'default'
       )
       SELECT
-        c.*, c.primary_source_id AS source_ids,
+        ps.id, ps.source_id as primary_source_id, ps.source_id as source_ids,
+        ps.stream_id as external_id, ps.type, COALESCE(pc.title, ps.title) as title,
+        ps.category_id, ps.thumbnail_url as poster_url, ps.container_extension,
+        pc.id as canonical_id, pc.original_title, pc.year, pc.overview as plot,
+        pc.poster_path, pc.backdrop_path as backdrop_url, pc.vote_average as rating_tmdb,
+        pc.genres, pc.director, pc.cast_json as cast, pc.keywords,
+        pc.runtime, pc.tmdb_id, pc.enriched, pc.tvg_id,
         r.resume_episode_id,
         r.resume_season_number,
         r.resume_episode_number,
@@ -1085,9 +1141,16 @@ export function registerHandlers() {
         r.last_position,
         r.last_watched_at
       FROM ranked_episodes r
-      JOIN content c ON c.id = r.parent_id
-      JOIN sources s ON s.id = c.primary_source_id AND s.disabled = 0
+      JOIN canonical pc ON pc.id = r.parent_canonical_id
+      LEFT JOIN streams ps ON ps.canonical_id = pc.id
+        AND ps.source_id = (
+          SELECT s2.source_id FROM streams s2
+          JOIN sources src ON src.id = s2.source_id AND src.disabled = 0
+          WHERE s2.canonical_id = pc.id
+          ORDER BY s2.added_at ASC LIMIT 1
+        )
       WHERE r.rn = 1
+      GROUP BY pc.id
       ORDER BY r.last_watched_at DESC
       LIMIT 20
     `
@@ -1095,7 +1158,6 @@ export function registerHandlers() {
     if (args?.type === 'movie') return sqlite.prepare(moviesSql).all()
     if (args?.type === 'series') return sqlite.prepare(seriesSql).all()
 
-    // No type = combined: merge movies + series, sort by recency
     const movies = sqlite.prepare(moviesSql).all() as any[]
     const series = sqlite.prepare(seriesSql).all() as any[]
     return [...movies, ...series]
@@ -1109,39 +1171,61 @@ export function registerHandlers() {
 
     // Non-episode history (movies, live, series watched directly)
     const directRows = sqlite.prepare(`
-      SELECT c.*, c.primary_source_id as source_ids, ud.last_position, ud.last_watched_at
+      SELECT s.id, s.source_id as primary_source_id, s.source_id as source_ids,
+        s.stream_id as external_id, s.type, COALESCE(c.title, s.title) as title,
+        s.category_id, s.thumbnail_url as poster_url, s.container_extension,
+        c.id as canonical_id, c.original_title, c.year, c.overview as plot,
+        c.poster_path, c.backdrop_path as backdrop_url, c.vote_average as rating_tmdb,
+        c.genres, c.director, c.cast_json as cast, c.keywords,
+        c.runtime, c.tmdb_id, c.enriched, c.tvg_id,
+        ud.watch_position as last_position, ud.last_watched_at
       FROM user_data ud
-      JOIN content c ON c.id = ud.content_id
+      JOIN canonical c ON c.id = ud.canonical_id
+      LEFT JOIN streams s ON s.canonical_id = c.id
+        AND s.source_id = (
+          SELECT s2.source_id FROM streams s2
+          JOIN sources src ON src.id = s2.source_id AND src.disabled = 0
+          WHERE s2.canonical_id = c.id
+          ORDER BY s2.added_at ASC LIMIT 1
+        )
       WHERE ud.last_watched_at IS NOT NULL AND ud.profile_id = 'default'
         AND c.type != 'episode'
+      GROUP BY c.id
       ORDER BY ud.last_watched_at DESC
       LIMIT ?
     `).all(limit) as any[]
 
-    // Episode history → transform to parent series with resume info (most recent episode per series)
+    // Episode history → transform to parent series with resume info
     const episodeRows = sqlite.prepare(`
       WITH ranked_episodes AS (
         SELECT
-          ep.parent_id,
-          ep.id             AS resume_episode_id,
-          ep.season_number  AS resume_season_number,
-          ep.episode_number AS resume_episode_number,
-          ep.title          AS resume_episode_title,
-          ud.last_position,
+          ep_s.parent_canonical_id,
+          ep_s.id              AS resume_episode_id,
+          ep_s.season_number   AS resume_season_number,
+          ep_s.episode_number  AS resume_episode_number,
+          COALESCE(ep_c.title, ep_s.title) AS resume_episode_title,
+          ud.watch_position    AS last_position,
           ud.last_watched_at,
           ROW_NUMBER() OVER (
-            PARTITION BY ep.parent_id
+            PARTITION BY ep_s.parent_canonical_id
             ORDER BY ud.last_watched_at DESC
           ) AS rn
         FROM user_data ud
-        JOIN content ep ON ep.id = ud.content_id
+        JOIN canonical ep_c ON ep_c.id = ud.canonical_id
+        JOIN streams ep_s ON ep_s.canonical_id = ep_c.id
         WHERE ud.last_watched_at IS NOT NULL
-          AND ep.type = 'episode'
-          AND ep.parent_id IS NOT NULL
+          AND ep_c.type = 'episode'
+          AND ep_s.parent_canonical_id IS NOT NULL
           AND ud.profile_id = 'default'
       )
       SELECT
-        c.*, c.primary_source_id AS source_ids,
+        ps.id, ps.source_id as primary_source_id, ps.source_id as source_ids,
+        ps.stream_id as external_id, ps.type, COALESCE(pc.title, ps.title) as title,
+        ps.category_id, ps.thumbnail_url as poster_url, ps.container_extension,
+        pc.id as canonical_id, pc.original_title, pc.year, pc.overview as plot,
+        pc.poster_path, pc.backdrop_path as backdrop_url, pc.vote_average as rating_tmdb,
+        pc.genres, pc.director, pc.cast_json as cast, pc.keywords,
+        pc.runtime, pc.tmdb_id, pc.enriched, pc.tvg_id,
         r.resume_episode_id,
         r.resume_season_number,
         r.resume_episode_number,
@@ -1149,13 +1233,20 @@ export function registerHandlers() {
         r.last_position,
         r.last_watched_at
       FROM ranked_episodes r
-      JOIN content c ON c.id = r.parent_id
+      JOIN canonical pc ON pc.id = r.parent_canonical_id
+      LEFT JOIN streams ps ON ps.canonical_id = pc.id
+        AND ps.source_id = (
+          SELECT s2.source_id FROM streams s2
+          JOIN sources src ON src.id = s2.source_id AND src.disabled = 0
+          WHERE s2.canonical_id = pc.id
+          ORDER BY s2.added_at ASC LIMIT 1
+        )
       WHERE r.rn = 1
+      GROUP BY pc.id
       ORDER BY r.last_watched_at DESC
       LIMIT ?
     `).all(limit) as any[]
 
-    // Merge and sort by recency, deduplicate by content id
     const seen = new Set<string>()
     return [...directRows, ...episodeRows]
       .sort((a, b) => (b.last_watched_at ?? 0) - (a.last_watched_at ?? 0))
@@ -1166,62 +1257,70 @@ export function registerHandlers() {
   ipcMain.handle('user:bulk-get-data', async (_event, contentIds: string[]) => {
     const sqlite = getSqlite()
     if (!contentIds.length) return {}
+    // Look up canonical_ids from stream ids
     const inList = contentIds.map(() => '?').join(',')
-    const rows = sqlite.prepare(`
-      SELECT * FROM user_data WHERE content_id IN (${inList}) AND profile_id = 'default'
-    `).all(...contentIds) as any[]
+    const streams = sqlite.prepare(
+      `SELECT id, canonical_id FROM streams WHERE id IN (${inList})`
+    ).all(...contentIds) as any[]
+    const streamToCanonical = new Map<string, string>()
+    const canonicalIds: string[] = []
+    for (const s of streams) {
+      if (s.canonical_id) {
+        streamToCanonical.set(s.id, s.canonical_id)
+        canonicalIds.push(s.canonical_id)
+      }
+    }
+    if (!canonicalIds.length) return {}
+    const cInList = canonicalIds.map(() => '?').join(',')
+    const rows = sqlite.prepare(
+      `SELECT * FROM user_data WHERE canonical_id IN (${cInList}) AND profile_id = 'default'`
+    ).all(...canonicalIds) as any[]
+    const canonicalToData = new Map<string, any>()
+    for (const row of rows) canonicalToData.set(row.canonical_id, row)
+    // Return keyed by stream id with v1-compatible column names
     const result: Record<string, any> = {}
-    for (const row of rows) {
-      result[row.content_id] = row
+    for (const [streamId, canonicalId] of streamToCanonical) {
+      const row = canonicalToData.get(canonicalId)
+      if (row) {
+        result[streamId] = {
+          content_id: streamId,
+          favorite: row.is_favorite ?? 0,
+          watchlist: row.is_watchlisted ?? 0,
+          rating: row.rating,
+          last_position: row.watch_position ?? 0,
+          last_watched_at: row.last_watched_at,
+          completed: row.completed ?? 0,
+          fav_sort_order: row.fav_sort_order,
+        }
+      }
     }
     return result
   })
 
   ipcMain.handle('user:set-completed', async (_event, contentId: string) => {
     const sqlite = getSqlite()
+    const stream = sqlite.prepare('SELECT canonical_id FROM streams WHERE id = ?').get(contentId) as any
+    if (!stream?.canonical_id) return { success: false }
     sqlite.prepare(`
-      INSERT INTO user_data (content_id, completed, last_position, last_watched_at)
+      INSERT INTO user_data (canonical_id, completed, watch_position, last_watched_at)
       VALUES (?, 1, 0, unixepoch())
-      ON CONFLICT(content_id) DO UPDATE SET
-        completed = 1,
-        last_position = 0,
+      ON CONFLICT(canonical_id, profile_id) DO UPDATE SET
+        completed       = 1,
+        watch_position  = 0,
         last_watched_at = unixepoch()
-    `).run(contentId)
-
-    // Dual-write to user_data_v2 (new schema)
-    const stream = sqlite.prepare(`SELECT canonical_id FROM streams WHERE id = ?`).get(contentId) as any
-    if (stream?.canonical_id) {
-      sqlite.prepare(`
-        INSERT INTO user_data_v2 (canonical_id, completed, watch_position, last_watched_at)
-        VALUES (?, 1, 0, unixepoch())
-        ON CONFLICT(canonical_id, profile_id) DO UPDATE SET
-          completed       = 1,
-          watch_position  = 0,
-          last_watched_at = unixepoch()
-      `).run(stream.canonical_id)
-    }
-
+    `).run(stream.canonical_id)
     return { success: true }
   })
 
   ipcMain.handle('user:set-rating', async (_event, args: { contentId: string; rating: number | null }) => {
     const sqlite = getSqlite()
+    const stream = sqlite.prepare('SELECT canonical_id FROM streams WHERE id = ?').get(args.contentId) as any
+    if (!stream?.canonical_id) return { success: false }
     sqlite.prepare(`
-      INSERT INTO user_data (content_id, rating)
+      INSERT INTO user_data (canonical_id, rating)
       VALUES (?, ?)
-      ON CONFLICT(content_id) DO UPDATE SET rating = excluded.rating
-    `).run(args.contentId, args.rating)
-
-    // Dual-write to user_data_v2 (new schema)
-    const stream = sqlite.prepare(`SELECT canonical_id FROM streams WHERE id = ?`).get(args.contentId) as any
-    if (stream?.canonical_id) {
-      sqlite.prepare(`
-        INSERT INTO user_data_v2 (canonical_id, rating)
-        VALUES (?, ?)
-        ON CONFLICT(canonical_id, profile_id) DO UPDATE SET rating = excluded.rating
-      `).run(stream.canonical_id, args.rating)
-    }
-
+      ON CONFLICT(canonical_id, profile_id) DO UPDATE SET rating = excluded.rating
+    `).run(stream.canonical_id, args.rating)
     return { success: true }
   })
 
@@ -1229,67 +1328,41 @@ export function registerHandlers() {
 
   ipcMain.handle('user:clear-continue', async (_event, contentId: string) => {
     const sqlite = getSqlite()
+    const stream = sqlite.prepare('SELECT canonical_id FROM streams WHERE id = ?').get(contentId) as any
+    if (!stream?.canonical_id) return { success: false }
     sqlite.prepare(`
-      UPDATE user_data
-      SET last_position = 0, completed = 1
-      WHERE content_id = ?
-    `).run(contentId)
-
-    // Dual-write to user_data_v2 (new schema)
-    const stream = sqlite.prepare(`SELECT canonical_id FROM streams WHERE id = ?`).get(contentId) as any
-    if (stream?.canonical_id) {
-      sqlite.prepare(`
-        UPDATE user_data_v2 SET watch_position = 0, completed = 1
-        WHERE canonical_id = ? AND profile_id = 'default'
-      `).run(stream.canonical_id)
-    }
-
+      UPDATE user_data SET watch_position = 0, completed = 1
+      WHERE canonical_id = ? AND profile_id = 'default'
+    `).run(stream.canonical_id)
     return { success: true }
   })
 
   ipcMain.handle('user:clear-item-history', async (_event, contentId: string) => {
     const sqlite = getSqlite()
+    const stream = sqlite.prepare('SELECT canonical_id FROM streams WHERE id = ?').get(contentId) as any
+    if (!stream?.canonical_id) return { success: false }
     sqlite.prepare(`
-      UPDATE user_data
-      SET last_position = 0, last_watched_at = NULL, completed = 0
-      WHERE content_id = ?
-    `).run(contentId)
-
-    // Dual-write to user_data_v2 (new schema)
-    const stream = sqlite.prepare(`SELECT canonical_id FROM streams WHERE id = ?`).get(contentId) as any
-    if (stream?.canonical_id) {
-      sqlite.prepare(`
-        UPDATE user_data_v2 SET watch_position = 0, last_watched_at = NULL, completed = 0
-        WHERE canonical_id = ? AND profile_id = 'default'
-      `).run(stream.canonical_id)
-    }
-
+      UPDATE user_data SET watch_position = 0, last_watched_at = NULL, completed = 0
+      WHERE canonical_id = ? AND profile_id = 'default'
+    `).run(stream.canonical_id)
     return { success: true }
   })
 
   ipcMain.handle('user:clear-history', async () => {
     const sqlite = getSqlite()
-    sqlite.prepare(`
-      UPDATE user_data
-      SET last_position = 0, last_watched_at = NULL, completed = 0
-    `).run()
-    sqlite.prepare(`
-      UPDATE user_data_v2 SET watch_position = 0, last_watched_at = NULL, completed = 0
-    `).run()
+    sqlite.prepare(`UPDATE user_data SET watch_position = 0, last_watched_at = NULL, completed = 0`).run()
     return { success: true }
   })
 
   ipcMain.handle('user:clear-favorites', async () => {
     const sqlite = getSqlite()
-    sqlite.prepare(`UPDATE user_data SET favorite = 0, watchlist = 0`).run()
-    sqlite.prepare(`UPDATE user_data_v2 SET is_favorite = 0, is_watchlisted = 0`).run()
+    sqlite.prepare(`UPDATE user_data SET is_favorite = 0, is_watchlisted = 0`).run()
     return { success: true }
   })
 
   ipcMain.handle('user:clear-all-data', async () => {
     const sqlite = getSqlite()
     sqlite.prepare(`DELETE FROM user_data`).run()
-    sqlite.prepare(`DELETE FROM user_data_v2`).run()
     return { success: true }
   })
 
@@ -1297,7 +1370,6 @@ export function registerHandlers() {
 
   ipcMain.handle('debug:category-items', async (_event, categoryNameSearch: string) => {
     const sqlite = getSqlite()
-    // Find all categories matching the search
     const cats = sqlite.prepare(`
       SELECT cat.*, s.name as source_name
       FROM categories cat
@@ -1308,13 +1380,13 @@ export function registerHandlers() {
 
     const results: any[] = []
     for (const cat of cats) {
-      // Find content in this category via junction table
       const catId = `${cat.source_id}:${cat.type}:${cat.external_id}`
       const items = sqlite.prepare(`
-        SELECT c.id, c.title, c.external_id, c.type, c.primary_source_id
-        FROM content_categories cc
-        JOIN content c ON c.id = cc.content_id
-        WHERE cc.category_id = ?
+        SELECT st.id, COALESCE(c.title, st.title) as title, st.stream_id as external_id, st.type, st.source_id as primary_source_id
+        FROM stream_categories sc
+        JOIN streams st ON st.id = sc.stream_id
+        LEFT JOIN canonical c ON c.id = st.canonical_id
+        WHERE sc.category_id = ?
       `).all(catId) as any[]
 
       results.push({
@@ -1323,7 +1395,6 @@ export function registerHandlers() {
         sourceId: cat.source_id,
         sourceName: cat.source_name,
         type: cat.type,
-        dbItemCount: cat.item_count,
         actualItems: items.length,
         items: items.map((i: any) => ({ id: i.id, title: i.title, externalId: i.external_id })),
       })
@@ -1345,8 +1416,8 @@ export function registerHandlers() {
 
   ipcMain.handle('enrichment:status', () => {
     const sqlite = getSqlite()
-    const total = (sqlite.prepare(`SELECT COUNT(*) as n FROM content WHERE type != 'live'`).get() as any).n
-    const enriched = (sqlite.prepare(`SELECT COUNT(*) as n FROM content WHERE type != 'live' AND enriched = 1`).get() as any).n
+    const total = (sqlite.prepare(`SELECT COUNT(*) as n FROM canonical WHERE type NOT IN ('channel', 'episode')`).get() as any).n
+    const enriched = (sqlite.prepare(`SELECT COUNT(*) as n FROM canonical WHERE type NOT IN ('channel', 'episode') AND enriched = 1`).get() as any).n
     return { total, enriched, pending: total - enriched }
   })
 
@@ -1371,11 +1442,11 @@ export function registerHandlers() {
         cat.name,
         cat.type,
         GROUP_CONCAT(DISTINCT cat.source_id) as source_ids,
-        COUNT(DISTINCT cc.content_id) as item_count,
+        COUNT(DISTINCT sc.stream_id) as item_count,
         MIN(cat.content_synced) as needs_sync,
         MIN(cat.position) as position
       FROM categories cat
-      LEFT JOIN content_categories cc ON cc.category_id = cat.id
+      LEFT JOIN stream_categories sc ON sc.category_id = cat.id
       WHERE cat.source_id IN (${inList})
       ${typeFilter}
       GROUP BY cat.name, cat.type
@@ -1407,39 +1478,47 @@ export function registerHandlers() {
 
     const inList = filterIds.map(() => '?').join(',')
 
-    // Safe sort column map (prevent injection)
+    // Safe sort column map
     const sortCol: Record<string, string> = {
-      title: 'c.title', year: 'c.year', rating: 'c.rating_tmdb', updated: 'c.updated_at',
+      title: 'COALESCE(c.title, s.title)', year: 'c.year', rating: 'c.vote_average', updated: 's.added_at',
     }
-    const orderBy = `${sortCol[sortBy] ?? 'c.updated_at'} ${sortDir === 'asc' ? 'ASC' : 'DESC'}`
+    const orderBy = `${sortCol[sortBy] ?? 's.added_at'} ${sortDir === 'asc' ? 'ASC' : 'DESC'}`
 
-    // Use junction table for category filter (supports multi-category membership)
+    // Category filter via stream_categories junction table
     const catJoin = categoryName
-      ? `JOIN content_categories cc ON cc.content_id = c.id JOIN categories cat ON cat.id = cc.category_id AND cat.name = ?`
+      ? `JOIN stream_categories sc ON sc.stream_id = s.id JOIN categories cat ON cat.id = sc.category_id AND cat.name = ?`
       : ''
-
-    // Build WHERE params: [categoryName?, ...filterIds, type?]
     const catParams: any[] = categoryName ? [categoryName] : []
-    const typeFilter = type ? `AND c.type = ?` : ''
+
+    // Type filter on streams
+    const typeFilter = type ? `AND s.type = ?` : ''
     const typeParams: any[] = type ? [type] : []
 
     const countSql = `
       SELECT COUNT(*) as n
-      FROM content c
+      FROM streams s
       ${catJoin}
-      WHERE c.primary_source_id IN (${inList})
+      WHERE s.source_id IN (${inList})
       ${typeFilter}
     `
     const total = (sqlite.prepare(countSql).get(...catParams, ...filterIds, ...typeParams) as any).n
 
     const itemSql = `
-      SELECT DISTINCT c.*, c.primary_source_id as source_ids,
-        CASE WHEN c.epg_channel_id IS NOT NULL AND EXISTS (
-          SELECT 1 FROM epg e WHERE e.channel_external_id = c.epg_channel_id AND e.source_id = c.primary_source_id LIMIT 1
+      SELECT DISTINCT s.id, s.source_id as primary_source_id, s.source_id as source_ids,
+        s.stream_id as external_id, s.type, COALESCE(c.title, s.title) as title,
+        s.category_id, s.thumbnail_url as poster_url, s.container_extension,
+        s.catchup_supported, s.catchup_days, s.epg_channel_id,
+        c.id as canonical_id, c.original_title, c.year, c.overview as plot,
+        c.poster_path, c.backdrop_path as backdrop_url, c.vote_average as rating_tmdb,
+        c.rating_imdb, c.genres, c.director, c.cast_json as cast, c.keywords,
+        c.runtime, c.tmdb_id, c.enriched, c.enriched_at, c.tvg_id,
+        CASE WHEN s.epg_channel_id IS NOT NULL AND EXISTS (
+          SELECT 1 FROM epg e WHERE e.channel_external_id = s.epg_channel_id AND e.source_id = s.source_id LIMIT 1
         ) THEN 1 ELSE 0 END as has_epg_data
-      FROM content c
+      FROM streams s
+      LEFT JOIN canonical c ON c.id = s.canonical_id
       ${catJoin}
-      WHERE c.primary_source_id IN (${inList})
+      WHERE s.source_id IN (${inList})
       ${typeFilter}
       ORDER BY ${orderBy}
       LIMIT ? OFFSET ?
@@ -1484,38 +1563,47 @@ export function registerHandlers() {
     if (!hasKey) return { success: false, error: 'No TMDB API key configured' }
 
     const sqlite = getSqlite()
-    const item = sqlite.prepare('SELECT * FROM content WHERE id = ?').get(contentId) as any
-    if (!item) return { success: false, error: 'Content not found' }
-    if (item.type === 'live') return { success: false, error: 'Live channels are not enriched' }
+    const stream = sqlite.prepare('SELECT canonical_id, type FROM streams WHERE id = ?').get(contentId) as any
+    if (!stream?.canonical_id) return { success: false, error: 'Content not found' }
+    if (stream.type === 'live') return { success: false, error: 'Live channels are not enriched' }
 
-    // If previously enriched but has no metadata, reset so we retry
-    const hasData = item.plot || item.director || item.cast || item.genres
-    if (item.enriched && hasData) {
+    const canonical = sqlite.prepare('SELECT * FROM canonical WHERE id = ?').get(stream.canonical_id) as any
+    if (!canonical) return { success: false, error: 'Canonical not found' }
+
+    const hasData = canonical.overview || canonical.director || canonical.cast_json || canonical.genres
+    if (canonical.enriched && hasData) {
       console.log(`[Enrich] ${contentId} already enriched with data`)
       return { success: true, alreadyEnriched: true }
     }
-    if (item.enriched && !hasData) {
+    if (canonical.enriched && !hasData) {
       console.log(`[Enrich] ${contentId} was marked enriched but has no data — retrying`)
-      sqlite.prepare('UPDATE content SET enriched = 0 WHERE id = ?').run(contentId)
+      sqlite.prepare('UPDATE canonical SET enriched = 0 WHERE id = ?').run(stream.canonical_id)
     }
 
-    console.log(`[Enrich] Calling TMDB for "${item.title}" (type=${item.type}, year=${item.year})`)
+    console.log(`[Enrich] Calling TMDB for "${canonical.title}" (type=${canonical.type}, year=${canonical.year})`)
     try {
-      await tmdbService.enrichBatch([contentId])
+      await tmdbService.enrichBatch([stream.canonical_id])
     } catch (err) {
       console.error(`[Enrich] enrichBatch failed:`, err)
       return { success: false, error: String(err) }
     }
 
-    // Return the updated content row
+    // Return the updated row with v1-compatible column aliases
     const updated = sqlite.prepare(`
-      SELECT c.*, c.primary_source_id as source_ids,
-             GROUP_CONCAT(DISTINCT cat.name) as category_name
-      FROM content c
-      LEFT JOIN content_categories cc ON cc.content_id = c.id
-      LEFT JOIN categories cat ON cat.id = cc.category_id
-      WHERE c.id = ?
-      GROUP BY c.id
+      SELECT s.id, s.source_id as primary_source_id, s.source_id as source_ids,
+        s.stream_id as external_id, s.type, COALESCE(c.title, s.title) as title,
+        s.category_id, s.thumbnail_url as poster_url, s.container_extension,
+        c.id as canonical_id, c.original_title, c.year, c.overview as plot,
+        c.poster_path, c.backdrop_path as backdrop_url, c.vote_average as rating_tmdb,
+        c.rating_imdb, c.genres, c.director, c.cast_json as cast, c.keywords,
+        c.runtime, c.tmdb_id, c.enriched, c.enriched_at, c.tvg_id,
+        GROUP_CONCAT(DISTINCT cat.name) as category_name
+      FROM streams s
+      LEFT JOIN canonical c ON c.id = s.canonical_id
+      LEFT JOIN stream_categories sc ON sc.stream_id = s.id
+      LEFT JOIN categories cat ON cat.id = sc.category_id
+      WHERE s.id = ?
+      GROUP BY s.id
     `).get(contentId) as any
     const enrichedWithData = !!(updated?.plot || updated?.director || updated?.cast || updated?.genres)
     console.log(`[Enrich] Done for ${contentId}, gotData=${enrichedWithData}`)
@@ -1527,31 +1615,36 @@ export function registerHandlers() {
     if (!tmdbService.hasKey()) return { success: false, error: 'No TMDB API key configured' }
 
     const sqlite = getSqlite()
-    const item = sqlite.prepare('SELECT * FROM content WHERE id = ?').get(args.contentId) as any
-    if (!item) return { success: false, error: 'Content not found' }
+    const stream = sqlite.prepare('SELECT canonical_id, type FROM streams WHERE id = ?').get(args.contentId) as any
+    if (!stream?.canonical_id) return { success: false, error: 'Content not found' }
 
-    // Reset enriched flag so enrichBatch will process it
-    sqlite.prepare('UPDATE content SET enriched = 0 WHERE id = ?').run(args.contentId)
+    sqlite.prepare('UPDATE canonical SET enriched = 0 WHERE id = ?').run(stream.canonical_id)
 
-    // Temporarily override the title for search purposes
     console.log(`[Enrich] Manual search: "${args.title}" (year=${args.year ?? 'none'}) for ${args.contentId}`)
 
-    // Call enrichMovie/enrichSeries directly with the user-provided title
     try {
-      await tmdbService.enrichWithTitle(args.contentId, args.title, item.type, args.year)
+      const canonicalType = stream.type === 'live' ? 'channel' : stream.type
+      await tmdbService.enrichWithTitle(stream.canonical_id, args.title, canonicalType, args.year)
     } catch (err) {
       console.error(`[Enrich] Manual enrich failed:`, err)
       return { success: false, error: String(err) }
     }
 
     const updated = sqlite.prepare(`
-      SELECT c.*, c.primary_source_id as source_ids,
-             GROUP_CONCAT(DISTINCT cat.name) as category_name
-      FROM content c
-      LEFT JOIN content_categories cc ON cc.content_id = c.id
-      LEFT JOIN categories cat ON cat.id = cc.category_id
-      WHERE c.id = ?
-      GROUP BY c.id
+      SELECT s.id, s.source_id as primary_source_id, s.source_id as source_ids,
+        s.stream_id as external_id, s.type, COALESCE(c.title, s.title) as title,
+        s.category_id, s.thumbnail_url as poster_url, s.container_extension,
+        c.id as canonical_id, c.original_title, c.year, c.overview as plot,
+        c.poster_path, c.backdrop_path as backdrop_url, c.vote_average as rating_tmdb,
+        c.genres, c.director, c.cast_json as cast, c.keywords,
+        c.runtime, c.tmdb_id, c.enriched, c.enriched_at,
+        GROUP_CONCAT(DISTINCT cat.name) as category_name
+      FROM streams s
+      LEFT JOIN canonical c ON c.id = s.canonical_id
+      LEFT JOIN stream_categories sc ON sc.stream_id = s.id
+      LEFT JOIN categories cat ON cat.id = sc.category_id
+      WHERE s.id = ?
+      GROUP BY s.id
     `).get(args.contentId) as any
     const enrichedWithData = !!(updated?.plot || updated?.director || updated?.cast || updated?.genres)
     console.log(`[Enrich] Manual done for ${args.contentId}, gotData=${enrichedWithData}`)
@@ -1589,25 +1682,34 @@ export function registerHandlers() {
     if (!tmdbService.hasKey()) return { success: false, error: 'No TMDB API key configured' }
 
     const sqlite = getSqlite()
-    const item = sqlite.prepare('SELECT * FROM content WHERE id = ?').get(args.contentId) as any
-    if (!item) return { success: false, error: 'Content not found' }
+    const stream = sqlite.prepare('SELECT canonical_id, type FROM streams WHERE id = ?').get(args.contentId) as any
+    if (!stream?.canonical_id) return { success: false, error: 'Content not found' }
 
-    console.log(`[Enrich] User chose TMDB ID ${args.tmdbId} for "${item.title}"`)
+    const canonical = sqlite.prepare('SELECT title FROM canonical WHERE id = ?').get(stream.canonical_id) as any
+    console.log(`[Enrich] User chose TMDB ID ${args.tmdbId} for "${canonical?.title}"`)
     try {
-      await tmdbService.enrichById(args.contentId, args.tmdbId, item.type)
+      const canonicalType = stream.type === 'live' ? 'channel' : stream.type
+      await tmdbService.enrichById(stream.canonical_id, args.tmdbId, canonicalType)
     } catch (err) {
       console.error(`[Enrich] enrichById failed:`, err)
       return { success: false, error: String(err) }
     }
 
     const updated = sqlite.prepare(`
-      SELECT c.*, c.primary_source_id as source_ids,
-             GROUP_CONCAT(DISTINCT cat.name) as category_name
-      FROM content c
-      LEFT JOIN content_categories cc ON cc.content_id = c.id
-      LEFT JOIN categories cat ON cat.id = cc.category_id
-      WHERE c.id = ?
-      GROUP BY c.id
+      SELECT s.id, s.source_id as primary_source_id, s.source_id as source_ids,
+        s.stream_id as external_id, s.type, COALESCE(c.title, s.title) as title,
+        s.category_id, s.thumbnail_url as poster_url, s.container_extension,
+        c.id as canonical_id, c.original_title, c.year, c.overview as plot,
+        c.poster_path, c.backdrop_path as backdrop_url, c.vote_average as rating_tmdb,
+        c.genres, c.director, c.cast_json as cast, c.keywords,
+        c.runtime, c.tmdb_id, c.enriched, c.enriched_at,
+        GROUP_CONCAT(DISTINCT cat.name) as category_name
+      FROM streams s
+      LEFT JOIN canonical c ON c.id = s.canonical_id
+      LEFT JOIN stream_categories sc ON sc.stream_id = s.id
+      LEFT JOIN categories cat ON cat.id = sc.category_id
+      WHERE s.id = ?
+      GROUP BY s.id
     `).get(args.contentId) as any
     const enrichedWithData = !!(updated?.plot || updated?.director || updated?.cast || updated?.genres)
     return { success: true, content: updated, enrichedWithData }
@@ -1619,16 +1721,15 @@ export function registerHandlers() {
 
     if (apiKey) tmdbService.setApiKey(apiKey)
 
-    // Get unenriched content IDs (batch up to 500 at a time to avoid memory issues)
+    // Get unenriched canonical IDs (movies + series only)
     const rows = sqlite.prepare(
-      `SELECT id FROM content WHERE type != 'live' AND enriched = 0 ORDER BY updated_at DESC LIMIT 500`
+      `SELECT id FROM canonical WHERE type NOT IN ('channel', 'episode') AND enriched = 0 ORDER BY created_at DESC LIMIT 500`
     ).all() as { id: string }[]
 
     if (rows.length === 0) return { success: true, message: 'Nothing to enrich' }
 
     const ids = rows.map((r) => r.id)
 
-    // Run in background, send progress events
     tmdbService.enrichBatch(ids, (done, total) => {
       win?.webContents.send('enrichment:progress', { done, total })
     }).then(() => {
