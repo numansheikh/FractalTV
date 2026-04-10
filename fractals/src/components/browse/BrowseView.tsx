@@ -341,7 +341,7 @@ export function BrowseView({ onAddSource, onSyncSource, onRemoveSource, onSelect
                 {SORT_OPTIONS.map((opt, i) => (
                   <button key={i} onClick={() => { setSortIdx(i); setShowSortMenu(false) }}
                     style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 10px', borderRadius: 5, border: 'none', background: i === sortIdx ? 'var(--color-primary-dim)' : 'transparent', color: i === sortIdx ? 'var(--color-primary)' : 'var(--color-text-secondary)', fontSize: 11, cursor: 'pointer', fontWeight: i === sortIdx ? 500 : 400 }}
-                    onMouseEnter={(e) => { if (i !== sortIdx) { e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; e.currentTarget.style.color = 'var(--color-text-primary)' } }}
+                    onMouseEnter={(e) => { if (i !== sortIdx) { e.currentTarget.style.background = 'var(--color-card-hover)'; e.currentTarget.style.color = 'var(--color-text-primary)' } }}
                     onMouseLeave={(e) => { if (i !== sortIdx) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-text-secondary)' } }}
                   >
                     {opt.label}

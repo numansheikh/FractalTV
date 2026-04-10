@@ -37,7 +37,9 @@ export function ContextMenu() {
   const handleFavorite = useCallback(() => {
     if (!item) return
     setFav(item.id, !isFavorite)
-    api.user.toggleFavorite(item.id)
+    api.user.toggleFavorite(item.id).catch(() => {
+      setFav(item.id, isFavorite)
+    })
     hide()
   }, [item, isFavorite, setFav, hide])
 
@@ -47,6 +49,8 @@ export function ContextMenu() {
     api.user.toggleWatchlist(item.id).then(() => {
       qc.invalidateQueries({ queryKey: ['home-watchlist'] })
       qc.invalidateQueries({ queryKey: ['library', 'watchlist'] })
+    }).catch(() => {
+      setWl(item.id, isWatchlist)
     })
     hide()
   }, [item, isWatchlist, setWl, qc, hide])

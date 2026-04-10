@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 
 interface Props {
@@ -47,6 +47,8 @@ export function SlidePanel({ open, onClose, width = 420, children, suppressClose
           {/* Panel */}
           <motion.div
             key="panel"
+            role="dialog"
+            aria-modal="true"
             initial={{ x: width }}
             animate={{ x: 0 }}
             exit={{ x: width }}

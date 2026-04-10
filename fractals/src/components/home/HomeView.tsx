@@ -38,7 +38,6 @@ export function HomeView({ onSelectContent }: Props) {
   const {
     setView, selectedSourceIds,
     homeMode, setHomeMode,
-    homeStripSize,
     setShowSources, setChannelSurfContext,
   } = useAppStore()
   const { query, setQuery } = useSearchStore()
@@ -731,7 +730,7 @@ function HomeSearchResults({ query, onSelectContent }: { query: string; onSelect
     staleTime: 10_000, enabled: !!query,
   })
 
-  const isFetching = liveFetching && movieFetching && seriesFetching
+  const isFetching = liveFetching || movieFetching || seriesFetching
   const hasResults = liveResults.length > 0 || movieResults.length > 0 || seriesResults.length > 0
 
   const handleSelect = useCallback((item: ContentItem) => {
@@ -766,9 +765,9 @@ function HomeSearchResults({ query, onSelectContent }: { query: string; onSelect
   return (
     <Suspense fallback={null}>
       <SearchResults
-        live={{   results: liveResults   as ContentItem[], isExpanded: liveLimit   > SEARCH_INIT, onShowAll: () => setLiveLimit(SEARCH_FULL),   onShowLess: () => setLiveLimit(SEARCH_INIT) }}
-        movies={{  results: movieResults  as ContentItem[], isExpanded: movieLimit  > SEARCH_INIT, onShowAll: () => setMovieLimit(SEARCH_FULL),  onShowLess: () => setMovieLimit(SEARCH_INIT) }}
-        series={{  results: seriesResults as ContentItem[], isExpanded: seriesLimit > SEARCH_INIT, onShowAll: () => setSeriesLimit(SEARCH_FULL), onShowLess: () => setSeriesLimit(SEARCH_INIT) }}
+        live={{   results: liveResults   as ContentItem[], onShowAll: () => setLiveLimit(SEARCH_FULL)   }}
+        movies={{  results: movieResults  as ContentItem[], onShowAll: () => setMovieLimit(SEARCH_FULL)  }}
+        series={{  results: seriesResults as ContentItem[], onShowAll: () => setSeriesLimit(SEARCH_FULL) }}
         onSelect={handleSelect}
       />
     </Suspense>

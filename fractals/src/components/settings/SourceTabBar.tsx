@@ -30,21 +30,6 @@ function daysUntilExpiry(expDate?: string | null): number | null {
   return Math.floor((ts - Date.now()) / 86_400_000)
 }
 
-function expiryColor(days: number | null): string {
-  if (days === null) return 'var(--color-success)'
-  if (days < 0)   return 'var(--color-danger)'
-  if (days < 30)  return 'var(--color-warning)'
-  return 'var(--color-success)'
-}
-
-function expiryLabel(days: number | null): string {
-  if (days === null) return 'Unknown expiry'
-  if (days < 0)   return `Expired ${Math.abs(days)}d ago`
-  if (days === 0) return 'Expires today'
-  if (days < 30)  return `Expires in ${days}d`
-  const ms = (parseInt('0') || Date.now()) // placeholder
-  return `${days}d remaining`
-}
 
 export function SourceTabBar({ sources, onAddSource, onSyncSource, onRemoveSource, inline }: Props) {
   const { selectedSourceIds, toggleSourceFilter, clearSourceFilter } = useSourcesStore()
@@ -244,7 +229,7 @@ function SourceTab({ source, colorObj, selected, onSelect, onSync, onRemove }: {
 
       {/* Account info popover — rendered via fixed positioning to escape overflow:hidden */}
       {showInfo && (
-        <AccountInfoPopover source={source} color={colorObj.accent} days={days} dotColor={colorObj.accent}
+        <AccountInfoPopover source={source} color={colorObj.accent} days={days}
           onClose={() => setShowInfo(false)} anchorRef={ref} />
       )}
     </div>
@@ -266,7 +251,7 @@ function SyncProgressPill({ progress, color }: { progress: SyncProgress; color: 
           </span>
         )}
       </div>
-      <div style={{ height: 2, borderRadius: 1, background: 'rgba(255,255,255,0.08)', overflow: 'hidden' }}>
+      <div style={{ height: 2, borderRadius: 1, background: 'var(--border-subtle)', overflow: 'hidden' }}>
         {pct !== null ? (
           <div style={{ height: '100%', width: `${pct}%`, background: color, borderRadius: 1, transition: 'width 0.3s ease' }} />
         ) : (
@@ -277,8 +262,8 @@ function SyncProgressPill({ progress, color }: { progress: SyncProgress; color: 
   )
 }
 
-function AccountInfoPopover({ source, color, days, dotColor, onClose, anchorRef }: {
-  source: Source; color: string; days: number | null; dotColor: string; onClose: () => void
+function AccountInfoPopover({ source, color, days, onClose, anchorRef }: {
+  source: Source; color: string; days: number | null; onClose: () => void
   anchorRef: React.RefObject<HTMLDivElement | null>
 }) {
   const [liveInfo, setLiveInfo] = useState<any>(null)

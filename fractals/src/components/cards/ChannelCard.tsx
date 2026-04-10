@@ -24,6 +24,7 @@ export function ChannelCard({ item, onClick }: Props) {
   const hasPoster = poster && !imgError
   const primarySourceId = item.primarySourceId ?? item.primary_source_id ?? (item as any).source_ids ?? item.id?.split(':')[0]
   const sourceColor = primarySourceId ? colorMap[primarySourceId] : undefined
+  const sourceName = primarySourceId ? sources.find((s) => s.id === primarySourceId)?.name : undefined
   const showSourceBar = sources.length > 1 && !!sourceColor
   const isFavorite = userData?.favorite === 1
 
@@ -41,7 +42,7 @@ export function ChannelCard({ item, onClick }: Props) {
       onContextMenu={(e) => { e.preventDefault(); showCtxMenu(e.clientX, e.clientY, item) }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      title={item.title}
+      title={showSourceBar && sourceName ? `${item.title} — Source: ${sourceName}` : item.title}
       style={{
         minWidth: 0,
         cursor: 'pointer',
@@ -71,6 +72,7 @@ export function ChannelCard({ item, onClick }: Props) {
           <img
             src={poster}
             alt=""
+            loading="lazy"
             style={{
               position: 'absolute', inset: 0,
               width: '100%', height: '100%',

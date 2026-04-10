@@ -5,9 +5,6 @@
 
 import { parentPort, workerData } from 'worker_threads'
 import Database from 'better-sqlite3'
-import { writeFileSync, mkdirSync } from 'fs'
-import { join } from 'path'
-import { homedir } from 'os'
 
 interface WorkerData {
   sourceId: string
@@ -28,6 +25,10 @@ function sendError(message: string) {
   parentPort?.postMessage({ type: 'error', message })
 }
 
+function sendWarning(message: string) {
+  parentPort?.postMessage({ type: 'warning', message })
+}
+
 function sendDone(totalItems: number, catCount: number) {
   parentPort?.postMessage({ type: 'done', totalItems, catCount })
 }
@@ -38,20 +39,20 @@ function normalize(text: string | null | undefined): string | null {
   return text.toLowerCase().trim()
 }
 
-async function fetchJson<T>(url: string, timeout: number, label: string): Promise<T> {
+async function fetchJson<T>(url: string, timeout: number, label: string): Promise<{ data: T; error: boolean }> {
   try {
     const resp = await fetch(url, { signal: AbortSignal.timeout(timeout) })
     if (!resp.ok) {
       console.error(`[SyncWorker] ${label}: HTTP ${resp.status} ${resp.statusText}`)
-      return [] as unknown as T
+      return { data: [] as unknown as T, error: true }
     }
     const data = await resp.json()
     const count = Array.isArray(data) ? data.length : '?'
     console.log(`[SyncWorker] ${label}: fetched ${count} items`)
-    return data as T
+    return { data: data as T, error: false }
   } catch (err) {
     console.error(`[SyncWorker] ${label}: fetch failed —`, err)
-    return [] as unknown as T
+    return { data: [] as unknown as T, error: true }
   }
 }
 
@@ -60,6 +61,12 @@ async function run() {
   db.pragma('journal_mode = WAL')
   db.pragma('synchronous = normal')
   db.pragma('foreign_keys = ON')
+
+  // Guard: check if source still exists (may have been deleted mid-sync)
+  const sourceExistsStmt = db.prepare('SELECT 1 FROM sources WHERE id = ?')
+  function sourceExists(): boolean {
+    return !!sourceExistsStmt.get(sourceId)
+  }
 
   try {
     const base = serverUrl.replace(/\/$/, '')
@@ -70,13 +77,17 @@ async function run() {
     db.prepare('UPDATE sources SET status = ? WHERE id = ?').run('syncing', sourceId)
 
     // ── Categories ────────────────────────────────────────────────────────
+    if (!sourceExists()) { console.log('[SyncWorker] Source deleted before category sync — aborting'); sendDone(0, 0); db.close(); return }
     send('categories', 0, 3, 'Fetching categories...')
 
-    const [liveCats, vodCats, seriesCats] = await Promise.all([
+    const [liveCatsResult, vodCatsResult, seriesCatsResult] = await Promise.all([
       fetchJson<any[]>(`${apiBase}&action=get_live_categories`, 15_000, 'live_categories'),
       fetchJson<any[]>(`${apiBase}&action=get_vod_categories`, 15_000, 'vod_categories'),
       fetchJson<any[]>(`${apiBase}&action=get_series_categories`, 15_000, 'series_categories'),
     ])
+    const liveCats = liveCatsResult.data
+    const vodCats = vodCatsResult.data
+    const seriesCats = seriesCatsResult.data
 
     const insertCat = db.prepare(`
       INSERT INTO categories (id, source_id, external_id, name, type, position)
@@ -98,7 +109,9 @@ async function run() {
 
     // ── Live streams ──────────────────────────────────────────────────────
     send('live', 0, 0, 'Fetching channels…')
-    const liveStreams: any[] = await fetchJson(`${apiBase}&action=get_live_streams`, FETCH_TIMEOUT, 'live_streams')
+    const liveResult = await fetchJson<any[]>(`${apiBase}&action=get_live_streams`, FETCH_TIMEOUT, 'live_streams')
+    const liveStreams = liveResult.data
+    if (liveResult.error) sendWarning('Failed to fetch live channels — timed out or server error')
     send('live', 0, liveStreams?.length ?? 0, `Saving ${(liveStreams?.length ?? 0).toLocaleString()} channels…`)
 
     const insertCanonical = db.prepare(`
@@ -173,6 +186,12 @@ async function run() {
     `)
 
     const BATCH = 500
+    const deleteStaleStreamCategories = db.prepare(`DELETE FROM stream_categories WHERE stream_id IN (SELECT id FROM streams WHERE source_id = ? AND type = ? AND id NOT IN (SELECT value FROM json_each(?)))`)
+    const deleteStaleStreams = db.prepare(`DELETE FROM streams WHERE source_id = ? AND type = ? AND id NOT IN (SELECT value FROM json_each(?))`)
+
+    if (!sourceExists()) { console.log('[SyncWorker] Source deleted before live insert — aborting'); sendDone(0, 0); db.close(); return }
+
+    const insertedLiveIds: string[] = []
     const batchLive = db.transaction((items: any[]) => {
       for (const s of items) {
         const cid = `${sourceId}:live:${s.stream_id}`
@@ -184,18 +203,29 @@ async function run() {
         insertStream.run(cid, canonicalId, sourceId, String(s.stream_id), title, s.category_id || null, tvgId, s.stream_icon || null, s.tv_archive ? 1 : 0, s.tv_archive_duration || 0, tvgId)
         insertFts.run(canonicalId, normalize(title))
         if (s.category_id) { const catId = `${sourceId}:live:${s.category_id}`; insertSC.run(cid, catId, catId) }
+        insertedLiveIds.push(cid)
       }
     })
     for (let i = 0; i < (liveStreams?.length ?? 0); i += BATCH) {
       batchLive((liveStreams || []).slice(i, i + BATCH))
       send('live', Math.min(i + BATCH, liveStreams.length), liveStreams.length, `Channels: ${Math.min(i + BATCH, liveStreams.length)}/${liveStreams.length}`)
     }
+    if (!liveResult.error && insertedLiveIds.length > 0) {
+      const idsJson = JSON.stringify(insertedLiveIds)
+      deleteStaleStreamCategories.run(sourceId, 'live', idsJson)
+      deleteStaleStreams.run(sourceId, 'live', idsJson)
+    }
 
     // ── VOD streams ───────────────────────────────────────────────────────
     send('movies', 0, 0, 'Fetching movies…')
-    const vodStreams: any[] = await fetchJson(`${apiBase}&action=get_vod_streams`, FETCH_TIMEOUT, 'vod_streams')
+    const vodResult = await fetchJson<any[]>(`${apiBase}&action=get_vod_streams`, FETCH_TIMEOUT, 'vod_streams')
+    const vodStreams = vodResult.data
+    if (vodResult.error) sendWarning('Failed to fetch movies — timed out or server error')
     send('movies', 0, vodStreams?.length ?? 0, `Saving ${(vodStreams?.length ?? 0).toLocaleString()} movies…`)
 
+    if (!sourceExists()) { console.log('[SyncWorker] Source deleted before VOD insert — aborting'); sendDone(0, 0); db.close(); return }
+
+    const insertedVodIds: string[] = []
     const batchVod = db.transaction((items: any[]) => {
       for (const s of items) {
         const cid = `${sourceId}:movie:${s.stream_id}`
@@ -207,18 +237,29 @@ async function run() {
         insertStreamMovie.run(cid, canonicalId, sourceId, String(s.stream_id), title, s.category_id || null, s.stream_icon || null, s.container_extension || null)
         insertFts.run(canonicalId, normalize(title))
         if (s.category_id) { const catId = `${sourceId}:movie:${s.category_id}`; insertSC.run(cid, catId, catId) }
+        insertedVodIds.push(cid)
       }
     })
     for (let i = 0; i < (vodStreams?.length ?? 0); i += BATCH) {
       batchVod((vodStreams || []).slice(i, i + BATCH))
       send('movies', Math.min(i + BATCH, vodStreams.length), vodStreams.length, `Movies: ${Math.min(i + BATCH, vodStreams.length)}/${vodStreams.length}`)
     }
+    if (!vodResult.error && insertedVodIds.length > 0) {
+      const idsJson = JSON.stringify(insertedVodIds)
+      deleteStaleStreamCategories.run(sourceId, 'movie', idsJson)
+      deleteStaleStreams.run(sourceId, 'movie', idsJson)
+    }
 
     // ── Series ────────────────────────────────────────────────────────────
     send('series', 0, 0, 'Fetching series…')
-    const seriesList: any[] = await fetchJson(`${apiBase}&action=get_series`, FETCH_TIMEOUT, 'series')
+    const seriesResult = await fetchJson<any[]>(`${apiBase}&action=get_series`, FETCH_TIMEOUT, 'series')
+    const seriesList = seriesResult.data
+    if (seriesResult.error) sendWarning('Failed to fetch series — timed out or server error')
     send('series', 0, seriesList?.length ?? 0, `Saving ${(seriesList?.length ?? 0).toLocaleString()} series…`)
 
+    if (!sourceExists()) { console.log('[SyncWorker] Source deleted before series insert — aborting'); sendDone(0, 0); db.close(); return }
+
+    const insertedSeriesIds: string[] = []
     const batchSeries = db.transaction((items: any[]) => {
       for (const s of items) {
         const cid = `${sourceId}:series:${s.series_id}`
@@ -230,29 +271,22 @@ async function run() {
         insertStreamSeries.run(cid, canonicalId, sourceId, String(s.series_id), title, s.category_id || null, s.cover || null)
         insertFtsSeries.run(canonicalId, normalize(title), normalize(s.plot), normalize(s.cast), normalize(s.director))
         if (s.category_id) { const catId = `${sourceId}:series:${s.category_id}`; insertSC.run(cid, catId, catId) }
+        insertedSeriesIds.push(cid)
       }
     })
     for (let i = 0; i < (seriesList?.length ?? 0); i += BATCH) {
       batchSeries((seriesList || []).slice(i, i + BATCH))
       send('series', Math.min(i + BATCH, seriesList.length), seriesList.length, `Series: ${Math.min(i + BATCH, seriesList.length)}/${seriesList.length}`)
     }
-
-    // ── Save dumps (categories only — content too large) ──────────────────
-    try {
-      const dumpDir = join(homedir(), '.fractals', 'sync-dumps', `${sourceName.replace(/[^a-zA-Z0-9]/g, '_')}_${sourceId.slice(0, 8)}`)
-      mkdirSync(dumpDir, { recursive: true })
-      writeFileSync(join(dumpDir, 'live_categories.json'), JSON.stringify(liveCats, null, 2))
-      writeFileSync(join(dumpDir, 'vod_categories.json'), JSON.stringify(vodCats, null, 2))
-      writeFileSync(join(dumpDir, 'series_categories.json'), JSON.stringify(seriesCats, null, 2))
-      const writeSample = (name: string, data: any[]) => {
-        writeFileSync(join(dumpDir, name), JSON.stringify({ total: data?.length ?? 0, sample: (data || []).slice(0, 5) }, null, 2))
-      }
-      writeSample('live_streams.json', liveStreams)
-      writeSample('vod_streams.json', vodStreams)
-      writeSample('series_list.json', seriesList)
-    } catch {}
+    if (!seriesResult.error && insertedSeriesIds.length > 0) {
+      const idsJson = JSON.stringify(insertedSeriesIds)
+      deleteStaleStreamCategories.run(sourceId, 'series', idsJson)
+      deleteStaleStreams.run(sourceId, 'series', idsJson)
+    }
 
     // ── Finalize ──────────────────────────────────────────────────────────
+    if (!sourceExists()) { console.log('[SyncWorker] Source deleted before finalize — aborting'); sendDone(0, 0); db.close(); return }
+
     db.prepare('UPDATE categories SET content_synced = 1 WHERE source_id = ?').run(sourceId)
     const totalItems = (db.prepare('SELECT COUNT(*) as n FROM streams WHERE source_id = ?').get(sourceId) as any).n
 
@@ -263,8 +297,14 @@ async function run() {
 
     sendDone(totalItems, catCount)
   } catch (err) {
-    db.prepare(`UPDATE sources SET status = 'error', last_error = ? WHERE id = ?`).run(String(err), sourceId)
-    sendError(String(err))
+    // If source was deleted mid-sync, don't try to update its status — just log and exit
+    if (!sourceExists()) {
+      console.log('[SyncWorker] Source deleted during sync — suppressing error:', String(err))
+      sendDone(0, 0)
+    } else {
+      db.prepare(`UPDATE sources SET status = 'error', last_error = ? WHERE id = ?`).run(String(err), sourceId)
+      sendError(String(err))
+    }
   } finally {
     db.close()
   }

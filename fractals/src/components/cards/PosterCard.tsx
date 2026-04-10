@@ -26,6 +26,7 @@ export function PosterCard({ item, onClick }: Props) {
   const rating = item.ratingTmdb ?? item.rating_tmdb ?? item.ratingImdb ?? item.rating_imdb
   const primarySourceId = item.primarySourceId ?? item.primary_source_id ?? (item as any).source_ids ?? item.id?.split(':')[0]
   const sourceColor = primarySourceId ? colorMap[primarySourceId] : undefined
+  const sourceName = primarySourceId ? sources.find((s) => s.id === primarySourceId)?.name : undefined
   const showSourceBadge = sources.length > 1 && !!sourceColor
 
   const isFavorite = userData?.favorite === 1
@@ -41,6 +42,7 @@ export function PosterCard({ item, onClick }: Props) {
       onContextMenu={(e) => { e.preventDefault(); showCtxMenu(e.clientX, e.clientY, item) }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
+      title={showSourceBadge && sourceName ? `Source: ${sourceName}` : undefined}
       style={{
         background: 'var(--bg-2)',
         borderRadius: 6,
@@ -63,6 +65,7 @@ export function PosterCard({ item, onClick }: Props) {
           <img
             src={poster}
             alt=""
+            loading="lazy"
             style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
             onError={() => setImgError(true)}
           />

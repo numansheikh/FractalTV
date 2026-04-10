@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useSourcesStore } from '@/stores/sources.store'
 import { useUserStore } from '@/stores/user.store'
 import { buildColorMapFromSources } from '@/lib/sourceColors'
-import { ContentItem } from './ContentCard'
+import { ContentItem } from '@/lib/types'
 import { api } from '@/lib/api'
 
 // Deterministic gradient palettes for missing posters
@@ -62,7 +62,11 @@ export function PosterCard({ item, onClick }: Props) {
       qc.setQueriesData<ContentItem[]>({ queryKey: ['browse-favorites'] }, strip)
       qc.setQueriesData<ContentItem[]>({ queryKey: ['library', 'favorites'] }, strip)
     }
-    await api.user.toggleFavorite(item.id)
+    try {
+      await api.user.toggleFavorite(item.id)
+    } catch {
+      setFav(item.id, isFavorite)
+    }
     qc.invalidateQueries({ queryKey: ['browse-favorites'] })
     qc.invalidateQueries({ queryKey: ['library', 'favorites'] })
   }
@@ -72,6 +76,8 @@ export function PosterCard({ item, onClick }: Props) {
     api.user.toggleWatchlist(item.id).then(() => {
       qc.invalidateQueries({ queryKey: ['home-watchlist'] })
       qc.invalidateQueries({ queryKey: ['library', 'watchlist'] })
+    }).catch(() => {
+      setWl(item.id, isWatchlist)
     })
   }
 

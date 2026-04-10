@@ -13,6 +13,8 @@ interface Props {
   items: ContentItem[]
   onSelect: (item: ContentItem) => void
   viewMode?: 'grid' | 'list'
+  isLoading?: boolean
+  contentType?: 'live' | 'movie' | 'series'
 }
 
 // ─── Marquee style (injected once) ───────────────────────────────────────────
@@ -113,14 +115,17 @@ function ChannelListRow({ item, onClick }: ChannelListRowProps) {
     >
       {/* Source color bar */}
       {showSourceBadge && sourceColor && (
-        <div style={{
-          position: 'absolute',
-          left: 0, top: 4, bottom: 4,
-          width: 3,
-          borderRadius: 2,
-          background: sourceColor.accent,
-          flexShrink: 0,
-        }} />
+        <div
+          title={sourceName ? `Source: ${sourceName}` : undefined}
+          style={{
+            position: 'absolute',
+            left: 0, top: 4, bottom: 4,
+            width: 3,
+            borderRadius: 2,
+            background: sourceColor.accent,
+            flexShrink: 0,
+          }}
+        />
       )}
 
       {/* Logo */}
@@ -215,7 +220,7 @@ function ChannelListRow({ item, onClick }: ChannelListRowProps) {
 
 // ─── Virtual grid ────────────────────────────────────────────────────────────
 
-export function VirtualGrid({ items, onSelect, viewMode = 'grid' }: Props) {
+export function VirtualGrid({ items, onSelect, viewMode = 'grid', isLoading, contentType }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [containerWidth, setContainerWidth] = useState(0)
 
@@ -264,6 +269,53 @@ export function VirtualGrid({ items, onSelect, viewMode = 'grid' }: Props) {
     estimateSize: useCallback(() => rowHeight + gap, [rowHeight, gap]),
     overscan: isList ? 8 : 3,
   })
+
+  // Show skeleton when loading with no items
+  if (isLoading && items.length === 0) {
+    const skeletonType = contentType === 'live' ? 'channel' : 'poster'
+    const skeletonCount = columns * 4
+    return (
+      <div
+        ref={containerRef}
+        style={{
+          width: '100%',
+          height: '100%',
+          overflowY: 'auto',
+          overflowX: 'hidden',
+          padding: `0 ${padding}px`,
+        }}
+      >
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: `repeat(${columns}, 1fr)`,
+          gap: gap,
+          paddingTop: gap,
+        }}>
+          {Array.from({ length: skeletonCount }).map((_, i) => (
+            <div key={i} style={{
+              borderRadius: 6,
+              overflow: 'hidden',
+              background: 'var(--bg-2)',
+              border: '1px solid var(--border-subtle)',
+            }}>
+              <div style={{
+                aspectRatio: skeletonType === 'channel' ? '16/9' : '2/3',
+                background: 'linear-gradient(90deg, var(--bg-2) 25%, var(--bg-3) 50%, var(--bg-2) 75%)',
+                backgroundSize: '200% 100%',
+                animation: 'shimmer 1.4s infinite',
+              }} />
+              <div style={{ padding: '6px 8px 8px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <div style={{ height: 10, borderRadius: 3, background: 'var(--bg-3)', width: '70%' }} />
+                {skeletonType === 'poster' && (
+                  <div style={{ height: 8, borderRadius: 3, background: 'var(--bg-3)', width: '45%' }} />
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div

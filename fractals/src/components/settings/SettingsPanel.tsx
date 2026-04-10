@@ -551,6 +551,29 @@ function DataTab({ tmdbKey, setTmdbKey, enrichStatus, enrichProgress, enrichMsg,
   const [msg, setMsg] = useState<string | null>(null)
   const [importMsg, setImportMsg] = useState<string | null>(null)
   const [includeUserData, setIncludeUserData] = useState(false)
+  const [tmdbSaving, setTmdbSaving] = useState(false)
+  const [tmdbSaveMsg, setTmdbSaveMsg] = useState<{ ok: boolean; text: string } | null>(null)
+
+  const handleSaveTmdbKey = async () => {
+    if (!tmdbKey.trim()) return
+    setTmdbSaving(true)
+    setTmdbSaveMsg(null)
+    try {
+      // Persist the key first (searchTmdb reads from persisted key)
+      await api.enrichment.setApiKey(tmdbKey.trim())
+      // Validate with a lightweight TMDB search
+      const res = await api.enrichment.searchTmdb({ title: 'test', type: 'movie' })
+      if (res && (res as any).success === false) {
+        setTmdbSaveMsg({ ok: false, text: (res as any).error ?? 'Invalid API key' })
+      } else {
+        setTmdbSaveMsg({ ok: true, text: 'Key validated and saved' })
+      }
+    } catch (e) {
+      setTmdbSaveMsg({ ok: false, text: `Validation failed: ${String(e)}` })
+    } finally {
+      setTmdbSaving(false)
+    }
+  }
 
   const run = async (action: 'history' | 'favorites' | 'all' | 'prefs' | 'factory') => {
     setBusy(true)
@@ -676,7 +699,13 @@ function DataTab({ tmdbKey, setTmdbKey, enrichStatus, enrichProgress, enrichMsg,
         <p style={{ fontSize: 11, color: 'var(--text-1)', lineHeight: 1.6, marginBottom: 12 }}>
           Fetches posters, ratings, plots, cast, and genres from TMDB.
           Get a free key at{' '}
-          <span style={{ color: 'var(--accent-interactive)' }}>themoviedb.org/settings/api</span>
+          <a
+            href="https://www.themoviedb.org/settings/api"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ color: 'var(--accent-interactive)', cursor: 'pointer', textDecoration: 'none' }}
+            onClick={(e) => { e.preventDefault(); window.open('https://www.themoviedb.org/settings/api', '_blank') }}
+          >themoviedb.org/settings/api</a>
         </p>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{ display: 'flex', gap: 8 }}>
@@ -695,6 +724,19 @@ function DataTab({ tmdbKey, setTmdbKey, enrichStatus, enrichProgress, enrichMsg,
               onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--border-default)' }}
             />
             <button
+              onClick={handleSaveTmdbKey}
+              disabled={tmdbSaving || !tmdbKey.trim()}
+              style={{
+                padding: '8px 12px', borderRadius: 8, fontSize: 11, fontWeight: 600,
+                background: 'var(--accent-interactive)', color: '#fff', border: 'none',
+                cursor: (!tmdbKey.trim() || tmdbSaving) ? 'default' : 'pointer', whiteSpace: 'nowrap',
+                opacity: (!tmdbKey.trim() || tmdbSaving) ? 0.5 : 1,
+                transition: 'opacity 0.15s', fontFamily: 'var(--font-ui)',
+              }}
+            >
+              {tmdbSaving ? 'Validating...' : 'Save Key'}
+            </button>
+            <button
               onClick={onStart}
               disabled={isPending || !!enrichProgress}
               style={{
@@ -708,6 +750,14 @@ function DataTab({ tmdbKey, setTmdbKey, enrichStatus, enrichProgress, enrichMsg,
               {enrichProgress ? `${pct}%` : 'Enrich'}
             </button>
           </div>
+          {tmdbSaveMsg && (
+            <p style={{
+              fontSize: 11, margin: 0,
+              color: tmdbSaveMsg.ok ? 'var(--accent-success)' : 'var(--accent-danger)',
+            }}>
+              {tmdbSaveMsg.ok ? '✓' : '✗'} {tmdbSaveMsg.text}
+            </p>
+          )}
           {enrichProgress && (
             <div style={{ borderRadius: 99, overflow: 'hidden', height: 3, background: 'var(--bg-3)' }}>
               <div style={{

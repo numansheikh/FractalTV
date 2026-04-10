@@ -153,8 +153,9 @@ export const api = {
 
   // Events from main process
   on: (channel: string, callback: (...args: unknown[]) => void) => {
-    ipcRenderer.on(channel, (_event, ...args) => callback(...args))
-    return () => ipcRenderer.removeAllListeners(channel)
+    const wrapper = (_event: Electron.IpcRendererEvent, ...args: unknown[]) => callback(...args)
+    ipcRenderer.on(channel, wrapper)
+    return () => { ipcRenderer.removeListener(channel, wrapper) }
   },
 }
 

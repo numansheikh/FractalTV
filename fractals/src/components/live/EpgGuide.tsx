@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { ContentItem } from '@/lib/types'
 import { api } from '@/lib/api'
@@ -55,6 +55,7 @@ export function EpgGuide({ channels, activeChannel, onSwitchChannel, onFullscree
   const [loadedCount, setLoadedCount] = useState(0) // how many channel IDs fetched so far
   const [loadingMore, setLoadingMore] = useState(false)
   const allChannelIds = channels.map((c) => c.id)
+  const channelIdKey = useMemo(() => allChannelIds.join(','), [allChannelIds.length, channels])
   const hasMore = loadedCount < allChannelIds.length
 
   const fetchBatch = useCallback((startIdx: number, append: boolean) => {
@@ -75,7 +76,7 @@ export function EpgGuide({ channels, activeChannel, onSwitchChannel, onFullscree
       if (isFirst) setLoading(false)
       else setLoadingMore(false)
     })
-  }, [allChannelIds.join(','), windowStart])
+  }, [channelIdKey, windowStart])
 
   // Initial load: first 100 channels
   useEffect(() => {
@@ -446,7 +447,7 @@ export function EpgGuide({ channels, activeChannel, onSwitchChannel, onFullscree
                                   onClick={(e) => {
                                     e.stopPropagation()
                                     setSelectedProg({ prog, channel: ch })
-                                    api.user.getData(ch.contentId).then((d) => setIsFav(!!d?.favorite))
+                                    api.user.getData(ch.contentId).then((d: { favorite?: number } | null) => setIsFav(!!d?.favorite))
                                   }}
                                   style={{
                                     position: 'absolute',
@@ -498,7 +499,6 @@ export function EpgGuide({ channels, activeChannel, onSwitchChannel, onFullscree
                 <DetailPanel
                   prog={selectedProg.prog}
                   channel={selectedProg.channel}
-                  channels={channels}
                   nowSec={nowSec}
                   programmes={programmes}
                   colorMap={colorMap}
@@ -509,7 +509,11 @@ export function EpgGuide({ channels, activeChannel, onSwitchChannel, onFullscree
                   onToggleFav={async () => {
                     const next = !isFav
                     setIsFav(next)
-                    await api.user.toggleFavorite(selectedProg.channel.contentId)
+                    try {
+                      await api.user.toggleFavorite(selectedProg.channel.contentId)
+                    } catch {
+                      setIsFav(!next) // rollback
+                    }
                   }}
                 />
               )}
@@ -534,11 +538,10 @@ export function EpgGuide({ channels, activeChannel, onSwitchChannel, onFullscree
 // ── Detail panel sub-component ────────────────────────────────────────────────
 
 function DetailPanel({
-  prog, channel, channels, nowSec, programmes, colorMap, isFav, fmtTime, fmtDur, onWatch, onToggleFav,
+  prog, channel, nowSec, programmes, colorMap, isFav, fmtTime, fmtDur, onWatch, onToggleFav,
 }: {
   prog: EpgProgramme
   channel: EpgChannel
-  channels: ContentItem[]
   nowSec: number
   programmes: Record<string, EpgProgramme[]>
   colorMap: Record<string, { accent: string; dim: string }>

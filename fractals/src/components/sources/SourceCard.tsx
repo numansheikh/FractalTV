@@ -1,13 +1,13 @@
 import { useState } from 'react'
 import { Source, SyncProgress, useSourcesStore } from '@/stores/sources.store'
 import { useAppStore } from '@/stores/app.store'
-import { getSourceColor, PALETTE_HEX, PALETTE_SIZE } from '@/lib/sourceColors'
+import { getSourceColor, PALETTE_HEX } from '@/lib/sourceColors'
 import { api } from '@/lib/api'
 
 interface Props {
   source: Source
   onSync: (id: string) => void
-  onRemove: (id: string) => void
+  onRemove: (id: string) => void | Promise<void>
   onClose?: () => void
 }
 
@@ -54,7 +54,6 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
   const color = getSourceColor(source.colorIndex ?? autoIndex)
 
   const [editMode, setEditMode] = useState(false)
-  const [confirmDelete, setConfirmDelete] = useState(false)
   // Edit form state
   const isM3u = source.type === 'm3u'
   const [editForm, setEditForm] = useState({
@@ -144,14 +143,16 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
     }
   }
 
-  const handleDelete = () => {
-    if (!confirmDelete) {
-      setConfirmDelete(true)
-      return
-    }
+  const [deleting, setDeleting] = useState(false)
 
-    setConfirmDelete(false)
-    onRemove(source.id)
+  const handleDelete = async () => {
+    if (!window.confirm('Remove this source? All its channels and movies will be deleted.')) return
+    setDeleting(true)
+    try {
+      await onRemove(source.id)
+    } catch {
+      setDeleting(false)
+    }
   }
 
   const dotColor = source.status === 'error'
@@ -170,9 +171,28 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
       display: 'flex',
       flexDirection: 'column',
       gap: 6,
-      opacity: source.disabled ? 0.6 : 1,
+      opacity: deleting ? 0.45 : source.disabled ? 0.6 : 1,
+      pointerEvents: deleting ? 'none' : 'auto',
       transition: 'opacity 0.15s',
+      position: 'relative',
     }}>
+      {deleting && (
+        <div style={{
+          position: 'absolute', inset: 0, borderRadius: 8,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: 'color-mix(in srgb, var(--bg-0) 60%, transparent)',
+          zIndex: 10,
+        }}>
+          <span style={{
+            fontSize: 11, fontWeight: 600, color: 'var(--text-1)',
+            fontFamily: 'var(--font-ui)',
+            display: 'flex', alignItems: 'center', gap: 6,
+          }}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ animation: 'spin 1s linear infinite' }}><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
+            Removing...
+          </span>
+        </div>
+      )}
       {/* Top row: dot + name + actions */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <div style={{
@@ -216,7 +236,7 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
             <ActionButton
               icon={<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6" /><path d="M14 11v6" /><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /></svg>}
               onClick={handleDelete}>
-              {confirmDelete ? 'Confirm?' : 'Delete'}
+              Delete
             </ActionButton>
           </div>
         )}
@@ -411,33 +431,6 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
 }
 
 /* ── Inner helpers ──────────────────────────────────────────────── */
-function MenuButton({
-  children, onClick, disabled, color,
-}: {
-  children: React.ReactNode; onClick: () => void; disabled?: boolean; color?: string
-}) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      style={{
-        display: 'block', width: '100%', textAlign: 'left',
-        padding: '6px 12px', fontSize: 11, fontWeight: 500,
-        background: 'transparent', border: 'none',
-        color: color ?? 'var(--text-0)',
-        cursor: disabled ? 'default' : 'pointer',
-        opacity: disabled ? 0.4 : 1,
-        fontFamily: 'var(--font-ui)',
-        transition: 'background 0.08s',
-      }}
-      onMouseEnter={(e) => { if (!disabled) e.currentTarget.style.background = 'var(--bg-2)' }}
-      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
-    >
-      {children}
-    </button>
-  )
-}
-
 function ActionButton({
   children, icon, onClick, disabled,
 }: {

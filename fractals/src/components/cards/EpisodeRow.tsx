@@ -98,7 +98,7 @@ export function EpisodeRow({ episode, onPlay, isPlaying = false, isCompleted = f
         {progress > 0 && !isCompleted && (
           <div style={{
             height: 3,
-            background: 'rgba(255,255,255,0.08)',
+            background: 'var(--border-subtle)',
             borderRadius: 1.5,
             overflow: 'hidden',
           }}>
@@ -158,15 +158,6 @@ export function EpisodeRow({ episode, onPlay, isPlaying = false, isCompleted = f
         </div>
       )}
 
-      {/* Keyframe style injection */}
-      {isPlaying && (
-        <style>{`
-          @keyframes episodeBarPulse {
-            from { transform: scaleY(0.4); opacity: 0.7; }
-            to   { transform: scaleY(1);   opacity: 1;   }
-          }
-        `}</style>
-      )}
     </div>
   )
 }

@@ -32,7 +32,11 @@ export function ChannelCard({ item, onClick }: Props) {
       qc.setQueriesData<ContentItem[]>({ queryKey: ['browse-favorites'] }, strip)
       qc.setQueriesData<ContentItem[]>({ queryKey: ['library', 'favorites'] }, strip)
     }
-    await api.user.toggleFavorite(item.id)
+    try {
+      await api.user.toggleFavorite(item.id)
+    } catch {
+      setFav(item.id, isFavorite)
+    }
     qc.invalidateQueries({ queryKey: ['browse-favorites'] })
     qc.invalidateQueries({ queryKey: ['library', 'favorites'] })
     qc.invalidateQueries({ queryKey: ['channels', 'favorites'] })
@@ -102,10 +106,10 @@ export function ChannelCard({ item, onClick }: Props) {
               width: 24, height: 24, borderRadius: 6,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               background: isFavorite ? 'rgba(239,68,68,0.25)' : 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)',
-              border: `1px solid ${isFavorite ? 'rgba(239,68,68,0.4)' : 'rgba(255,255,255,0.15)'}`,
+              border: `1px solid ${isFavorite ? 'rgba(239,68,68,0.4)' : 'var(--border-default)'}`,
               cursor: 'pointer', padding: 0,
             }}>
-            <svg width="11" height="11" viewBox="0 0 24 24" fill={isFavorite ? '#ef4444' : 'none'} stroke={isFavorite ? '#ef4444' : 'rgba(255,255,255,0.8)'} strokeWidth="2">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill={isFavorite ? '#ef4444' : 'none'} stroke={isFavorite ? '#ef4444' : 'var(--text-1)'} strokeWidth="2">
               <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
             </svg>
           </button>

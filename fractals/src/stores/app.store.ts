@@ -108,15 +108,17 @@ export const useAppStore = create<AppState>()(
       setSplitViewChannel: (splitViewChannel) => set({ splitViewChannel }),
       setChannelSurfContext: (channelSurfList, channelSurfIndex, action) => set({ channelSurfList, channelSurfIndex, surfContextAction: action ?? null }),
       surfChannel: (dir) => {
-        const { channelSurfList, channelSurfIndex, splitViewChannel, playingContent } = useAppStore.getState()
-        if (channelSurfList.length === 0) return null
-        const currentId = (playingContent ?? splitViewChannel)?.id
-        let idx = channelSurfList.findIndex((c) => c.id === currentId)
-        if (idx === -1) idx = channelSurfIndex
-        const next = (idx + dir + channelSurfList.length) % channelSurfList.length
-        const nextChannel = channelSurfList[next]
-        set({ channelSurfIndex: next })
-        return nextChannel
+        let result: ContentItem | null = null
+        set((s) => {
+          if (s.channelSurfList.length === 0) return s
+          const currentId = (s.playingContent ?? s.splitViewChannel)?.id
+          let idx = s.channelSurfList.findIndex((c) => c.id === currentId)
+          if (idx === -1) idx = s.channelSurfIndex
+          const next = (idx + dir + s.channelSurfList.length) % s.channelSurfList.length
+          result = s.channelSurfList[next]
+          return { channelSurfIndex: next }
+        })
+        return result
       },
       setShowSources: (showSources) => set({ showSources }),
       setTypeFilter: (typeFilter) => set({ typeFilter, categoryFilter: null }),

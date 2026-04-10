@@ -32,6 +32,8 @@ export function CardActions({ item, onPlay, showWatchlist = true }: Props) {
       qc.invalidateQueries({ queryKey: ['channels', 'favorites'] })
       qc.invalidateQueries({ queryKey: ['browse-favorites'] })
       qc.invalidateQueries({ queryKey: ['library', 'favorites'] })
+    }).catch(() => {
+      setFav(item.id, isFavorite)
     })
   }
 
@@ -41,6 +43,8 @@ export function CardActions({ item, onPlay, showWatchlist = true }: Props) {
     api.user.toggleWatchlist(item.id).then(() => {
       qc.invalidateQueries({ queryKey: ['home-watchlist'] })
       qc.invalidateQueries({ queryKey: ['library', 'watchlist'] })
+    }).catch(() => {
+      setWl(item.id, isWatchlist)
     })
   }
 

@@ -310,5 +310,10 @@ input::placeholder {
   to   { opacity: 1; transform: translateY(0); }
 }
 
+@keyframes episodeBarPulse {
+  from { transform: scaleY(0.4); opacity: 0.7; }
+  to   { transform: scaleY(1);   opacity: 1;   }
+}
+
 /* ArtPlayer: hide the floating live-edge button (top-right), keep the controls bar badge */
 .art-live-edge { display: none !important; }

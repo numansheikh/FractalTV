@@ -284,19 +284,43 @@ export function ContentArea({ sort, onSelectContent, onAddSource }: Props) {
                 />
               )
             }
+            const disabledSources = sources.filter((s) => s.disabled)
             return (
               <EmptyState
                 icon={<PlayIcon />}
                 title="Nothing in this category"
                 description="Try a different category or check back after syncing."
-              />
+              >
+                {disabledSources.length > 0 && (
+                  <div style={{
+                    marginTop: 12, padding: '8px 14px', borderRadius: 6,
+                    background: 'color-mix(in srgb, var(--accent-interactive) 8%, transparent)',
+                    border: '1px solid color-mix(in srgb, var(--accent-interactive) 20%, transparent)',
+                    fontSize: 11, color: 'var(--text-1)', fontFamily: 'var(--font-ui)',
+                    display: 'flex', alignItems: 'center', gap: 8,
+                  }}>
+                    <span>{disabledSources.length} source{disabledSources.length > 1 ? 's' : ''} disabled</span>
+                    <button
+                      onClick={() => useAppStore.getState().setShowSources(true)}
+                      style={{
+                        background: 'none', border: 'none', padding: 0,
+                        color: 'var(--accent-interactive)', cursor: 'pointer',
+                        fontSize: 11, fontWeight: 600, fontFamily: 'var(--font-ui)',
+                        textDecoration: 'underline', textUnderlineOffset: 2,
+                      }}
+                    >
+                      Manage sources
+                    </button>
+                  </div>
+                )}
+              </EmptyState>
             )
           })()}
           {!isEmpty && (
             <>
               <div style={{ flex: 1, minHeight: 0 }}>
                 {ready && VirtualGrid
-                  ? <VirtualGrid items={items} onSelect={handleSelect} viewMode={activeView === 'live' ? viewMode : 'grid'} />
+                  ? <VirtualGrid items={items} onSelect={handleSelect} viewMode={activeView === 'live' ? viewMode : 'grid'} isLoading={isLoading} contentType={contentType} />
                   : <FallbackGrid items={items} onSelect={handleSelect} />
                 }
               </div>

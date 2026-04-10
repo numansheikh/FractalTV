@@ -4,9 +4,10 @@ interface Props {
   description?: string
   action?: { label: string; onClick: () => void }
   hint?: string
+  children?: React.ReactNode
 }
 
-export function EmptyState({ icon, title, description, action, hint }: Props) {
+export function EmptyState({ icon, title, description, action, hint, children }: Props) {
   return (
     <div style={{
       flex: 1,
@@ -46,6 +47,7 @@ export function EmptyState({ icon, title, description, action, hint }: Props) {
           {action.label}
         </button>
       )}
+      {children}
       {hint && (
         <p style={{ fontSize: 10, color: 'var(--text-3)', margin: 0 }}>{hint}</p>
       )}

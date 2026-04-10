@@ -12,6 +12,55 @@ import { tmdbService } from '../services/tmdb.service'
 import { syncEpg, getNowNext } from '../services/epg.service'
 import { normalizeForSearch } from '../lib/normalize'
 
+// ── Minimal interfaces for raw SQLite query results ─────────────────────────
+// These replace `as any` on the most dangerous direct-property-access patterns.
+
+/** Result of `SELECT COUNT(*) as n FROM ...` */
+interface CountRow { n: number }
+
+/** Result of `SELECT canonical_id FROM streams WHERE id = ?` */
+interface StreamCanonicalRef { canonical_id: string }
+
+/** Result of `SELECT canonical_id, type FROM streams WHERE id = ?` */
+interface StreamCanonicalTypeRef { canonical_id: string; type: string }
+
+/** Result of `SELECT * FROM streams WHERE id = ?` */
+interface StreamRow {
+  id: string; source_id: string; stream_id: string; type: string
+  title: string; category_id?: string; thumbnail_url?: string
+  container_extension?: string; stream_url?: string
+  catchup_supported?: number; catchup_days?: number
+  epg_channel_id?: string; canonical_id?: string
+}
+
+/** Result of `SELECT * FROM sources WHERE id = ?` (raw SQLite, not Drizzle) */
+interface SourceRow {
+  id: string; type: string; name: string
+  server_url: string; username: string; password: string
+  m3u_url?: string; status?: string; disabled?: number
+  color_index?: number; last_epg_sync?: number
+}
+
+/** Result of `SELECT value FROM settings WHERE key = ?` */
+interface SettingRow { value: string }
+
+/** Result of `SELECT disabled FROM sources WHERE id = ?` */
+interface DisabledRow { disabled: number }
+
+/** Result of `SELECT is_favorite FROM user_data ...` */
+interface FavoriteRow { is_favorite: number }
+
+/** Result of `SELECT is_watchlisted FROM user_data ...` */
+interface WatchlistRow { is_watchlisted: number }
+
+/** Result of `SELECT * FROM user_data WHERE canonical_id = ? ...` */
+interface UserDataRow {
+  canonical_id: string; profile_id: string
+  is_favorite?: number; is_watchlisted?: number; rating?: number
+  watch_position?: number; last_watched_at?: string; completed?: number
+  fav_sort_order?: number
+}
+
 const EPG_REFRESH_INTERVAL_HOURS = 24
 
 function runEpgSync(sqlite: ReturnType<typeof getSqlite>, win: BrowserWindow | null, sourceId: string, src: any) {
@@ -69,7 +118,7 @@ export function registerHandlers() {
     const db = getDb()
     const sqlite = getSqlite()
     const rows = await db.select().from(sources).all()
-    return rows.map((s) => ({ ...s, colorIndex: (s as any).color_index ?? undefined }))
+    return rows.map((s) => ({ ...s, colorIndex: (s as unknown as { color_index?: number }).color_index ?? undefined }))
   })
 
   ipcMain.handle('sources:set-color', (_event, sourceId: string, colorIndex: number) => {
@@ -90,7 +139,7 @@ export function registerHandlers() {
     const settingKeys = ['tmdb_api_key']
     const settings: Record<string, string> = {}
     for (const key of settingKeys) {
-      const row = sqlite.prepare(`SELECT value FROM settings WHERE key = ?`).get(key) as any
+      const row = sqlite.prepare(`SELECT value FROM settings WHERE key = ?`).get(key) as SettingRow | undefined
       if (row?.value) settings[key] = row.value
     }
 
@@ -107,7 +156,7 @@ export function registerHandlers() {
 
     const win = BrowserWindow.fromWebContents(event.sender)
     const result = await dialog.showSaveDialog(win!, {
-      defaultPath: `fractals-backup-${new Date().toISOString().slice(0, 10)}.json`,
+      defaultPath: `fractals-backup-${new Date().toISOString().slice(0, 16).replace(':', '')}.json`,
       filters: [{ name: 'JSON', extensions: ['json'] }],
     })
     if (result.canceled || !result.filePath) return { canceled: true }
@@ -137,7 +186,8 @@ export function registerHandlers() {
     `)
     const insertUserData = sqlite.prepare(`
       INSERT OR REPLACE INTO user_data (canonical_id, profile_id, is_favorite, fav_sort_order, is_watchlisted, rating, watch_position, watch_duration, last_watched_at, completed)
-      VALUES (@canonical_id, @profile_id, @is_favorite, @fav_sort_order, @is_watchlisted, @rating, @watch_position, @watch_duration, @last_watched_at, @completed)
+      SELECT @canonical_id, @profile_id, @is_favorite, @fav_sort_order, @is_watchlisted, @rating, @watch_position, @watch_duration, @last_watched_at, @completed
+      WHERE EXISTS (SELECT 1 FROM canonical WHERE id = @canonical_id)
     `)
 
     try {
@@ -171,7 +221,10 @@ export function registerHandlers() {
         }
       })()
 
-      return { ok: true, count: parsed.sources.length }
+      // Count orphaned user_data rows (canonical_id references that don't exist yet)
+      const orphaned = (sqlite.prepare('SELECT COUNT(*) as n FROM user_data WHERE canonical_id NOT IN (SELECT id FROM canonical)').get() as CountRow)!.n
+
+      return { ok: true, count: parsed.sources.length, orphanedUserData: orphaned }
     } catch (err: any) {
       return { error: err.message }
     }
@@ -190,7 +243,7 @@ export function registerHandlers() {
         sqlite.prepare(`DELETE FROM canonical`).run()
         sqlite.prepare(`DELETE FROM categories`).run()
         sqlite.prepare(`DELETE FROM sources`).run()
-        sqlite.prepare(`DELETE FROM settings WHERE key NOT IN ('migration_source_scoped_ids', 'migration_source_color_column')`).run()
+        sqlite.prepare(`DELETE FROM settings WHERE key NOT LIKE 'migration_%'`).run()
         try { sqlite.prepare(`DELETE FROM embeddings`).run() } catch {}
       })()
     } finally {
@@ -205,7 +258,7 @@ export function registerHandlers() {
     const row = sqlite.prepare(`
       SELECT COUNT(*) as n FROM streams s
       JOIN sources src ON src.id = s.source_id AND src.disabled = 0
-    `).get() as any
+    `).get() as CountRow | undefined
     return row?.n ?? 0
   })
 
@@ -253,7 +306,7 @@ export function registerHandlers() {
   // Live account info from Xtream API (always fresh)
   ipcMain.handle('sources:account-info', async (_event, sourceId: string) => {
     const sqlite = getSqlite()
-    const source = sqlite.prepare('SELECT * FROM sources WHERE id = ?').get(sourceId) as any
+    const source = sqlite.prepare('SELECT * FROM sources WHERE id = ?').get(sourceId) as SourceRow | undefined
     if (!source?.server_url) return { error: 'Source not found' }
     return xtreamService.testConnection(source.server_url, source.username, source.password)
   })
@@ -330,7 +383,7 @@ export function registerHandlers() {
   ipcMain.handle('sources:toggle-disabled', async (_event, sourceId: string) => {
     const sqlite = getSqlite()
     sqlite.prepare(`UPDATE sources SET disabled = NOT disabled WHERE id = ?`).run(sourceId)
-    const row = sqlite.prepare(`SELECT disabled FROM sources WHERE id = ?`).get(sourceId) as any
+    const row = sqlite.prepare(`SELECT disabled FROM sources WHERE id = ?`).get(sourceId) as DisabledRow | undefined
     return { disabled: !!row?.disabled }
   })
 
@@ -339,7 +392,7 @@ export function registerHandlers() {
     const sqlite = getSqlite()
 
     // Get source info
-    const source = sqlite.prepare('SELECT * FROM sources WHERE id = ?').get(sourceId) as any
+    const source = sqlite.prepare('SELECT * FROM sources WHERE id = ?').get(sourceId) as SourceRow | undefined
     if (!source) return { success: false, error: 'Source not found' }
 
     // DB path — same as what connection.ts uses
@@ -377,10 +430,18 @@ export function registerHandlers() {
           })
           resolve({ success: true })
           // Kick off EPG sync in background after content sync
-          const src = sqlite.prepare('SELECT * FROM sources WHERE id = ?').get(sourceId) as any
+          const src = sqlite.prepare('SELECT * FROM sources WHERE id = ?').get(sourceId) as SourceRow | undefined
           if (src?.server_url) {
             runEpgSync(sqlite, win, sourceId, src)
           }
+        } else if (msg.type === 'warning') {
+          win?.webContents.send('sync:progress', {
+            sourceId,
+            phase: 'warning',
+            current: 0,
+            total: 0,
+            message: msg.message,
+          })
         } else if (msg.type === 'error') {
           win?.webContents.send('sync:progress', {
             sourceId,
@@ -417,7 +478,7 @@ export function registerHandlers() {
   ipcMain.handle('epg:sync', async (event, sourceId: string) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     const sqlite = getSqlite()
-    const source = sqlite.prepare('SELECT * FROM sources WHERE id = ?').get(sourceId) as any
+    const source = sqlite.prepare('SELECT * FROM sources WHERE id = ?').get(sourceId) as SourceRow | undefined
     if (!source?.server_url) return { success: false, error: 'Source not found' }
 
     const result = await syncEpg(
@@ -525,7 +586,7 @@ export function registerHandlers() {
 
   ipcMain.handle('content:get-catchup-url', async (_event, args: { contentId: string; startTime: number; duration: number }) => {
     const sqlite = getSqlite()
-    const stream = sqlite.prepare('SELECT * FROM streams WHERE id = ?').get(args.contentId) as any
+    const stream = sqlite.prepare('SELECT * FROM streams WHERE id = ?').get(args.contentId) as StreamRow | undefined
     if (!stream) return { error: 'Stream not found' }
 
     const db = getDb()
@@ -774,7 +835,7 @@ export function registerHandlers() {
     const db = getDb()
     const sqlite = getSqlite()
 
-    const stream = sqlite.prepare('SELECT * FROM streams WHERE id = ?').get(args.contentId) as any
+    const stream = sqlite.prepare('SELECT * FROM streams WHERE id = ?').get(args.contentId) as StreamRow | undefined
     if (!stream) return { error: 'Content not found' }
 
     const sourceId = args.sourceId ?? stream.source_id
@@ -804,7 +865,7 @@ export function registerHandlers() {
     const db = getDb()
     const sqlite = getSqlite()
 
-    const stream = sqlite.prepare('SELECT * FROM streams WHERE id = ?').get(args.contentId) as any
+    const stream = sqlite.prepare('SELECT * FROM streams WHERE id = ?').get(args.contentId) as StreamRow | undefined
     if (!stream) return { error: 'Content not found' }
 
     const [source] = await db.select().from(sources).where(eq(sources.id, stream.source_id))
@@ -854,9 +915,9 @@ export function registerHandlers() {
 
   ipcMain.handle('user:get-data', async (_event, contentId: string) => {
     const sqlite = getSqlite()
-    const stream = sqlite.prepare('SELECT canonical_id FROM streams WHERE id = ?').get(contentId) as any
+    const stream = sqlite.prepare('SELECT canonical_id FROM streams WHERE id = ?').get(contentId) as StreamCanonicalRef | undefined
     if (!stream?.canonical_id) return null
-    const row = sqlite.prepare('SELECT * FROM user_data WHERE canonical_id = ? AND profile_id = ?').get(stream.canonical_id, 'default') as any
+    const row = sqlite.prepare('SELECT * FROM user_data WHERE canonical_id = ? AND profile_id = ?').get(stream.canonical_id, 'default') as UserDataRow | undefined
     if (!row) return null
     // Alias columns to v1-compatible names for frontend
     return {
@@ -873,7 +934,7 @@ export function registerHandlers() {
 
   ipcMain.handle('user:set-position', async (_event, args: { contentId: string; position: number }) => {
     const sqlite = getSqlite()
-    const stream = sqlite.prepare('SELECT canonical_id FROM streams WHERE id = ?').get(args.contentId) as any
+    const stream = sqlite.prepare('SELECT canonical_id FROM streams WHERE id = ?').get(args.contentId) as StreamCanonicalRef | undefined
     if (!stream?.canonical_id) return { success: false }
     sqlite.prepare(`
       INSERT INTO user_data (canonical_id, watch_position, last_watched_at)
@@ -887,27 +948,27 @@ export function registerHandlers() {
 
   ipcMain.handle('user:toggle-favorite', async (_event, contentId: string) => {
     const sqlite = getSqlite()
-    const stream = sqlite.prepare('SELECT canonical_id FROM streams WHERE id = ?').get(contentId) as any
+    const stream = sqlite.prepare('SELECT canonical_id FROM streams WHERE id = ?').get(contentId) as StreamCanonicalRef | undefined
     if (!stream?.canonical_id) return { favorite: false }
     sqlite.prepare(`
       INSERT INTO user_data (canonical_id, is_favorite)
       VALUES (?, 1)
       ON CONFLICT(canonical_id, profile_id) DO UPDATE SET is_favorite = NOT is_favorite
     `).run(stream.canonical_id)
-    const row = sqlite.prepare('SELECT is_favorite FROM user_data WHERE canonical_id = ? AND profile_id = ?').get(stream.canonical_id, 'default') as any
+    const row = sqlite.prepare('SELECT is_favorite FROM user_data WHERE canonical_id = ? AND profile_id = ?').get(stream.canonical_id, 'default') as FavoriteRow | undefined
     return { favorite: !!row?.is_favorite }
   })
 
   ipcMain.handle('user:toggle-watchlist', async (_event, contentId: string) => {
     const sqlite = getSqlite()
-    const stream = sqlite.prepare('SELECT canonical_id FROM streams WHERE id = ?').get(contentId) as any
+    const stream = sqlite.prepare('SELECT canonical_id FROM streams WHERE id = ?').get(contentId) as StreamCanonicalRef | undefined
     if (!stream?.canonical_id) return { watchlist: false }
     sqlite.prepare(`
       INSERT INTO user_data (canonical_id, is_watchlisted)
       VALUES (?, 1)
       ON CONFLICT(canonical_id, profile_id) DO UPDATE SET is_watchlisted = NOT is_watchlisted
     `).run(stream.canonical_id)
-    const row = sqlite.prepare('SELECT is_watchlisted FROM user_data WHERE canonical_id = ? AND profile_id = ?').get(stream.canonical_id, 'default') as any
+    const row = sqlite.prepare('SELECT is_watchlisted FROM user_data WHERE canonical_id = ? AND profile_id = ?').get(stream.canonical_id, 'default') as WatchlistRow | undefined
     return { watchlist: !!row?.is_watchlisted }
   })
 
@@ -1299,7 +1360,7 @@ export function registerHandlers() {
 
   ipcMain.handle('user:set-completed', async (_event, contentId: string) => {
     const sqlite = getSqlite()
-    const stream = sqlite.prepare('SELECT canonical_id FROM streams WHERE id = ?').get(contentId) as any
+    const stream = sqlite.prepare('SELECT canonical_id FROM streams WHERE id = ?').get(contentId) as StreamCanonicalRef | undefined
     if (!stream?.canonical_id) return { success: false }
     sqlite.prepare(`
       INSERT INTO user_data (canonical_id, completed, watch_position, last_watched_at)
@@ -1314,7 +1375,7 @@ export function registerHandlers() {
 
   ipcMain.handle('user:set-rating', async (_event, args: { contentId: string; rating: number | null }) => {
     const sqlite = getSqlite()
-    const stream = sqlite.prepare('SELECT canonical_id FROM streams WHERE id = ?').get(args.contentId) as any
+    const stream = sqlite.prepare('SELECT canonical_id FROM streams WHERE id = ?').get(args.contentId) as StreamCanonicalRef | undefined
     if (!stream?.canonical_id) return { success: false }
     sqlite.prepare(`
       INSERT INTO user_data (canonical_id, rating)
@@ -1328,7 +1389,7 @@ export function registerHandlers() {
 
   ipcMain.handle('user:clear-continue', async (_event, contentId: string) => {
     const sqlite = getSqlite()
-    const stream = sqlite.prepare('SELECT canonical_id FROM streams WHERE id = ?').get(contentId) as any
+    const stream = sqlite.prepare('SELECT canonical_id FROM streams WHERE id = ?').get(contentId) as StreamCanonicalRef | undefined
     if (!stream?.canonical_id) return { success: false }
     sqlite.prepare(`
       UPDATE user_data SET watch_position = 0, completed = 1
@@ -1339,7 +1400,7 @@ export function registerHandlers() {
 
   ipcMain.handle('user:clear-item-history', async (_event, contentId: string) => {
     const sqlite = getSqlite()
-    const stream = sqlite.prepare('SELECT canonical_id FROM streams WHERE id = ?').get(contentId) as any
+    const stream = sqlite.prepare('SELECT canonical_id FROM streams WHERE id = ?').get(contentId) as StreamCanonicalRef | undefined
     if (!stream?.canonical_id) return { success: false }
     sqlite.prepare(`
       UPDATE user_data SET watch_position = 0, last_watched_at = NULL, completed = 0
@@ -1416,8 +1477,8 @@ export function registerHandlers() {
 
   ipcMain.handle('enrichment:status', () => {
     const sqlite = getSqlite()
-    const total = (sqlite.prepare(`SELECT COUNT(*) as n FROM canonical WHERE type NOT IN ('channel', 'episode')`).get() as any).n
-    const enriched = (sqlite.prepare(`SELECT COUNT(*) as n FROM canonical WHERE type NOT IN ('channel', 'episode') AND enriched = 1`).get() as any).n
+    const total = (sqlite.prepare(`SELECT COUNT(*) as n FROM canonical WHERE type NOT IN ('channel', 'episode')`).get() as CountRow)!.n
+    const enriched = (sqlite.prepare(`SELECT COUNT(*) as n FROM canonical WHERE type NOT IN ('channel', 'episode') AND enriched = 1`).get() as CountRow)!.n
     return { total, enriched, pending: total - enriched }
   })
 
@@ -1501,7 +1562,7 @@ export function registerHandlers() {
       WHERE s.source_id IN (${inList})
       ${typeFilter}
     `
-    const total = (sqlite.prepare(countSql).get(...catParams, ...filterIds, ...typeParams) as any).n
+    const total = (sqlite.prepare(countSql).get(...catParams, ...filterIds, ...typeParams) as CountRow)!.n
 
     const itemSql = `
       SELECT DISTINCT s.id, s.source_id as primary_source_id, s.source_id as source_ids,
@@ -1563,7 +1624,7 @@ export function registerHandlers() {
     if (!hasKey) return { success: false, error: 'No TMDB API key configured' }
 
     const sqlite = getSqlite()
-    const stream = sqlite.prepare('SELECT canonical_id, type FROM streams WHERE id = ?').get(contentId) as any
+    const stream = sqlite.prepare('SELECT canonical_id, type FROM streams WHERE id = ?').get(contentId) as StreamCanonicalTypeRef | undefined
     if (!stream?.canonical_id) return { success: false, error: 'Content not found' }
     if (stream.type === 'live') return { success: false, error: 'Live channels are not enriched' }
 
@@ -1615,7 +1676,7 @@ export function registerHandlers() {
     if (!tmdbService.hasKey()) return { success: false, error: 'No TMDB API key configured' }
 
     const sqlite = getSqlite()
-    const stream = sqlite.prepare('SELECT canonical_id, type FROM streams WHERE id = ?').get(args.contentId) as any
+    const stream = sqlite.prepare('SELECT canonical_id, type FROM streams WHERE id = ?').get(args.contentId) as StreamCanonicalTypeRef | undefined
     if (!stream?.canonical_id) return { success: false, error: 'Content not found' }
 
     sqlite.prepare('UPDATE canonical SET enriched = 0 WHERE id = ?').run(stream.canonical_id)
@@ -1682,7 +1743,7 @@ export function registerHandlers() {
     if (!tmdbService.hasKey()) return { success: false, error: 'No TMDB API key configured' }
 
     const sqlite = getSqlite()
-    const stream = sqlite.prepare('SELECT canonical_id, type FROM streams WHERE id = ?').get(args.contentId) as any
+    const stream = sqlite.prepare('SELECT canonical_id, type FROM streams WHERE id = ?').get(args.contentId) as StreamCanonicalTypeRef | undefined
     if (!stream?.canonical_id) return { success: false, error: 'Content not found' }
 
     const canonical = sqlite.prepare('SELECT title FROM canonical WHERE id = ?').get(stream.canonical_id) as any

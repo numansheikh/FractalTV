@@ -234,7 +234,7 @@ function IconBtn({ children, title, onClick, disabled, danger }: {
       className="flex items-center justify-center rounded-md p-1.5 transition-colors disabled:opacity-40"
       style={{ color: danger ? 'var(--color-error)' : 'var(--color-text-muted)' }}
       onMouseEnter={(e) => {
-        e.currentTarget.style.background = danger ? 'rgba(224,108,117,0.15)' : 'rgba(255,255,255,0.08)'
+        e.currentTarget.style.background = danger ? 'rgba(224,108,117,0.15)' : 'var(--color-card-hover)'
         e.currentTarget.style.color = danger ? 'var(--color-error)' : 'var(--color-text-primary)'
       }}
       onMouseLeave={(e) => {

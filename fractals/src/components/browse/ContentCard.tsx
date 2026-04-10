@@ -1,24 +1,9 @@
 import { motion } from 'framer-motion'
 import { useSourcesStore } from '@/stores/sources.store'
 import { buildColorMapFromSources } from '@/lib/sourceColors'
+import { ContentItem } from '@/lib/types'
 
-export interface ContentItem {
-  id: string
-  type: 'live' | 'movie' | 'series'
-  title: string
-  year?: number
-  plot?: string
-  posterUrl?: string
-  poster_url?: string
-  ratingTmdb?: number
-  rating_tmdb?: number
-  ratingImdb?: number
-  rating_imdb?: number
-  genres?: string
-  sourceIds?: string
-  primarySourceId?: string
-  primary_source_id?: string
-}
+export type { ContentItem }
 
 interface Props {
   item: ContentItem

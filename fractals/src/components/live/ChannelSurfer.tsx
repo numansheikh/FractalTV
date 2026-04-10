@@ -10,7 +10,7 @@ interface Props {
   onClose: () => void
 }
 
-export function ChannelSurfer({ channels, activeId, onSwitch, onClose }: Props) {
+export function ChannelSurfer({ channels, activeId, onSwitch }: Props) {
   const { sources } = useSourcesStore()
   const colorMap = buildColorMapFromSources(sources)
   const activeRef = useRef<HTMLDivElement>(null)

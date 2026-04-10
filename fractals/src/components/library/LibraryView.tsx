@@ -55,51 +55,6 @@ function TypePill({
   )
 }
 
-// ─── Section header ──────────────────────────────────────────────────
-function SectionHeader({
-  title,
-  count,
-  typeFilter,
-  onTypeChange,
-}: {
-  title: string
-  count: number
-  typeFilter: TypeFilter
-  onTypeChange: (t: TypeFilter) => void
-}) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
-      <span style={{
-        fontSize: 13,
-        fontWeight: 600,
-        color: 'var(--text-0)',
-        fontFamily: 'var(--font-ui)',
-        userSelect: 'none',
-      }}>
-        {title}
-      </span>
-      <span style={{
-        fontSize: 11,
-        color: 'var(--text-1)',
-        fontFamily: 'var(--font-mono)',
-        userSelect: 'none',
-      }}>
-        {count}
-      </span>
-      <div style={{ flex: 1 }} />
-      <div style={{ display: 'flex', gap: 4 }}>
-        {TYPE_PILLS.map((p) => (
-          <TypePill
-            key={p.value}
-            label={p.label}
-            active={typeFilter === p.value}
-            onClick={() => onTypeChange(p.value)}
-          />
-        ))}
-      </div>
-    </div>
-  )
-}
 
 // ─── Empty text ──────────────────────────────────────────────────────
 function EmptyText() {

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import Hls from 'hls.js'
 import Artplayer from 'artplayer'
@@ -42,7 +42,7 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
   const minWatchSeconds = useAppStore((s) => s.minWatchSeconds)
   const controlsMode = useAppStore((s) => s.controlsMode)
   const sources = useSourcesStore((s) => s.sources)
-  const colorMap = buildColorMapFromSources(sources)
+  const colorMap = useMemo(() => buildColorMapFromSources(sources), [sources])
 
   // localContent drives all UI — decoupled from ArtPlayer rebuild cycle
   const [localContent, setLocalContent] = useState<ContentItem | null>(content)
@@ -53,7 +53,7 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
   useEffect(() => {
     if (!content || content.type !== 'live') return
     let alive = true
-    const fetch = () => api.epg.nowNext(content.id).then((d) => { if (alive) setEpgNowNext(d) })
+    const fetch = () => api.epg.nowNext(content.id).then((d) => { if (alive) setEpgNowNext(d) }).catch(() => {})
     fetch()
     const t = setInterval(fetch, 60_000)
     return () => { alive = false; clearInterval(t) }
@@ -93,6 +93,7 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
   const [error, setError] = useState<string | null>(null)
   const [streamUrl, setStreamUrl] = useState<string | null>(null)
   const [isAudioOnly, setIsAudioOnly] = useState(false)
+  const isAudioOnlyRef = useRef(false)
   const [osd, setOsd] = useState<{ text: string; icon: 'seek-back' | 'seek-fwd' | 'vol-up' | 'vol-down' } | null>(null)
   const osdTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [resumePrompt, setResumePrompt] = useState<number | null>(null)
@@ -143,7 +144,7 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
     setPlayerState('loading')
     setError(null)
     setStreamUrl(null)
-    setIsAudioOnly(false)
+    setIsAudioOnly(false); isAudioOnlyRef.current = false
     setIsTimeshift(false)
     setTimeshiftProg(null)
     completionMarkedRef.current = false
@@ -209,7 +210,7 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
         container: containerRef.current,
         url,
         autoplay: true,
-        autoHide: autoHideMs,
+        ...({ autoHide: autoHideMs === 0 ? false : autoHideMs } as Record<string, unknown>),
         pip: false,
         fullscreen: false, // OS fullscreen handled via Electron IPC
         hotkey: false,     // All keyboard handling done in our own handler
@@ -238,14 +239,14 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
               ;(art as any).hls = hls
               hls.loadSource(src)
               hls.attachMedia(video)
-              let networkRecovery = false
-              let mediaRecovery = false
+              let networkRecoveryCount = 0
+              let mediaRecoveryCount = 0
               hls.on(Hls.Events.ERROR, (_e: any, data: any) => {
                 if (data.fatal && !cancelled) {
-                  if (data.type === Hls.ErrorTypes.NETWORK_ERROR && !networkRecovery) {
-                    networkRecovery = true; hls.startLoad()
-                  } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR && !mediaRecovery) {
-                    mediaRecovery = true; hls.recoverMediaError()
+                  if (data.type === Hls.ErrorTypes.NETWORK_ERROR && networkRecoveryCount < 3) {
+                    networkRecoveryCount++; hls.startLoad()
+                  } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR && mediaRecoveryCount < 3) {
+                    mediaRecoveryCount++; hls.recoverMediaError()
                   } else {
                     setError(`Playback error: ${data.details ?? data.type}`)
                     setPlayerState('error')
@@ -275,8 +276,8 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
         const video = art.template.$video as HTMLVideoElement
         if (video) {
           const checkAudioOnly = () => {
-            if (cancelled || isAudioOnly) return
-            if (video.videoWidth === 0 && video.videoHeight === 0) setIsAudioOnly(true)
+            if (cancelled || isAudioOnlyRef.current) return
+            if (video.videoWidth === 0 && video.videoHeight === 0) { setIsAudioOnly(true); isAudioOnlyRef.current = true }
           }
           video.addEventListener('loadedmetadata', checkAudioOnly, { once: true })
           setTimeout(checkAudioOnly, 3000)
@@ -291,16 +292,12 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
               const r = trackEl.getBoundingClientRect()
               return Math.max(0, Math.min(1, (clientX - r.left) / r.width))
             }
-            const fmtTime = (s: number) => {
-              const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = Math.floor(s % 60)
-              return h > 0 ? `${h}:${String(m).padStart(2,'0')}:${String(ss).padStart(2,'0')}` : `${m}:${String(ss).padStart(2,'0')}`
-            }
             progressEl.addEventListener('mousemove', (e: MouseEvent) => {
               const pct = computePct(e.clientX)
               const hover = progressEl.querySelector('.art-progress-hover') as HTMLElement | null
               const tip = progressEl.querySelector('.art-progress-tip') as HTMLElement | null
               if (hover) hover.style.width = `${pct * 100}%`
-              if (tip) { tip.textContent = fmtTime(pct * art.duration); tip.style.left = `${pct * 100}%` }
+              if (tip) { tip.textContent = fmt(pct * art.duration); tip.style.left = `${pct * 100}%` }
               e.stopImmediatePropagation()
             }, { capture: true })
             progressEl.addEventListener('click', (e: MouseEvent) => {
@@ -325,7 +322,7 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
         if (!cancelled) { setError(null); setPlayerState('playing') }
       })
 
-      art.on('error', (_e: any, msg: string) => {
+      ;(art as any).on('error', (_e: any, msg: string) => {
         clearLoadingTimer()
         if (!cancelled) {
           const video = art.template?.$video as HTMLVideoElement | undefined
@@ -355,7 +352,7 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
       artRef.current?.pause?.()
       return
     }
-    const t = setTimeout(() => artRef.current?.resize?.(), 300)
+    const t = setTimeout(() => (artRef.current as any)?.resize?.(), 300)
     return () => clearTimeout(t)
   }, [mode])
 
@@ -367,11 +364,7 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
     api.user.getData(content.id).then((data: any) => {
       if (data?.last_position > 5 && !data?.completed) {
         setResumePrompt(data.last_position)
-        resumeTimerRef.current = setTimeout(() => {
-          const art = artRef.current
-          if (art && data.last_position > 0) art.seek = data.last_position
-          setResumePrompt(null)
-        }, 5000)
+        // Auto-dismiss timer starts in the playerState === 'playing' effect below
       }
     })
 
@@ -428,10 +421,21 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
     }
   }, [content?.id, content?.type, qc, minWatchSeconds])
 
+  // ── Resume auto-dismiss: wait for player to be ready before starting 5s timer
+  useEffect(() => {
+    if (playerState !== 'playing' || resumePrompt === null) return
+    resumeTimerRef.current = setTimeout(() => {
+      const art = artRef.current
+      if (art && resumePrompt > 0) art.seek = resumePrompt
+      setResumePrompt(null)
+    }, 5000)
+    return () => { if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current) }
+  }, [playerState, resumePrompt])
+
   // ── In-place channel switch ───────────────────────────────────────────────
   const doChannelSwitch = useCallback((next: ContentItem) => {
     setLocalContent(next)
-    setIsAudioOnly(false)
+    setIsAudioOnly(false); isAudioOnlyRef.current = false
     setShowSurfer(true)
     if (surferTimerRef.current) clearTimeout(surferTimerRef.current)
     surferTimerRef.current = setTimeout(() => setShowSurfer(false), 3000)
@@ -477,18 +481,13 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
     }
   }, [])
 
-  const handlePlayCatchup = useCallback(async (prog: { id: string; title: string; startTime: number; endTime: number }) => {
-    if (!localContent) return
-    const result = await api.content.getCatchupUrl({ contentId: localContent.id, startTime: prog.startTime, duration: prog.endTime - prog.startTime })
-    if (!result?.url) {
-      setError('Catchup not available for this programme')
-      setPlayerState('error')
-      return
-    }
-    switchToUrl(result.url)
-    setIsTimeshift(true)
-    setTimeshiftProg(prog)
-  }, [localContent, switchToUrl])
+  // Catchup playback — wired up when TimeshiftBar is integrated
+  // const handlePlayCatchup = useCallback(async (prog: { id: string; title: string; startTime: number; endTime: number }) => {
+  //   if (!localContent) return
+  //   const result = await api.content.getCatchupUrl({ contentId: localContent.id, startTime: prog.startTime, duration: prog.endTime - prog.startTime })
+  //   if (!result?.url) { setError('Catchup not available for this programme'); setPlayerState('error'); return }
+  //   switchToUrl(result.url); setIsTimeshift(true); setTimeshiftProg(prog)
+  // }, [localContent, switchToUrl])
 
   const handleGoLive = useCallback(() => {
     const liveUrl = liveStreamUrlRef.current

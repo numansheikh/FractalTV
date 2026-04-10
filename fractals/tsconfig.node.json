@@ -6,7 +6,10 @@
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "strict": true,
-    "noEmit": true,
+    "composite": true,
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "declaration": true,
     "skipLibCheck": true,
     "baseUrl": ".",
     "paths": {

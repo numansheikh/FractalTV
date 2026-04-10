@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, lazy, Suspense } from 'react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { useSourcesStore, Source, SyncProgress } from '@/stores/sources.store'
 import { useAppStore } from '@/stores/app.store'
@@ -20,11 +20,10 @@ const SettingsPanel = lazy(() => import('@/components/settings/SettingsPanel').t
 const SourcesPanel = lazy(() => import('@/components/sources/SourcesPanel').then((m) => ({ default: m.SourcesPanel })))
 const LiveSplitView = lazy(() => import('@/components/live/LiveSplitView').then((m) => ({ default: m.LiveSplitView })))
 
-const queryClient = new QueryClient({
-  defaultOptions: { queries: { staleTime: 30_000, retry: 1 } },
-})
-
 export function App() {
+  const [queryClient] = useState(() => new QueryClient({
+    defaultOptions: { queries: { staleTime: 30_000, retry: 1 } },
+  }))
   return (
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
@@ -35,10 +34,10 @@ export function App() {
 }
 
 function AppShell() {
-  const { sources, setSources, updateSource, setSyncProgress } = useSourcesStore()
-  const { query } = useSearchStore()
+  const queryClient = useQueryClient()
+  const { setSources, updateSource, setSyncProgress } = useSourcesStore()
   const {
-    activeView, selectedContent, playingContent, showSettings, showSources,
+    selectedContent, playingContent, showSettings, showSources,
     splitViewChannel, setSplitViewChannel,
     setSelectedContent, setPlayingContent, setShowSettings, setShowSources,
     setView, setCategoryFilter, clearSourceFilter, toggleSourceFilter,
