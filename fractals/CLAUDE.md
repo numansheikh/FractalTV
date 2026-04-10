@@ -477,23 +477,19 @@ The data model has two distinct layers, loosely coupled via a bridge:
 
 ## Known limitations & open work
 
-- **International character search (partial)** — European diacritics handled via `any-ascii`. Arabic, Hebrew, Cyrillic, CJK not yet transliterated.
+High-level backlog lives in `../BACKLOG.md` (five buckets: Data & Search, Product shape, Multi-platform, Experience polish, Tech health). Quality/hardening debt is catalogued in `docs/qa-cycle-2.md`. Highlights:
 
-- **M3U/M3U8 import implemented** — Parser, sync worker, IPC handlers, and UI all wired. AddSourceForm supports both Xtream and M3U tabs. Stream URLs stored directly on content rows; `get-stream-url` handler returns them for M3U sources without Xtream credential construction.
+- **International character search (partial)** — European diacritics handled via `any-ascii`. Arabic, Hebrew, Cyrillic, CJK not yet transliterated. Cross-language resolution is part of the Data & Search bucket.
 
-- **Semantic / embedding search not yet wired** — Schema and extension in place; worker not built. Phase 2.
+- **Semantic / embedding search not yet wired** — Schema and `sqlite-vec` extension in place; worker not built. Deferred — will be reconsidered as part of the Data & Search rework.
 
-- **EPG timeshift timeline not yet implemented** — XMLTV parser, EPG strip, and Full Guide panel are done. Timeshift bottom bar in fullscreen player (Phase 1, task 1.4) is still pending.
+- **EPG timeshift timeline not yet implemented** — XMLTV parser, EPG strip, and Full Guide panel are done. Timeshift bottom bar in the fullscreen player is pending (Experience polish bucket).
 
-- **Episodes not indexed in FTS5** — `series:get-info` upserts episodes into `content` but not `content_fts`. Episode titles not searchable by keyword. Low priority (users search series not episodes).
+- **Episodes not indexed in FTS5** — `series:get-info` upserts episodes into `content` but not `content_fts`. Low priority (users search series, not episodes).
 
 - **Continue Watching not browsable in live/films/series views** — Works on Home and Library only.
 
-- **Capacitor / mobile not yet implemented** — Phase 3.
-
-## Known UI bugs (open — not yet fixed)
-
-- **`SearchBar.tsx` is a dead component** — Not rendered anywhere; superseded by `CommandBar.tsx`. Safe to delete but left in place.
+- **Capacitor / mobile not yet implemented** — Multi-platform reach bucket.
 
 ## Data quirks to be aware of
 

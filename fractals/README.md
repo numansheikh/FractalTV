@@ -4,7 +4,7 @@ A local-first IPTV client — like Plex, but for IPTV streams you already have a
 
 Add your Xtream Codes accounts once. Fractals merges all sources into a single unified library, enriches everything with metadata from TMDB, and lets you search across all content by title, actor, director, genre, or free text.
 
-**Status:** Active development on branch `rewrite/new-architecture`. Core features (browsing, search, playback, enrichment, user data) are functional. Multi-platform and EPG support are next.
+**Status:** Active development on `master`. Phase 0 (core scaffold) + Phase 1 (UX refinement) + Phase 2 (V2 canonical/streams data model cutover) complete. Phase 3 (multi-platform) not yet started. See `../BACKLOG.md` for the full roadmap.
 
 ---
 
@@ -102,10 +102,12 @@ CLAUDE.md          Full architecture, design language, conventions
 
 ## Roadmap
 
-- **Phase 7:** EPG / program guide + catchup/timeshift playback
-- **Phase 8:** Semantic search with local embeddings (transformers.js + sqlite-vec)
-- **Phase 9:** M3U/M3U8 playlist support
-- **Phase 11:** Multi-platform — Android (Capacitor), iOS, Android TV, Samsung Tizen
-- **Library tab:** Dedicated view for favorites, watchlist, continue watching, history
+Active work is organized into five buckets in [`../BACKLOG.md`](../BACKLOG.md):
+
+1. **Data & Search** *(next pick)* — canonical data model + search redesign + TMDB enrichment. Detailed scoping in `~/.claude/plans/scalable-leaping-cake.md`.
+2. **Product shape** — three-tier split (M3U Player / Xtream Lite / Fractals Pro) + M3U parsing improvements. Business plan in `docs/business-plan.md`.
+3. **Multi-platform reach** — Android, iOS, Android TV, Samsung Tizen via Capacitor. Full plan in `docs/multi-platform-strategy.md`.
+4. **Experience polish** — Live TV nav breadcrumb, series full-page view, player fixes.
+5. **Tech health** — QA cycle 2 follow-ups (type safety, security, hardening). See `docs/qa-cycle-2.md`.
 
 The legacy Angular reference implementation lives in `../legacy/`.
