@@ -2,6 +2,7 @@ import { useState, useMemo, useRef, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useAppStore } from '@/stores/app.store'
 import { useSourcesStore } from '@/stores/sources.store'
+import { useSearchStore } from '@/stores/search.store'
 import { buildColorMapFromSources } from '@/lib/sourceColors'
 import { api } from '@/lib/api'
 import { ActiveView } from '@/lib/types'
@@ -21,7 +22,11 @@ const ACCENT_MAP: Partial<Record<ActiveView, string>> = {
 type SortMode = 'count' | 'az' | 'za'
 
 export function BrowseSidebar() {
-  const { activeView, categoryFilter, setCategoryFilter, selectedSourceIds } = useAppStore()
+  const { activeView, categoryFilters, setCategoryFilter, selectedSourceIds } = useAppStore()
+  const categoryFilter = categoryFilters[activeView] ?? null
+  const { queries, lastQueries, setQuery } = useSearchStore()
+  const query = queries[activeView] ?? ''
+  const lastQuery = lastQueries[activeView] ?? ''
   const { sources } = useSourcesStore()
   const type = TYPE_MAP[activeView]
   const accent = ACCENT_MAP[activeView] ?? 'var(--accent-interactive)'
@@ -179,25 +184,55 @@ export function BrowseSidebar() {
           <SidebarItem
             label={`All ${activeView === 'films' ? 'Movies' : activeView === 'series' ? 'Series' : 'Channels'}`}
             count={totalCount}
-            active={categoryFilter === null}
+            active={!query && categoryFilter === null}
             accent={accent}
             sourceColor={undefined}
-            onClick={() => setCategoryFilter(null)}
+            onClick={() => { if (query) setQuery(''); setCategoryFilter(null) }}
           />
           <SidebarItem
             label="Favorites"
-            active={categoryFilter === '__favorites__'}
+            active={!query && categoryFilter === '__favorites__'}
             accent={accent}
             sourceColor={undefined}
             icon={
               <svg width="10" height="10" viewBox="0 0 24 24"
-                fill={categoryFilter === '__favorites__' ? 'currentColor' : 'none'}
+                fill={!query && categoryFilter === '__favorites__' ? 'currentColor' : 'none'}
                 stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
                 <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
               </svg>
             }
-            onClick={() => setCategoryFilter('__favorites__')}
+            onClick={() => { if (query) setQuery(''); setCategoryFilter('__favorites__') }}
           />
+          {query && (
+            <SidebarItem
+              label="Search Results"
+              active={categoryFilter === null}
+              accent={accent}
+              sourceColor={undefined}
+              muted
+              icon={
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                  <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                </svg>
+              }
+              onClick={() => setCategoryFilter(null)}
+            />
+          )}
+          {!query && lastQuery && (
+            <SidebarItem
+              label={`Search (${lastQuery.replace(/^@/, '').trim().length > 18 ? lastQuery.replace(/^@/, '').trim().slice(0, 18) + '…' : lastQuery.replace(/^@/, '').trim()})`}
+              active={false}
+              accent={accent}
+              sourceColor={undefined}
+              muted
+              icon={
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                  <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                </svg>
+              }
+              onClick={() => { setQuery(lastQuery); setCategoryFilter(null) }}
+            />
+          )}
           <div style={{ height: 1, background: 'var(--border-subtle)', margin: '2px 0' }} />
         </div>
       )}
@@ -230,10 +265,10 @@ export function BrowseSidebar() {
   )
 }
 
-function SidebarItem({ label, count, active, accent, sourceColor, icon, onClick, buttonRef }: {
+function SidebarItem({ label, count, active, accent, sourceColor, icon, onClick, buttonRef, muted }: {
   label: string; count?: number; active: boolean; accent: string
   sourceColor?: string; icon?: React.ReactNode; onClick: () => void
-  buttonRef?: React.RefObject<HTMLButtonElement | null>
+  buttonRef?: React.RefObject<HTMLButtonElement | null>; muted?: boolean
 }) {
   return (
     <button
@@ -245,8 +280,9 @@ function SidebarItem({ label, count, active, accent, sourceColor, icon, onClick,
         background: active ? `color-mix(in srgb, ${accent} 10%, transparent)` : 'transparent',
         border: 'none',
         borderRight: active ? `2px solid ${accent}` : '2px solid transparent',
-        color: active ? accent : 'var(--text-1)',
-        fontSize: 12,
+        color: active ? accent : muted ? 'var(--text-2)' : 'var(--text-1)',
+        fontSize: muted ? 11 : 12,
+        fontStyle: muted ? 'italic' : 'normal',
         fontWeight: active ? 600 : 400,
         cursor: 'pointer',
         display: 'flex',

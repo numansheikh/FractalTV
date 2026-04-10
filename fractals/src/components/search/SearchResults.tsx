@@ -15,7 +15,7 @@ interface Props {
   onSelect: (item: ContentItem) => void
 }
 
-const INITIAL_CAP = 20
+const DISPLAY_CAP = 20   // max cards shown; caller fetches up to 200 for accurate count
 
 const SECTIONS = [
   { key: 'live'   as const, label: 'Live Channels', accentColor: 'var(--accent-live)',    isChannel: true  },
@@ -42,10 +42,9 @@ export function SearchResults({ live, movies, series, onSelect }: Props) {
 
         if (results.length === 0) return null
 
-        // N+1 trick: if we got more than INITIAL_CAP rows, there are more to fetch
-        const hasMore = results.length > INITIAL_CAP
-        const visible = results.slice(0, INITIAL_CAP)
-        const countLabel = hasMore ? `(${INITIAL_CAP}+)` : `(${results.length})`
+        const hasMore = results.length > DISPLAY_CAP
+        const visible = results.slice(0, DISPLAY_CAP)
+        const countLabel = `(${results.length}${results.length >= 200 ? '+' : ''})`
 
         const gridStyle: React.CSSProperties = {
           display: 'grid',

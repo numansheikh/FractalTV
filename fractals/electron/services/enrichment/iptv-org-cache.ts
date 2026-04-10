@@ -132,7 +132,8 @@ export interface IptvOrgCache {
   getCacheDir(): string
 }
 
-function getCacheDir(): string {
+function getCacheDir(override?: string): string {
+  if (override) return join(override, CACHE_DIR_NAME)
   return join(app.getPath('userData'), CACHE_DIR_NAME)
 }
 
@@ -179,8 +180,8 @@ async function fetchJson<T>(url: string): Promise<T> {
  * the resolved cache directory and in-memory state. Not a class per project
  * convention (functional style, no classes when avoidable).
  */
-export function createIptvOrgCache(): IptvOrgCache {
-  const dir = getCacheDir()
+export function createIptvOrgCache(userDataPath?: string): IptvOrgCache {
+  const dir = getCacheDir(userDataPath)
 
   // In-memory copies of each dataset, lazy-loaded from disk on first access.
   const mem: {

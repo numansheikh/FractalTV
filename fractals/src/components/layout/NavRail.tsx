@@ -1,6 +1,5 @@
 import { ActiveView } from '@/lib/types'
 import { useAppStore } from '@/stores/app.store'
-import { useSearchStore } from '@/stores/search.store'
 import { useTheme } from '@/hooks/useTheme'
 
 const NAV_ITEMS: { id: ActiveView; label: string; shortcut: string }[] = [
@@ -26,7 +25,6 @@ interface Props {
 
 export function NavRail({ onOpenSources, onOpenSettings }: Props) {
   const { activeView, setView } = useAppStore()
-  const { setQuery } = useSearchStore()
   const { theme, setTheme } = useTheme()
 
   return (
@@ -58,7 +56,6 @@ export function NavRail({ onOpenSources, onOpenSettings }: Props) {
             inactiveColor={accent}
             onClick={() => {
               setView(item.id)
-              if (item.id === 'home') setQuery('')
               if (item.id !== 'live') useAppStore.getState().setSplitViewChannel(null)
             }}
           >

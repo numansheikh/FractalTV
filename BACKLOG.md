@@ -4,11 +4,11 @@ High-level buckets. Each bucket has a status, notes, and a pointer to the detail
 
 ---
 
-## 1. Data & Search  *(next pick)*
+## 1. Data & Search  *(in progress)*
 
 Canonical data model + search redesign + TMDB enrichment are one tightly-coupled effort. The sketch (provider layer + canonical identity + rich meta) is locked; the implementation split has been scoped.
 
-**Status:** Discussion/scoping phase. Scope breakdown complete, waiting on blocker decisions.
+**Status:** In progress via current queue.
 
 **Detailed plan:** `~/.claude/plans/scalable-leaping-cake.md`
 **Target visual:** `fractals/docs/data-model-diagram.html` (two-layer: provider streams → canonical → TMDB enrichment, free/pro tiers)
@@ -43,7 +43,23 @@ Three-tier split of the same React codebase via feature flags, plus M3U format w
 
 ---
 
-## 3. Multi-platform reach  *(not started)*
+## 3. Source management  *(small bucket)*
+
+Gaps and improvements to the add/sync source flow surfaced through real usage.
+
+**Status:** Items scoped, not started.
+
+**Items:**
+- **Sync fast-pass / background canonical split** — streams table populated first (dialog closes faster), canonical built in background with a status indicator
+- **Enrichment implementation assessment** — verify IMDb + Wikidata providers are actually implemented end-to-end
+- **Cancel button on add source dialog** — stops sync mid-flight but source stays in DB, restartable
+- **Gaps from usage** — catch-all for friction points found while using the add-source flow
+
+**Next action:** Pick off items one at a time; none depend on bucket 1 finishing.
+
+---
+
+## 4. Multi-platform reach  *(not started)*
 
 Desktop (Electron) is stable. Expansion plan covers Android phone/tablet, Android TV / Fire TV, iOS, Samsung Tizen, PWA.
 
@@ -60,7 +76,7 @@ Desktop (Electron) is stable. Expansion plan covers Android phone/tablet, Androi
 
 ---
 
-## 4. Experience polish  *(independent, small-to-medium)*
+## 5. Experience polish  *(independent, small-to-medium)*
 
 UX and player fixes that don't depend on the bigger architectural work. Each item is self-contained and can be picked off in its own session.
 
@@ -76,7 +92,7 @@ UX and player fixes that don't depend on the bigger architectural work. Each ite
 
 ---
 
-## 5. Tech health  *(backlog)*
+## 6. Tech health  *(backlog)*
 
 Quality and hardening debt surfaced by the QA cycle 2 audit. Not blocking product work but worth chipping away at.
 
@@ -104,4 +120,4 @@ Quality and hardening debt surfaced by the QA cycle 2 audit. Not blocking produc
 ## Cross-bucket notes
 
 - **Phase state:** Phase 0 (core) + Phase 1 (UX refinement) + Phase 2 (V2 data model cutover) all complete as of 2026-04-10. Phase 3 (multi-platform) not started.
-- **Next pick:** Data & Search (bucket 1). Blocker resolution first, then implementation plan.
+- **Next pick:** Data & Search (bucket 1). In progress via current queue.

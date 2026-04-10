@@ -13,18 +13,15 @@ import { BrowseSidebar } from '@/components/browse/BrowseSidebar'
 
 // Lazy imports — will be provided by agents
 let VirtualGrid: any = null
-let SearchResults: any = null
 let LibraryView: any = null
 
 async function loadComponents() {
   try {
-    const [g, s, l] = await Promise.all([
+    const [g, l] = await Promise.all([
       import('@/components/grids/VirtualGrid').catch(() => null),
-      import('@/components/search/SearchResults').catch(() => null),
       import('@/components/library/LibraryView').catch(() => null),
     ])
     if (g) VirtualGrid = g.VirtualGrid
-    if (s) SearchResults = s.SearchResults
     if (l) LibraryView = l.LibraryView
   } catch {}
 }
@@ -40,8 +37,6 @@ const VIEW_TYPE: Record<ActiveView, 'live' | 'movie' | 'series' | undefined> = {
 
 const BROWSE_VIEWS: ActiveView[] = ['live', 'films', 'series']
 
-const SEARCH_INIT = 21   // N+1: fetch one extra to detect "has more"
-const SEARCH_INITIAL_CAP = 20 // max displayed before "Show all"
 
 interface Props {
   sort: string
@@ -66,8 +61,10 @@ function navBtnStyle(disabled: boolean): React.CSSProperties {
 }
 
 export function ContentArea({ sort, onSelectContent, onAddSource }: Props) {
-  const { activeView, typeFilter, categoryFilter, selectedSourceIds, viewMode, pageSize, setChannelSurfContext } = useAppStore()
-  const { query } = useSearchStore()
+  const { activeView, typeFilter, categoryFilters, selectedSourceIds, viewMode, pageSize, setChannelSurfContext } = useAppStore()
+  const categoryFilter = categoryFilters[activeView] ?? null
+  const { queries } = useSearchStore()
+  const query = queries[activeView] ?? ''
   const { loadBulk } = useUserStore()
   const { sources } = useSourcesStore()
   const [ready, setReady] = useState(false)
@@ -95,14 +92,19 @@ export function ContentArea({ sort, onSelectContent, onAddSource }: Props) {
     queryKey: ['browse-favorites', contentType],
     queryFn: () => api.user.favorites({ type: contentType as 'live' | 'movie' | 'series' | undefined }),
     staleTime: 30_000,
-    enabled: !query && isFavoritesFilter && activeView !== 'library' && activeView !== 'home',
+    enabled: isFavoritesFilter && activeView !== 'library' && activeView !== 'home',
   })
-  const favData = selectedSourceIds.length > 0
-    ? allFavData.filter((item) => {
+  const favData = allFavData
+    .filter((item) => {
+      if (selectedSourceIds.length > 0) {
         const srcId = (item as any).primarySourceId ?? (item as any).primary_source_id ?? (item as any).source_ids ?? (item as any).id?.split(':')[0]
-        return srcId ? selectedSourceIds.includes(srcId) : true
-      })
-    : allFavData
+        if (srcId && !selectedSourceIds.includes(srcId)) return false
+      }
+      if (query) {
+        return item.title?.toLowerCase().includes(query.replace(/^@/, '').trim().toLowerCase())
+      }
+      return true
+    })
 
   // Browse query — page-based offset
   const { data: browseData, isLoading: browseLoading } = useQuery({
@@ -121,78 +123,70 @@ export function ContentArea({ sort, onSelectContent, onAddSource }: Props) {
 
   const isLoading = isFavoritesFilter ? favLoading : browseLoading
 
-  // Per-type search limits — initial N+1 to detect "has more"
-  const [liveSearchLimit,   setLiveSearchLimit]   = useState(SEARCH_INIT)
-  const [movieSearchLimit,  setMovieSearchLimit]  = useState(SEARCH_INIT)
-  const [seriesSearchLimit, setSeriesSearchLimit] = useState(SEARCH_INIT)
-  useEffect(() => {
-    setLiveSearchLimit(SEARCH_INIT)
-    setMovieSearchLimit(SEARCH_INIT)
-    setSeriesSearchLimit(SEARCH_INIT)
-  }, [query])
-
-  // Navigation callbacks for "Show all" — navigate to view + clear search
-  const { setView } = useAppStore()
-  const handleShowAllLive = useCallback(() => {
-    setView('live')
-  }, [setView])
-  const handleShowAllMovies = useCallback(() => {
-    setView('films')
-  }, [setView])
-  const handleShowAllSeries = useCallback(() => {
-    setView('series')
-  }, [setView])
-
   const searchBase = {
     query,
     categoryName: categoryFilter && categoryFilter !== '__favorites__' ? categoryFilter : undefined,
     sourceIds: selectedSourceIds.length ? selectedSourceIds : undefined,
   }
-  const { data: liveSearchResults   = [] } = useQuery({
-    queryKey: ['search', query, 'live',   categoryFilter, selectedSourceIds, liveSearchLimit],
-    queryFn: () => api.search.query({ ...searchBase, type: 'live',   limit: liveSearchLimit }),
-    enabled: !!query && (!contentType || contentType === 'live'),
+  const searchOffset = (page - 1) * pageSize
+  const serverSearchEnabled = !!query && !isFavoritesFilter
+  const { data: liveSearchData, isFetching: liveSearchFetching } = useQuery({
+    queryKey: ['search', query, 'live',   categoryFilter, selectedSourceIds, page, pageSize],
+    queryFn: () => api.search.query({ ...searchBase, type: 'live',   limit: pageSize, offset: searchOffset }),
+    enabled: serverSearchEnabled && (!contentType || contentType === 'live'),
     staleTime: 10_000,
   })
-  const { data: movieSearchResults  = [] } = useQuery({
-    queryKey: ['search', query, 'movie',  categoryFilter, selectedSourceIds, movieSearchLimit],
-    queryFn: () => api.search.query({ ...searchBase, type: 'movie',  limit: movieSearchLimit }),
-    enabled: !!query && (!contentType || contentType === 'movie'),
+  const { data: movieSearchData, isFetching: movieSearchFetching } = useQuery({
+    queryKey: ['search', query, 'movie',  categoryFilter, selectedSourceIds, page, pageSize],
+    queryFn: () => api.search.query({ ...searchBase, type: 'movie',  limit: pageSize, offset: searchOffset }),
+    enabled: serverSearchEnabled && (!contentType || contentType === 'movie'),
     staleTime: 10_000,
   })
-  const { data: seriesSearchResults = [] } = useQuery({
-    queryKey: ['search', query, 'series', categoryFilter, selectedSourceIds, seriesSearchLimit],
-    queryFn: () => api.search.query({ ...searchBase, type: 'series', limit: seriesSearchLimit }),
-    enabled: !!query && (!contentType || contentType === 'series'),
+  const { data: seriesSearchData, isFetching: seriesSearchFetching } = useQuery({
+    queryKey: ['search', query, 'series', categoryFilter, selectedSourceIds, page, pageSize],
+    queryFn: () => api.search.query({ ...searchBase, type: 'series', limit: pageSize, offset: searchOffset }),
+    enabled: serverSearchEnabled && (!contentType || contentType === 'series'),
     staleTime: 10_000,
   })
-  const allSearchResults = query
-    ? ([...liveSearchResults, ...movieSearchResults, ...seriesSearchResults] as ContentItem[])
-    : []
+  const isSearchFetching = serverSearchEnabled && (liveSearchFetching || movieSearchFetching || seriesSearchFetching)
 
-  const items: ContentItem[] = query
-    ? allSearchResults
-    : isFavoritesFilter
-      ? favData
+  const searchItems = query
+    ? ([
+        ...(liveSearchData?.items ?? []),
+        ...(movieSearchData?.items ?? []),
+        ...(seriesSearchData?.items ?? []),
+      ] as ContentItem[])
+    : []
+  const searchTotal = (liveSearchData?.total ?? 0) + (movieSearchData?.total ?? 0) + (seriesSearchData?.total ?? 0)
+  // When scoped to a single type, use that type's total directly
+  const singleSearchTotal = contentType === 'live' ? (liveSearchData?.total ?? 0)
+    : contentType === 'movie' ? (movieSearchData?.total ?? 0)
+    : contentType === 'series' ? (seriesSearchData?.total ?? 0)
+    : searchTotal
+
+  const liveSearchResults = liveSearchData?.items ?? []
+
+  const items: ContentItem[] = isFavoritesFilter
+    ? favData  // favData already has query filter applied client-side
+    : query
+      ? searchItems
       : ((browseData?.items ?? []) as ContentItem[])
-  const total: number = query ? items.length : isFavoritesFilter ? favData.length : (browseData?.total ?? 0)
+  const total: number = isFavoritesFilter ? favData.length : query ? singleSearchTotal : (browseData?.total ?? 0)
 
   useEffect(() => {
     if (items.length > 0) loadBulk(items.map((i) => i.id), isFavoritesFilter)
   }, [items, loadBulk, isFavoritesFilter])
 
-  const isEmpty = !isLoading && items.length === 0
+  const isEmpty = !isLoading && !isSearchFetching && items.length === 0
 
   // Wrap select — live items set surf context from whatever list is currently displayed
   const handleSelect = useCallback((item: ContentItem) => {
     if (item.type === 'live') {
       if (query) {
-        // Search mode: use capped search results
-        const liveForSurf = (liveSearchResults as ContentItem[]).slice(
-          0, liveSearchLimit > SEARCH_INIT ? liveSearchResults.length : SEARCH_INITIAL_CAP
-        )
+        // Search mode: surf within current page of live results
+        const liveForSurf = liveSearchResults as ContentItem[]
         const idx = liveForSurf.findIndex((i: ContentItem) => i.id === item.id)
-        setChannelSurfContext(liveForSurf, idx, null)
+        setChannelSurfContext(liveForSurf, idx, 'search', query)
       } else {
         // Browse/favorites mode: use current displayed items as surf list
         const currentItems = isFavoritesFilter
@@ -204,7 +198,7 @@ export function ContentArea({ sort, onSelectContent, onAddSource }: Props) {
       }
     }
     onSelectContent(item)
-  }, [query, liveSearchResults, liveSearchLimit, isFavoritesFilter, favData, browseData, onSelectContent, setChannelSurfContext])
+  }, [query, liveSearchResults, isFavoritesFilter, favData, browseData, onSelectContent, setChannelSurfContext])
 
   // Library view
   if (activeView === 'library') {
@@ -222,26 +216,6 @@ export function ContentArea({ sort, onSelectContent, onAddSource }: Props) {
   // Home view — always render HomeView; it handles search inline so the bottom bar never unmounts
   if (activeView === 'home') {
     return <HomeView onSelectContent={onSelectContent} />
-  }
-
-  // Search results (from non-home views)
-  if (query) {
-    return (
-      <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-        <FilterBar itemCount={total > 0 ? total : undefined} />
-        <div style={{ flex: 1, overflowY: 'auto' }}>
-          {ready && SearchResults
-            ? <SearchResults
-                live={{   results: liveSearchResults   as ContentItem[], onShowAll: handleShowAllLive   }}
-                movies={{  results: movieSearchResults  as ContentItem[], onShowAll: handleShowAllMovies  }}
-                series={{  results: seriesSearchResults as ContentItem[], onShowAll: handleShowAllSeries }}
-                onSelect={handleSelect}
-              />
-            : <FallbackGrid items={items} onSelect={handleSelect} />
-          }
-        </div>
-      </div>
-    )
   }
 
   // Browse views (live / films / series)
@@ -263,6 +237,25 @@ export function ContentArea({ sort, onSelectContent, onAddSource }: Props) {
           )}
           {isEmpty && !isLoading && (() => {
             const hasSources = sources.filter((s) => !s.disabled).length > 0
+            if (isFavoritesFilter && query) {
+              const typeLabel = activeView === 'live' ? 'channels' : activeView === 'films' ? 'movies' : 'series'
+              return (
+                <EmptyState
+                  icon={<HeartIcon />}
+                  title="No matching favorites"
+                  description={`No favorited ${typeLabel} match "${query.replace(/^@/, '').trim()}".`}
+                />
+              )
+            }
+            if (query && !isFavoritesFilter) {
+              return (
+                <EmptyState
+                  icon={<PlayIcon />}
+                  title="No results"
+                  description={`Nothing matched "${query}" in this view.`}
+                />
+              )
+            }
             if (!hasSources) {
               return (
                 <EmptyState
@@ -324,7 +317,7 @@ export function ContentArea({ sort, onSelectContent, onAddSource }: Props) {
                   : <FallbackGrid items={items} onSelect={handleSelect} />
                 }
               </div>
-              {/* Pagination bar — only when total exceeds threshold */}
+              {/* Pagination bar — shown when total exceeds page size */}
               {total > pageSize && (() => {
                 const totalPages = Math.ceil(total / pageSize)
                 return (

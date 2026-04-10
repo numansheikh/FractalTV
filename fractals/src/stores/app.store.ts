@@ -17,10 +17,11 @@ interface AppState {
   splitViewChannel: ContentItem | null
   channelSurfList: ContentItem[]
   channelSurfIndex: number
+  surfSearchQuery: string | null
 
-  // Filters (persisted across navigation)
+  // Filters (persisted per-view)
   typeFilter: ContentType
-  categoryFilter: string | null
+  categoryFilters: Record<string, string | null>
   selectedSourceIds: string[]
 
   // View mode (grid vs list — live TV only)
@@ -54,8 +55,8 @@ interface AppState {
   setPlayingContent: (item: ContentItem | null) => void
   setShowSettings: (v: boolean) => void
   setSplitViewChannel: (item: ContentItem | null) => void
-  surfContextAction: 'home-discover' | 'home-channels' | 'browse-favorites' | null
-  setChannelSurfContext: (list: ContentItem[], index: number, action?: 'home-discover' | 'home-channels' | 'browse-favorites' | null) => void
+  surfContextAction: 'home-discover' | 'home-channels' | 'browse-favorites' | 'search' | null
+  setChannelSurfContext: (list: ContentItem[], index: number, action?: 'home-discover' | 'home-channels' | 'browse-favorites' | 'search' | null, searchQuery?: string | null) => void
   surfChannel: (dir: 1 | -1) => ContentItem | null
   setShowSources: (v: boolean) => void
   setTypeFilter: (type: ContentType) => void
@@ -84,8 +85,9 @@ export const useAppStore = create<AppState>()(
       channelSurfList: [],
       channelSurfIndex: -1,
       surfContextAction: null,
+      surfSearchQuery: null,
       typeFilter: 'all',
-      categoryFilter: null,
+      categoryFilters: {},
       selectedSourceIds: [],
       viewMode: 'grid',
       pageSize: 60,
@@ -97,8 +99,8 @@ export const useAppStore = create<AppState>()(
       controlsMode: 'auto-3',
       playerMode: 'hidden',
 
-      setView: (activeView) => set((s) => ({ activeView, previousView: s.activeView, categoryFilter: null })),
-      goBack: () => set((s) => ({ activeView: s.previousView ?? 'home', previousView: null, categoryFilter: null })),
+      setView: (activeView) => set((s) => ({ activeView, previousView: s.activeView })),
+      goBack: () => set((s) => ({ activeView: s.previousView ?? 'home', previousView: null })),
       setViewMode: (viewMode) => set({ viewMode }),
       setPageSize: (pageSize) => set({ pageSize }),
       setSort: (sort) => set({ sort }),
@@ -106,7 +108,7 @@ export const useAppStore = create<AppState>()(
       setPlayingContent: (playingContent) => set({ playingContent }),
       setShowSettings: (showSettings) => set({ showSettings }),
       setSplitViewChannel: (splitViewChannel) => set({ splitViewChannel }),
-      setChannelSurfContext: (channelSurfList, channelSurfIndex, action) => set({ channelSurfList, channelSurfIndex, surfContextAction: action ?? null }),
+      setChannelSurfContext: (channelSurfList, channelSurfIndex, action, searchQuery) => set({ channelSurfList, channelSurfIndex, surfContextAction: action ?? null, surfSearchQuery: searchQuery ?? null }),
       surfChannel: (dir) => {
         let result: ContentItem | null = null
         set((s) => {
@@ -121,8 +123,8 @@ export const useAppStore = create<AppState>()(
         return result
       },
       setShowSources: (showSources) => set({ showSources }),
-      setTypeFilter: (typeFilter) => set({ typeFilter, categoryFilter: null }),
-      setCategoryFilter: (categoryFilter) => set({ categoryFilter }),
+      setTypeFilter: (typeFilter) => set({ typeFilter }),
+      setCategoryFilter: (cat) => set((s) => ({ categoryFilters: { ...s.categoryFilters, [s.activeView]: cat } })),
       toggleSourceFilter: (id) =>
         set((s) => ({
           selectedSourceIds: s.selectedSourceIds.includes(id)
@@ -130,7 +132,7 @@ export const useAppStore = create<AppState>()(
             : [...s.selectedSourceIds, id],
         })),
       clearSourceFilter: () => set({ selectedSourceIds: [] }),
-      clearFilters: () => set({ typeFilter: 'all', categoryFilter: null, selectedSourceIds: [] }),
+      clearFilters: () => set({ typeFilter: 'all', categoryFilters: {}, selectedSourceIds: [] }),
       setHomeMode: (homeMode) => set({ homeMode }),
       setHomeStripSize: (homeStripSize) => set({ homeStripSize }),
       setHasSeenChannelsModePrompt: (hasSeenChannelsModePrompt) => set({ hasSeenChannelsModePrompt }),
@@ -142,7 +144,7 @@ export const useAppStore = create<AppState>()(
       name: 'fractals-app',
       partialize: (s) => ({
         activeView: s.activeView,
-        categoryFilter: s.categoryFilter,
+        categoryFilters: s.categoryFilters,
         viewMode: s.viewMode,
         pageSize: s.pageSize,
         sort: s.sort,

@@ -283,6 +283,32 @@ function createTables(db: Database.Database) {
       PRIMARY KEY (stream_id, category_id)
     );
 
+    -- Series parents — not playable streams, so they can't live in the
+    -- streams table (CHECK constraint bans type='series'). They sit in a
+    -- sibling table keyed the same way ({sourceId}:series:{series_id}) and
+    -- FK into canonical_series for identity. Episodes remain in streams
+    -- with type='episode' + episode_id FK.
+    CREATE TABLE IF NOT EXISTS series_sources (
+      id                  TEXT PRIMARY KEY,              -- '{sourceId}:series:{series_id}'
+      source_id           TEXT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+      canonical_series_id INTEGER NOT NULL REFERENCES canonical_series(id) ON DELETE CASCADE,
+      series_external_id  TEXT NOT NULL,
+      title               TEXT NOT NULL,
+      thumbnail_url       TEXT,
+      category_id         TEXT,
+      language_hint       TEXT,
+      origin_hint         TEXT,
+      quality_hint        TEXT,
+      year_hint           INTEGER,
+      added_at            INTEGER NOT NULL DEFAULT (unixepoch())
+    );
+
+    CREATE TABLE IF NOT EXISTS series_source_categories (
+      series_source_id TEXT NOT NULL REFERENCES series_sources(id) ON DELETE CASCADE,
+      category_id      TEXT NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+      PRIMARY KEY (series_source_id, category_id)
+    );
+
     -- ─── User data — four tables, each with exactly its own columns ───
     -- Q4: movies & series favorite/watchlist/rating at canonical level,
     --     watch progress per stream, live channel favorite per stream.
@@ -358,6 +384,10 @@ function createTables(db: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_streams_vod_link        ON streams(canonical_vod_id);
     CREATE INDEX IF NOT EXISTS idx_streams_episode_link    ON streams(episode_id);
     CREATE INDEX IF NOT EXISTS idx_streams_live_link       ON streams(canonical_live_id);
+
+    CREATE INDEX IF NOT EXISTS idx_series_sources_source    ON series_sources(source_id);
+    CREATE INDEX IF NOT EXISTS idx_series_sources_canonical ON series_sources(canonical_series_id);
+    CREATE INDEX IF NOT EXISTS idx_series_sources_category  ON series_sources(category_id, source_id);
 
     -- Categories + EPG (unchanged from V2)
     CREATE INDEX IF NOT EXISTS idx_sc_category             ON stream_categories(category_id);

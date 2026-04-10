@@ -21,6 +21,7 @@ export const api = {
     toggleDisabled: (sourceId: string) => ipcRenderer.invoke('sources:toggle-disabled', sourceId),
     setColor: (sourceId: string, colorIndex: number) => ipcRenderer.invoke('sources:set-color', sourceId, colorIndex),
     sync: (sourceId: string) => ipcRenderer.invoke('sources:sync', sourceId),
+    cancelSync: (sourceId: string) => ipcRenderer.invoke('sources:sync:cancel', sourceId),
     accountInfo: (sourceId: string) => ipcRenderer.invoke('sources:account-info', sourceId),
     startupCheck: () => ipcRenderer.invoke('sources:startup-check'),
     totalCount: () => ipcRenderer.invoke('sources:total-count'),
@@ -104,15 +105,10 @@ export const api = {
     detectExternal: () => ipcRenderer.invoke('player:detect-external'),
   },
 
-  // TMDB enrichment
+  // V3 keyless metadata enrichment (IMDb suggest + Wikidata for VoD, iptv-org for Live)
   enrichment: {
-    setApiKey: (key: string) => ipcRenderer.invoke('enrichment:set-api-key', key),
     status: () => ipcRenderer.invoke('enrichment:status'),
-    start: (apiKey?: string) => ipcRenderer.invoke('enrichment:start', apiKey),
-    enrichSingle: (contentId: string) => ipcRenderer.invoke('enrichment:enrich-single', contentId),
-    enrichManual: (args: { contentId: string; title: string; year?: number }) => ipcRenderer.invoke('enrichment:enrich-manual', args),
-    searchTmdb: (args: { title: string; year?: number; type: 'movie' | 'series' }) => ipcRenderer.invoke('enrichment:search-tmdb', args),
-    enrichById: (args: { contentId: string; tmdbId: number }) => ipcRenderer.invoke('enrichment:enrich-by-id', args),
+    start: () => ipcRenderer.invoke('enrichment:start'),
   },
 
   // EPG

@@ -27,16 +27,19 @@ export function AddSourceModal({ onAdded, onCancel }: Props) {
   const [colorIndex, setColorIndex] = useState<number>(() => useSourcesStore.getState().sources.length % 8)
   const [testResult, setTestResult] = useState<TestResult | null>(null)
   const [syncMessage, setSyncMessage] = useState('')
+  const [syncingSourceId, setSyncingSourceId] = useState<string | null>(null)
   const [error, setError] = useState('')
 
   const sourceCount = useSourcesStore(s => s.sources.length)
 
   // Escape to close (capture phase so it doesn't leak)
+  // During syncing: Escape = run in background (dismiss, keep syncing)
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.stopImmediatePropagation()
-        if (step !== 'syncing' && step !== 'done') onCancel()
+        if (step === 'done') return
+        onCancel()
       }
     }
     window.addEventListener('keydown', handler, true)
@@ -138,6 +141,7 @@ export function AddSourceModal({ onAdded, onCancel }: Props) {
     }
 
     setSyncMessage('Starting sync…')
+    setSyncingSourceId(sourceId)
     await api.sources.setColor(sourceId, colorIndex)
 
     const unsub = api.on('sync:progress', (progress: any) => {
@@ -184,12 +188,12 @@ export function AddSourceModal({ onAdded, onCancel }: Props) {
   }
 
   const switchMode = (m: SourceMode) => {
-    if (step === 'syncing' || step === 'done') return
+    if (step === 'done') return
     setMode(m)
     resetForm()
   }
 
-  const isBusy = step === 'syncing' || step === 'done'
+  const isBusy = step === 'done'
 
   return (
     <div
@@ -422,66 +426,105 @@ export function AddSourceModal({ onAdded, onCancel }: Props) {
 
           {/* Action buttons */}
           <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-            <button
-              type="button"
-              onClick={onCancel}
-              disabled={isBusy}
-              style={{
-                flex: 1, padding: '8px 0', borderRadius: 7, fontSize: 11, fontWeight: 500,
-                background: 'transparent', border: '1px solid var(--border-default)',
-                color: 'var(--text-1)', cursor: 'pointer', transition: 'all 0.1s',
-                fontFamily: 'var(--font-ui)',
-                opacity: isBusy ? 0.4 : 1,
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-0)' }}
-              onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-1)' }}
-            >
-              Cancel
-            </button>
-
-            {step === 'error' ? (
-              <button
-                type="button"
-                onClick={resetForm}
-                style={{
-                  flex: 1, padding: '8px 0', borderRadius: 7, fontSize: 11, fontWeight: 600,
-                  background: 'var(--bg-3)', border: '1px solid var(--border-default)',
-                  color: 'var(--text-0)', cursor: 'pointer', transition: 'all 0.1s',
-                  fontFamily: 'var(--font-ui)',
-                }}
-              >
-                Try again
-              </button>
+            {step === 'syncing' ? (
+              <>
+                <button
+                  type="button"
+                  onClick={async () => { if (syncingSourceId) await api.sources.cancelSync(syncingSourceId); onCancel() }}
+                  style={{
+                    flex: 1, padding: '8px 0', borderRadius: 7, fontSize: 11, fontWeight: 500,
+                    background: 'transparent', border: '1px solid var(--border-default)',
+                    color: 'var(--accent-danger)', cursor: 'pointer',
+                    fontFamily: 'var(--font-ui)',
+                  }}
+                >
+                  Cancel sync
+                </button>
+                <button
+                  type="button"
+                  onClick={onCancel}
+                  style={{
+                    flex: 1, padding: '8px 0', borderRadius: 7, fontSize: 11, fontWeight: 600,
+                    background: 'var(--bg-3)', border: '1px solid var(--border-default)',
+                    color: 'var(--text-0)', cursor: 'pointer',
+                    fontFamily: 'var(--font-ui)',
+                  }}
+                >
+                  Run in background
+                </button>
+              </>
+            ) : step === 'error' ? (
+              <>
+                <button
+                  type="button"
+                  onClick={onCancel}
+                  style={{
+                    flex: 1, padding: '8px 0', borderRadius: 7, fontSize: 11, fontWeight: 500,
+                    background: 'transparent', border: '1px solid var(--border-default)',
+                    color: 'var(--text-1)', cursor: 'pointer',
+                    fontFamily: 'var(--font-ui)',
+                  }}
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  onClick={resetForm}
+                  style={{
+                    flex: 1, padding: '8px 0', borderRadius: 7, fontSize: 11, fontWeight: 600,
+                    background: 'var(--bg-3)', border: '1px solid var(--border-default)',
+                    color: 'var(--text-0)', cursor: 'pointer',
+                    fontFamily: 'var(--font-ui)',
+                  }}
+                >
+                  Try again
+                </button>
+              </>
             ) : (
               <>
                 <button
                   type="button"
+                  onClick={onCancel}
+                  disabled={step === 'done'}
+                  style={{
+                    flex: 1, padding: '8px 0', borderRadius: 7, fontSize: 11, fontWeight: 500,
+                    background: 'transparent', border: '1px solid var(--border-default)',
+                    color: 'var(--text-1)', cursor: 'pointer',
+                    fontFamily: 'var(--font-ui)',
+                    opacity: step === 'done' ? 0.4 : 1,
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-0)' }}
+                  onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-1)' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
                   onClick={handleTest}
-                  disabled={!canTest || step === 'testing' || isBusy}
+                  disabled={!canTest || step === 'testing'}
                   style={{
                     flex: 1, padding: '8px 0', borderRadius: 7, fontSize: 11, fontWeight: 500,
                     background: 'var(--bg-3)', border: '1px solid var(--border-default)',
-                    color: 'var(--text-0)', cursor: 'pointer', transition: 'all 0.1s',
+                    color: 'var(--text-0)', cursor: 'pointer',
                     fontFamily: 'var(--font-ui)',
-                    opacity: (!canTest || step === 'testing' || isBusy) ? 0.4 : 1,
+                    opacity: (!canTest || step === 'testing') ? 0.4 : 1,
                   }}
                 >
                   {step === 'testing' ? 'Testing…' : 'Test'}
                 </button>
-
                 <button
                   type="button"
                   onClick={handleAdd}
-                  disabled={!canAdd || isBusy}
+                  disabled={!canAdd}
                   style={{
                     flex: 1, padding: '8px 0', borderRadius: 7, fontSize: 11, fontWeight: 600,
                     background: 'var(--accent-interactive)', border: 'none',
                     color: '#fff', cursor: 'pointer', transition: 'opacity 0.1s',
                     fontFamily: 'var(--font-ui)',
-                    opacity: (!canAdd || isBusy) ? 0.4 : 1,
+                    opacity: !canAdd ? 0.4 : 1,
                   }}
                   onMouseEnter={(e) => { if (canAdd) e.currentTarget.style.opacity = '0.88' }}
-                  onMouseLeave={(e) => { e.currentTarget.style.opacity = (!canAdd || isBusy) ? '0.4' : '1' }}
+                  onMouseLeave={(e) => { e.currentTarget.style.opacity = !canAdd ? '0.4' : '1' }}
                 >
                   Add
                 </button>

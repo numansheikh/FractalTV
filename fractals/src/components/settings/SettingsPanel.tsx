@@ -35,11 +35,6 @@ export function SettingsPanel({ onClose }: Props) {
   const { theme, font, setTheme, setFont } = useTheme()
   const [activeTab, setActiveTab] = useState<Tab>('appearance')
 
-  const [tmdbKey, setTmdbKey] = useState('')
-  useEffect(() => {
-    api.settings.get('tmdb_api_key').then((v) => { if (v) setTmdbKey(v) })
-  }, [])
-
   const [playerPref, setPlayerPref] = useState<PlayerPref>(
     () => (localStorage.getItem('fractals-player') as PlayerPref) ?? 'artplayer'
   )
@@ -70,7 +65,7 @@ export function SettingsPanel({ onClose }: Props) {
   }, [qc])
 
   const startEnrichment = useMutation({
-    mutationFn: () => api.enrichment.start(tmdbKey || undefined),
+    mutationFn: () => api.enrichment.start(),
     onSuccess: (res: any) => setEnrichMsg(res?.message ?? 'Started'),
     onError: (err) => setEnrichMsg(`Error: ${String(err)}`),
   })
@@ -134,7 +129,6 @@ export function SettingsPanel({ onClose }: Props) {
           {activeTab === 'data' && (
             <TabPane key="data">
               <DataTab
-                tmdbKey={tmdbKey} setTmdbKey={setTmdbKey}
                 enrichStatus={enrichStatus}
                 enrichProgress={enrichProgress}
                 enrichMsg={enrichMsg}
@@ -538,8 +532,7 @@ function PlayerNote({ title, color, children }: { title: string; color: string; 
 }
 
 /* ── Data tab ──────────────────────────────────────────────────── */
-function DataTab({ tmdbKey, setTmdbKey, enrichStatus, enrichProgress, enrichMsg, pct, isPending, onStart }: {
-  tmdbKey: string; setTmdbKey: (v: string) => void
+function DataTab({ enrichStatus, enrichProgress, enrichMsg, pct, isPending, onStart }: {
   enrichStatus: any; enrichProgress: { done: number; total: number } | null
   enrichMsg: string | null; pct: number | null; isPending: boolean
   onStart: () => void
@@ -551,29 +544,6 @@ function DataTab({ tmdbKey, setTmdbKey, enrichStatus, enrichProgress, enrichMsg,
   const [msg, setMsg] = useState<string | null>(null)
   const [importMsg, setImportMsg] = useState<string | null>(null)
   const [includeUserData, setIncludeUserData] = useState(false)
-  const [tmdbSaving, setTmdbSaving] = useState(false)
-  const [tmdbSaveMsg, setTmdbSaveMsg] = useState<{ ok: boolean; text: string } | null>(null)
-
-  const handleSaveTmdbKey = async () => {
-    if (!tmdbKey.trim()) return
-    setTmdbSaving(true)
-    setTmdbSaveMsg(null)
-    try {
-      // Persist the key first (searchTmdb reads from persisted key)
-      await api.enrichment.setApiKey(tmdbKey.trim())
-      // Validate with a lightweight TMDB search
-      const res = await api.enrichment.searchTmdb({ title: 'test', type: 'movie' })
-      if (res && (res as any).success === false) {
-        setTmdbSaveMsg({ ok: false, text: (res as any).error ?? 'Invalid API key' })
-      } else {
-        setTmdbSaveMsg({ ok: true, text: 'Key validated and saved' })
-      }
-    } catch (e) {
-      setTmdbSaveMsg({ ok: false, text: `Validation failed: ${String(e)}` })
-    } finally {
-      setTmdbSaving(false)
-    }
-  }
 
   const run = async (action: 'history' | 'favorites' | 'all' | 'prefs' | 'factory') => {
     setBusy(true)
@@ -688,7 +658,7 @@ function DataTab({ tmdbKey, setTmdbKey, enrichStatus, enrichProgress, enrichMsg,
       {/* ── Enrichment ── */}
       <section>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-          <SectionLabel style={{ marginBottom: 0 }}>TMDB Enrichment</SectionLabel>
+          <SectionLabel style={{ marginBottom: 0 }}>Metadata enrichment</SectionLabel>
           {enrichStatus && (
             <span style={{ fontSize: 10, color: 'var(--text-2)', fontFamily: 'var(--font-mono)' }}>
               <span style={{ color: 'var(--accent-success)' }}>{enrichStatus.enriched}</span>
@@ -697,45 +667,13 @@ function DataTab({ tmdbKey, setTmdbKey, enrichStatus, enrichProgress, enrichMsg,
           )}
         </div>
         <p style={{ fontSize: 11, color: 'var(--text-1)', lineHeight: 1.6, marginBottom: 12 }}>
-          Fetches posters, ratings, plots, cast, and genres from TMDB.
-          Get a free key at{' '}
-          <a
-            href="https://www.themoviedb.org/settings/api"
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{ color: 'var(--accent-interactive)', cursor: 'pointer', textDecoration: 'none' }}
-            onClick={(e) => { e.preventDefault(); window.open('https://www.themoviedb.org/settings/api', '_blank') }}
-          >themoviedb.org/settings/api</a>
+          Fetches clean titles, posters, and multilingual labels from free,
+          keyless sources — IMDb suggest + Wikidata for movies &amp; series,
+          iptv-org for live channels. No API key required. Runs automatically
+          in the background after every sync.
         </p>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{ display: 'flex', gap: 8 }}>
-            <input
-              type="password"
-              placeholder="TMDB API key (v3 auth)"
-              value={tmdbKey}
-              onChange={(e) => setTmdbKey(e.target.value)}
-              style={{
-                flex: 1, borderRadius: 8, padding: '8px 10px', fontSize: 11, outline: 'none',
-                background: 'var(--bg-2)', border: '1px solid var(--border-default)',
-                color: 'var(--text-0)', caretColor: 'var(--accent-interactive)',
-                fontFamily: 'var(--font-ui)', transition: 'border-color 0.15s',
-              }}
-              onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--accent-interactive)' }}
-              onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--border-default)' }}
-            />
-            <button
-              onClick={handleSaveTmdbKey}
-              disabled={tmdbSaving || !tmdbKey.trim()}
-              style={{
-                padding: '8px 12px', borderRadius: 8, fontSize: 11, fontWeight: 600,
-                background: 'var(--accent-interactive)', color: '#fff', border: 'none',
-                cursor: (!tmdbKey.trim() || tmdbSaving) ? 'default' : 'pointer', whiteSpace: 'nowrap',
-                opacity: (!tmdbKey.trim() || tmdbSaving) ? 0.5 : 1,
-                transition: 'opacity 0.15s', fontFamily: 'var(--font-ui)',
-              }}
-            >
-              {tmdbSaving ? 'Validating...' : 'Save Key'}
-            </button>
             <button
               onClick={onStart}
               disabled={isPending || !!enrichProgress}
@@ -747,17 +685,9 @@ function DataTab({ tmdbKey, setTmdbKey, enrichStatus, enrichProgress, enrichMsg,
                 transition: 'opacity 0.15s', fontFamily: 'var(--font-ui)',
               }}
             >
-              {enrichProgress ? `${pct}%` : 'Enrich'}
+              {enrichProgress ? `${pct}%` : 'Run now'}
             </button>
           </div>
-          {tmdbSaveMsg && (
-            <p style={{
-              fontSize: 11, margin: 0,
-              color: tmdbSaveMsg.ok ? 'var(--accent-success)' : 'var(--accent-danger)',
-            }}>
-              {tmdbSaveMsg.ok ? '✓' : '✗'} {tmdbSaveMsg.text}
-            </p>
-          )}
           {enrichProgress && (
             <div style={{ borderRadius: 99, overflow: 'hidden', height: 3, background: 'var(--bg-3)' }}>
               <div style={{
@@ -783,7 +713,7 @@ function DataTab({ tmdbKey, setTmdbKey, enrichStatus, enrichProgress, enrichMsg,
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 11, color: 'var(--text-2)', cursor: 'default' }}>
                     <input type="checkbox" checked disabled style={{ accentColor: 'var(--accent-interactive)' }} />
-                    Sources &amp; Settings (TMDB key, colors)
+                    Sources &amp; Settings (source list, colors, preferences)
                   </label>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 11, color: 'var(--text-1)', cursor: 'pointer' }}>
                     <input type="checkbox" checked={includeUserData} onChange={(e) => setIncludeUserData(e.target.checked)} style={{ accentColor: 'var(--accent-interactive)', cursor: 'pointer' }} />
