@@ -560,6 +560,19 @@ Work is phased to keep the app shippable between phases.
 
 **Verification:** Manual UX test of the flows: sync a source, see enrichment progress, open a detail panel, click "Wrong match" and confirm split, click "Re-fetch" and confirm new match.
 
+### Phase H — Polish, cleanup, QA gate
+
+**Goal:** clear residual debt and run the V3 acceptance pass before merging the branch back.
+
+- Fix pre-existing tsc errors uncovered during V3 work:
+  - `electron/services/xtream.service.ts` — `seriesInfo` extra-property type error
+  - `tsconfig.node.json` — composite/emit project-reference warning
+- Run `fractals/docs/QA-Request.md` end-to-end as the V3 acceptance gate. Every flow listed must pass on a fresh DB after a real Xtream sync.
+- Merge `feat/data-model-v3` → `master`.
+- Update `BACKLOG.md` and `CLAUDE.md`: bucket 1 status → complete, phase state line → "Phase 2.5 — V3 cutover complete".
+
+**Verification:** Clean `pnpm tsc -b --noEmit`, all QA-Request items checked, branch merged.
+
 ## Critical files
 
 **Confirmed from session context (CLAUDE.md):**
@@ -589,7 +602,7 @@ Work is phased to keep the app shippable between phases.
 - Each phase must leave the app in a runnable state. No multi-phase uncommittable changes.
 - Phase A is the only schema migration; everything after is code-only.
 - Phases B, C, E can run in parallel on side branches if we want.
-- Phases D, F, G are sequential (D depends on B+C, F depends on D, G depends on F).
+- Phases D, F, G, H are sequential (D depends on B+C, F depends on D, G depends on F, H depends on G).
 
 ## Open implementation-time questions
 
