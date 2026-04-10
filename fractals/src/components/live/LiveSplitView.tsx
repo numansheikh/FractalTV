@@ -18,7 +18,7 @@ interface Props {
 }
 
 export function LiveSplitView({ channel, onFullscreen, onSwitchChannel, onClose }: Props) {
-  const { channelSurfList, surfContextAction, selectedSourceIds, toggleSourceFilter, setView, setCategoryFilter, setHomeMode } = useAppStore()
+  const { channelSurfList, surfContextAction, surfSearchQuery, selectedSourceIds, toggleSourceFilter, setView, setCategoryFilter, setHomeMode } = useAppStore()
   const { sources } = useSourcesStore()
   const colorMap = buildColorMapFromSources(sources)
   const qc = useQueryClient()
@@ -144,6 +144,7 @@ export function LiveSplitView({ channel, onFullscreen, onSwitchChannel, onClose 
           const pillLabel = surfContextAction === 'home-discover' ? 'Favorites'
             : surfContextAction === 'home-channels' ? 'Live TV'
             : surfContextAction === 'browse-favorites' ? 'Favorites'
+            : surfContextAction === 'search' ? `Search "${(surfSearchQuery ?? '').replace(/^@/, '').trim()}"`
             : categoryName ?? null
           if (!pillLabel) return null
           const handlePillClick = () => {
@@ -153,6 +154,8 @@ export function LiveSplitView({ channel, onFullscreen, onSwitchChannel, onClose 
               setView('home'); setHomeMode('channels'); onClose()
             } else if (surfContextAction === 'browse-favorites') {
               setView('live'); setCategoryFilter('__favorites__'); onClose()
+            } else if (surfContextAction === 'search') {
+              onClose() // query already persisted in search store
             } else if (categoryName) {
               handleBrowseCategory()
             }

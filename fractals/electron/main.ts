@@ -2,6 +2,8 @@ import { app, BrowserWindow, shell } from 'electron'
 import { join } from 'path'
 import { getDb } from './database/connection'
 import { registerHandlers } from './ipc/handlers'
+import { createIptvOrgCache } from './services/enrichment/iptv-org-cache'
+import { startRefreshScheduler, stopRefreshScheduler } from './services/enrichment/iptv-org-refresh'
 
 const isDev = !app.isPackaged
 
@@ -52,7 +54,15 @@ if (!gotTheLock) {
 
   app.whenReady().then(() => {
     getDb() // Initialize database on startup
-    registerHandlers()
+    registerHandlers() // Also kicks enrichment worker on startup
+
+    // V3 L10: iptv-org bulk dataset — init cache + weekly refresh scheduler
+    const iptvCache = createIptvOrgCache()
+    void iptvCache.initCache().catch((err) => {
+      console.warn('[main] iptv-org cache init failed:', err)
+    })
+    startRefreshScheduler(iptvCache)
+
     createWindow()
 
     app.on('activate', () => {
@@ -68,6 +78,7 @@ if (!gotTheLock) {
   })
 
   app.on('window-all-closed', () => {
+    stopRefreshScheduler()
     if (process.platform !== 'darwin') app.quit()
   })
 

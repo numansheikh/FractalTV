@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="340" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+
+  <!-- Dark background -->
+  <rect width="300" height="340" fill="#0d0d14"/>
+  <!-- Light background -->
+  <rect x="300" width="300" height="340" fill="#f1f5f9"/>
+
+  <!-- Labels -->
+  <text x="150" y="28" text-anchor="middle" fill="#9894bc" font-size="11">DARK</text>
+  <text x="450" y="28" text-anchor="middle" fill="#64748b" font-size="11">LIGHT</text>
+
+  <!-- LIVE — row 1 -->
+  <!-- dark -->
+  <rect x="24" y="44" width="60" height="60" rx="8" fill="#ff3355"/>
+  <rect x="96" y="44" width="60" height="60" rx="8" fill="none" stroke="#ff3355" stroke-width="2"/>
+  <rect x="168" y="44" width="60" height="60" rx="8" fill="#ff335522"/>
+  <text x="24" y="122" fill="#ff3355" font-size="10" font-weight="600">LIVE</text>
+  <text x="24" y="134" fill="#9894bc" font-size="9">#ff3355</text>
+  <!-- light -->
+  <rect x="324" y="44" width="60" height="60" rx="8" fill="#ee0033"/>
+  <rect x="396" y="44" width="60" height="60" rx="8" fill="none" stroke="#ee0033" stroke-width="2"/>
+  <rect x="468" y="44" width="60" height="60" rx="8" fill="#ee003322"/>
+  <text x="324" y="122" fill="#ee0033" font-size="10" font-weight="600">LIVE</text>
+  <text x="324" y="134" fill="#64748b" font-size="9">#ee0033</text>
+
+  <!-- FILM — row 2 -->
+  <!-- dark -->
+  <rect x="24" y="152" width="60" height="60" rx="8" fill="#3399ff"/>
+  <rect x="96" y="152" width="60" height="60" rx="8" fill="none" stroke="#3399ff" stroke-width="2"/>
+  <rect x="168" y="152" width="60" height="60" rx="8" fill="#3399ff22"/>
+  <text x="24" y="230" fill="#3399ff" font-size="10" font-weight="600">FILM</text>
+  <text x="24" y="242" fill="#9894bc" font-size="9">#3399ff</text>
+  <!-- light -->
+  <rect x="324" y="152" width="60" height="60" rx="8" fill="#0066ff"/>
+  <rect x="396" y="152" width="60" height="60" rx="8" fill="none" stroke="#0066ff" stroke-width="2"/>
+  <rect x="468" y="152" width="60" height="60" rx="8" fill="#0066ff22"/>
+  <text x="324" y="230" fill="#0066ff" font-size="10" font-weight="600">FILM</text>
+  <text x="324" y="242" fill="#64748b" font-size="9">#0066ff</text>
+
+  <!-- SERIES — row 3 -->
+  <!-- dark -->
+  <rect x="24" y="260" width="60" height="60" rx="8" fill="#00dd77"/>
+  <rect x="96" y="260" width="60" height="60" rx="8" fill="none" stroke="#00dd77" stroke-width="2"/>
+  <rect x="168" y="260" width="60" height="60" rx="8" fill="#00dd7722"/>
+  <text x="24" y="338" fill="#00dd77" font-size="10" font-weight="600">SERIES</text>
+  <text x="24" y="242" fill="#9894bc" font-size="9">#00dd77</text>
+  <!-- light -->
+  <rect x="324" y="260" width="60" height="60" rx="8" fill="#00cc66"/>
+  <rect x="396" y="260" width="60" height="60" rx="8" fill="none" stroke="#00cc66" stroke-width="2"/>
+  <rect x="468" y="260" width="60" height="60" rx="8" fill="#00cc6622"/>
+  <text x="324" y="338" fill="#00cc66" font-size="10" font-weight="600">SERIES</text>
+
+  <!-- Column labels -->
+  <text x="54" y="42" text-anchor="middle" fill="#555566" font-size="9">fill</text>
+  <text x="126" y="42" text-anchor="middle" fill="#555566" font-size="9">stroke</text>
+  <text x="198" y="42" text-anchor="middle" fill="#555566" font-size="9">tint</text>
+  <text x="354" y="42" text-anchor="middle" fill="#888" font-size="9">fill</text>
+  <text x="426" y="42" text-anchor="middle" fill="#888" font-size="9">stroke</text>
+  <text x="498" y="42" text-anchor="middle" fill="#888" font-size="9">tint</text>
+
+  <!-- divider -->
+  <line x1="300" y1="0" x2="300" y2="340" stroke="#ffffff18" stroke-width="1"/>
+
+</svg>

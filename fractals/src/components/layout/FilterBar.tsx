@@ -1,7 +1,8 @@
 import { useAppStore } from '@/stores/app.store'
 
 export function FilterBar({ itemCount }: { itemCount?: number }) {
-  const { typeFilter, categoryFilter, selectedSourceIds, setTypeFilter, setCategoryFilter, clearSourceFilter } = useAppStore()
+  const { typeFilter, categoryFilters, activeView, selectedSourceIds, setTypeFilter, setCategoryFilter, clearSourceFilter } = useAppStore()
+  const categoryFilter = categoryFilters[activeView] ?? null
 
   // '__favorites__' is the default state — not a user-applied filter, never shown as a chip
   const activeCategory = categoryFilter && categoryFilter !== '__favorites__' ? categoryFilter : null

@@ -1,9 +1,5 @@
-import { useState, useRef, useEffect, useCallback, lazy, Suspense } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-
-const SearchResults = lazy(() =>
-  import('@/components/search/SearchResults').then((m) => ({ default: m.SearchResults }))
-)
 import {
   DndContext, closestCenter, PointerSensor, KeyboardSensor,
   useSensor, useSensors, DragEndEvent,
@@ -23,6 +19,163 @@ import { PosterCard as RichPosterCard } from '@/components/cards/PosterCard'
 import { ChannelCard as RichChannelCard } from '@/components/cards/ChannelCard'
 import { useTheme } from '@/hooks/useTheme'
 
+// ── Hero search field ────────────────────────────────────────────────────────
+// Single rounded input with internal positioning. The visible value strips the
+// leading '@' (if any) — advanced mode is shown via an ADV chip overlay inside
+// the input. Typing '@' at the start of an empty input enables advanced mode;
+// clearing the input fully exits it. The keyboard shortcut hint on the right
+// fades when the input is focused.
+function HeroSearch({ query, setQuery, inputRef }: {
+  query: string
+  setQuery: (v: string) => void
+  inputRef: React.RefObject<HTMLInputElement | null>
+}) {
+  const [focused, setFocused] = useState(false)
+  const isAdvanced = query.startsWith('@')
+  // The text the user sees inside the input (no leading '@')
+  const visibleValue = isAdvanced ? query.slice(1) : query
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const v = e.target.value
+    if (isAdvanced) {
+      // In advanced: prefix '@' to whatever the user types. Empty → exit advanced.
+      setQuery(v === '' ? '' : '@' + v)
+    } else {
+      // Basic: typing '@' at the start enables advanced mode naturally.
+      setQuery(v)
+    }
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Escape' && isAdvanced && visibleValue === '') {
+      e.preventDefault()
+      setQuery('')
+    }
+  }
+
+  const toggleAdvanced = () => {
+    setQuery(isAdvanced ? visibleValue : '@' + visibleValue)
+    setTimeout(() => inputRef.current?.focus(), 0)
+  }
+
+  // Layout constants for the absolute-positioned overlays.
+  // The chip slot is always reserved (fixed label) so the input text never
+  // jumps when toggling advanced mode.
+  const CHIP_PAD = 100       // input padding-left — fits the ADV @ chip + breathing room
+  const RIGHT_PAD = 44       // room for the keyboard shortcut hint
+
+  // Border tracks focus only — advanced mode is communicated by the chip, not
+  // by tinting the input border (which would compete with the chip color).
+  const borderColor = focused ? 'var(--accent-interactive)' : 'var(--border-strong)'
+
+  // Amber palette for the ADV chip — distinct from accent-interactive (purple)
+  // so the chip and the focused input border don't blend into one color.
+  const ADV_AMBER = '#f59e0b'
+
+  return (
+    <div style={{ flex: 1, position: 'relative', height: 40, minWidth: 0 }}>
+      {/* Search icon — decorative, anchors the left side */}
+      <svg
+        width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+        strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+        style={{
+          position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)',
+          color: 'var(--text-2)', pointerEvents: 'none',
+        }}
+      >
+        <circle cx="11" cy="11" r="8" />
+        <line x1="21" y1="21" x2="16.65" y2="16.65" />
+      </svg>
+
+      {/* Mode chip — fixed label 'ADV @'. Amber when active (solid fill, dark
+          text); subtle outline when inactive. Click toggles. */}
+      <button
+        onMouseDown={(e) => e.preventDefault() /* don't steal focus from input */}
+        onClick={toggleAdvanced}
+        title={isAdvanced ? 'Advanced mode on — click to disable' : 'Enable advanced search mode'}
+        style={{
+          position: 'absolute', left: 38, top: '50%', transform: 'translateY(-50%)',
+          height: 24, padding: '0 9px',
+          display: 'flex', alignItems: 'center', gap: 5,
+          borderRadius: 5,
+          border: `1px solid ${isAdvanced ? ADV_AMBER : 'var(--border-strong)'}`,
+          background: isAdvanced ? ADV_AMBER : 'var(--bg-2)',
+          color: isAdvanced ? '#1a1305' : 'var(--text-2)',
+          fontSize: 10, fontWeight: 800, fontFamily: 'var(--font-mono)',
+          letterSpacing: '0.08em', cursor: 'pointer', userSelect: 'none',
+          boxShadow: isAdvanced ? `0 0 0 2px color-mix(in srgb, ${ADV_AMBER} 22%, transparent)` : 'none',
+          transition: 'color 0.12s, border-color 0.12s, background 0.12s, box-shadow 0.12s',
+        }}
+        onMouseEnter={(e) => {
+          if (!isAdvanced) {
+            e.currentTarget.style.color = ADV_AMBER
+            e.currentTarget.style.borderColor = ADV_AMBER
+          }
+        }}
+        onMouseLeave={(e) => {
+          if (!isAdvanced) {
+            e.currentTarget.style.color = 'var(--text-2)'
+            e.currentTarget.style.borderColor = 'var(--border-strong)'
+          }
+        }}
+      >
+        ADV
+        <span style={{ fontSize: 12, lineHeight: 1, fontWeight: 700 }}>@</span>
+      </button>
+
+      {/* Input — single bordered field, no merged buttons */}
+      <input
+        ref={inputRef}
+        value={visibleValue}
+        onChange={handleChange}
+        onKeyDown={handleKeyDown}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        placeholder={isAdvanced ? 'fr matrix 1999 …' : 'Search your library…'}
+        style={{
+          width: '100%', height: '100%',
+          background: 'var(--bg-3)',
+          border: `1px solid ${borderColor}`,
+          borderRadius: 8,
+          color: 'var(--text-0)', fontSize: 14,
+          paddingLeft: CHIP_PAD,
+          paddingRight: RIGHT_PAD,
+          outline: 'none',
+          transition: 'border-color 0.12s, padding-left 0.12s',
+          fontFamily: 'var(--font-ui)',
+          boxSizing: 'border-box',
+        }}
+      />
+
+      {/* Keyboard shortcut hint — fades when input is focused */}
+      <div
+        aria-hidden
+        style={{
+          position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)',
+          opacity: focused ? 0 : 1,
+          transition: 'opacity 0.12s',
+          pointerEvents: 'none',
+          display: 'flex', alignItems: 'center',
+        }}
+      >
+        <span
+          style={{
+            fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 700,
+            color: 'var(--text-2)',
+            background: 'var(--bg-2)',
+            border: '1px solid var(--border-strong)',
+            borderRadius: 4,
+            padding: '2px 7px',
+            boxShadow: 'inset 0 -1px 0 var(--border-strong)',
+          }}
+        >
+          /
+        </span>
+      </div>
+    </div>
+  )
+}
+
 function getGreeting() {
   const h = new Date().getHours()
   if (h < 12) return 'Good morning'
@@ -40,7 +193,8 @@ export function HomeView({ onSelectContent }: Props) {
     homeMode, setHomeMode,
     setShowSources, setChannelSurfContext,
   } = useAppStore()
-  const { query, setQuery } = useSearchStore()
+  const { queries, setQuery, seedQuery } = useSearchStore()
+  const query = queries['home'] ?? ''
   const { sources } = useSourcesStore()
   const { theme } = useTheme()
   const inputRef = useRef<HTMLInputElement>(null)
@@ -123,88 +277,46 @@ export function HomeView({ onSelectContent }: Props) {
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
-      {/* Hero area — search + mode toggle */}
+      {/* Hero area — search + mode toggle (always visible) + info strip */}
       <div style={{
-        padding: '12px 24px 16px',
+        padding: '12px 24px 10px',
         borderBottom: '1px solid var(--border-default)',
         background: `radial-gradient(ellipse 80% 250% at 50% 100%, color-mix(in srgb, var(--accent-interactive) ${theme === 'dark' ? '25%' : '6%'}, transparent), transparent), var(--bg-1)`,
-        display: 'flex', flexDirection: 'column', gap: 10,
+        display: 'flex', flexDirection: 'column', gap: 6,
         flexShrink: 0,
       }}>
-        {/* Stats line */}
-        {!query && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ fontSize: 11, color: 'var(--text-2)', fontFamily: 'var(--font-ui)' }}>
-              {getGreeting()}
-            </span>
-            {sources.length > 0 && (
-              <>
-                <span style={{ color: 'var(--border-default)', fontSize: 10 }}>·</span>
-                <span style={{ fontSize: 11, color: 'var(--text-2)', fontFamily: 'var(--font-ui)' }}>
-                  {sources.reduce((sum, s) => sum + (s.itemCount ?? 0), 0).toLocaleString()} titles
-                </span>
-                <span style={{ color: 'var(--border-default)', fontSize: 10 }}>·</span>
-                <span style={{ fontSize: 11, color: 'var(--text-2)', fontFamily: 'var(--font-ui)' }}>
-                  {sources.length} {sources.length === 1 ? 'source' : 'sources'}
-                </span>
-              </>
-            )}
-          </div>
-        )}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        {/* Search input */}
-        <div style={{ flex: 1, position: 'relative' }}>
-          <svg
-            style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-2)', pointerEvents: 'none' }}
-            width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"
-          >
-            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-          </svg>
-          <input
-            ref={inputRef}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search movies, channels, actors…"
-            style={{
-              width: '100%', height: 34,
-              background: 'var(--bg-2)',
-              border: `1px solid ${query ? 'var(--accent-interactive)' : 'var(--border-default)'}`,
-              borderRadius: 7, color: 'var(--text-0)',
-              fontSize: 13, padding: '0 68px 0 34px', outline: 'none',
-              transition: 'border-color 0.15s',
-            }}
-            onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--accent-interactive)' }}
-            onBlur={(e) => { if (!query) e.currentTarget.style.borderColor = 'var(--border-default)' }}
-          />
-          <div style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', display: 'flex', alignItems: 'center', gap: 6 }}>
-            {query && (
-              <button onClick={() => setQuery('')} style={{ background: 'none', border: 'none', color: 'var(--text-2)', cursor: 'pointer', fontSize: 11, padding: '2px 4px' }}>
-                clear
-              </button>
-            )}
-            <kbd style={{ fontSize: 10, color: 'var(--text-3)', background: 'var(--bg-3)', padding: '2px 6px', borderRadius: 4, border: '1px solid var(--border-subtle)' }}>/</kbd>
-          </div>
-        </div>
+        {/* Row 1 — search input + mode toggle */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <HeroSearch query={query} setQuery={setQuery} inputRef={inputRef} />
 
-        {/* Mode toggle */}
-        {!query && (
+          {/* Mode toggle — Discover is active during search; TV clears search and switches */}
           <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
             {(['discover', 'channels'] as const).map((m) => {
-              const active = homeMode === m
+              // During search, treat Discover as active regardless of stored mode.
+              const active = query ? m === 'discover' : homeMode === m
               const label = m === 'discover' ? 'Discover' : 'TV'
               const color = m === 'discover' ? 'var(--accent-interactive)' : 'var(--accent-live)'
               return (
                 <button
                   key={m}
-                  onClick={() => setHomeMode(m)}
+                  onClick={() => {
+                    if (query) {
+                      // Clicking TV during search → clear search and go to TV
+                      if (m === 'channels') { setQuery(''); setHomeMode('channels') }
+                      // Clicking Discover during search → no-op (already showing search results)
+                    } else {
+                      setHomeMode(m)
+                    }
+                  }}
                   style={{
-                    width: 80, padding: '6px 0', borderRadius: 7,
-                    fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                    width: 78, height: 32, borderRadius: 7,
+                    fontSize: 12, fontWeight: 600,
+                    cursor: (query && m === 'discover') ? 'default' : 'pointer',
                     fontFamily: 'var(--font-ui)', letterSpacing: '0.01em',
                     border: `1px solid ${active ? color : 'var(--border-default)'}`,
                     background: active ? `color-mix(in srgb, ${color} 12%, var(--bg-2))` : 'var(--bg-2)',
                     color: active ? color : 'var(--text-2)',
-                    transition: 'all 0.12s',
+                    transition: 'border-color 0.12s, background 0.12s, color 0.12s',
                   }}
                 >
                   {label}
@@ -212,7 +324,25 @@ export function HomeView({ onSelectContent }: Props) {
               )
             })}
           </div>
-        )}
+        </div>
+
+        {/* Row 2 — informative strip (always present, never collapses) */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          fontSize: 11, color: 'var(--text-2)',
+          fontFamily: 'var(--font-ui)',
+          height: 14, lineHeight: '14px',
+          paddingLeft: 2,
+        }}>
+          <span>{getGreeting()}</span>
+          {sources.length > 0 && (
+            <>
+              <span style={{ color: 'var(--border-default)', fontSize: 10 }}>·</span>
+              <span>{sources.reduce((sum, s) => sum + (s.itemCount ?? 0), 0).toLocaleString()} titles</span>
+              <span style={{ color: 'var(--border-default)', fontSize: 10 }}>·</span>
+              <span>{sources.length} {sources.length === 1 ? 'source' : 'sources'}</span>
+            </>
+          )}
         </div>
       </div>
 
@@ -355,7 +485,7 @@ function DiscoverMode({ favChannels, selectedSourceIds, onSelectContent, onNavig
   )
 }
 
-function DiscoverStrip({ title, accent, type, items, hasMore, isLoading, onMore, onSelectContent, stripMax }: {
+function DiscoverStrip({ title, accent, type, items, hasMore, isLoading, onMore, onSelectContent, stripMax, rows = 1 }: {
   title: string
   accent: string
   type: 'live' | 'movie' | 'series'
@@ -365,10 +495,12 @@ function DiscoverStrip({ title, accent, type, items, hasMore, isLoading, onMore,
   onMore: () => void
   onSelectContent: (item: ContentItem) => void
   stripMax: number
+  rows?: number
 }) {
   if (!isLoading && items.length === 0) return null
-  const visible = items.slice(0, stripMax)
-  const skeletonCount = stripMax
+  const displayCap = stripMax * rows
+  const visible = items.slice(0, displayCap)
+  const skeletonCount = displayCap
 
   return (
     <div style={{
@@ -390,7 +522,7 @@ function DiscoverStrip({ title, accent, type, items, hasMore, isLoading, onMore,
           </span>
           {!isLoading && (
             <span style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--font-mono)' }}>
-              {items.length > stripMax ? `${stripMax}+` : items.length}
+              {items.length > displayCap ? `${displayCap}+` : items.length}
             </span>
           )}
         </div>
@@ -696,53 +828,50 @@ function ChannelSkeleton() {
 // Shown inside HomeView when query is non-empty so the bottom search
 // bar never unmounts (and never loses focus).
 
-const SEARCH_INIT = 21
-const SEARCH_FULL = 9999
-const SEARCH_INITIAL_CAP = 20
+const SEARCH_FETCH_LIMIT = 200
 
 function HomeSearchResults({ query, onSelectContent }: { query: string; onSelectContent: (item: ContentItem) => void }) {
-  const { selectedSourceIds, setChannelSurfContext } = useAppStore()
+  const { selectedSourceIds, setChannelSurfContext, setView } = useAppStore()
+  const { seedQuery } = useSearchStore()
+  const STRIP_MAX = useAppStore((s) => s.homeStripSize)
+  const SEARCH_ROWS = 2
 
-  const [liveLimit, setLiveLimit] = useState(SEARCH_INIT)
-  const [movieLimit, setMovieLimit] = useState(SEARCH_INIT)
-  const [seriesLimit, setSeriesLimit] = useState(SEARCH_INIT)
-
-  // Reset limits when query changes
-  useEffect(() => { setLiveLimit(SEARCH_INIT); setMovieLimit(SEARCH_INIT); setSeriesLimit(SEARCH_INIT) }, [query])
-
-  const searchArgs = (type: 'live' | 'movie' | 'series', limit: number) => ({
-    query, type, sourceIds: selectedSourceIds.length ? selectedSourceIds : undefined, limit,
+  const searchArgs = (type: 'live' | 'movie' | 'series') => ({
+    query, type, sourceIds: selectedSourceIds.length ? selectedSourceIds : undefined, limit: SEARCH_FETCH_LIMIT,
   })
 
-  const { data: liveResults = [], isFetching: liveFetching } = useQuery<ContentItem[]>({
-    queryKey: ['search', query, 'live', selectedSourceIds, liveLimit],
-    queryFn: () => api.search.query(searchArgs('live', liveLimit)),
+  const { data: liveData, isFetching: liveFetching } = useQuery({
+    queryKey: ['search', query, 'live', selectedSourceIds],
+    queryFn: () => api.search.query(searchArgs('live')),
     staleTime: 10_000, enabled: !!query,
   })
-  const { data: movieResults = [], isFetching: movieFetching } = useQuery<ContentItem[]>({
-    queryKey: ['search', query, 'movie', selectedSourceIds, movieLimit],
-    queryFn: () => api.search.query(searchArgs('movie', movieLimit)),
+  const { data: movieData, isFetching: movieFetching } = useQuery({
+    queryKey: ['search', query, 'movie', selectedSourceIds],
+    queryFn: () => api.search.query(searchArgs('movie')),
     staleTime: 10_000, enabled: !!query,
   })
-  const { data: seriesResults = [], isFetching: seriesFetching } = useQuery<ContentItem[]>({
-    queryKey: ['search', query, 'series', selectedSourceIds, seriesLimit],
-    queryFn: () => api.search.query(searchArgs('series', seriesLimit)),
+  const { data: seriesData, isFetching: seriesFetching } = useQuery({
+    queryKey: ['search', query, 'series', selectedSourceIds],
+    queryFn: () => api.search.query(searchArgs('series')),
     staleTime: 10_000, enabled: !!query,
   })
+
+  const liveResults = (liveData?.items ?? []) as ContentItem[]
+  const movieResults = (movieData?.items ?? []) as ContentItem[]
+  const seriesResults = (seriesData?.items ?? []) as ContentItem[]
 
   const isFetching = liveFetching || movieFetching || seriesFetching
   const hasResults = liveResults.length > 0 || movieResults.length > 0 || seriesResults.length > 0
 
   const handleSelect = useCallback((item: ContentItem) => {
     if (item.type === 'live') {
-      const liveForSurf = (liveResults as ContentItem[]).slice(
-        0, liveLimit > SEARCH_INIT ? liveResults.length : SEARCH_INITIAL_CAP
-      )
+      const displayCap = STRIP_MAX * SEARCH_ROWS
+      const liveForSurf = liveResults.slice(0, displayCap)
       const idx = liveForSurf.findIndex((i) => i.id === item.id)
       setChannelSurfContext(liveForSurf, idx >= 0 ? idx : 0, 'home-channels')
     }
     onSelectContent(item)
-  }, [liveResults, liveLimit, onSelectContent, setChannelSurfContext])
+  }, [liveResults, STRIP_MAX, onSelectContent, setChannelSurfContext])
 
   if (isFetching && !hasResults) {
     return (
@@ -756,20 +885,38 @@ function HomeSearchResults({ query, onSelectContent }: { query: string; onSelect
     return (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 48, gap: 8, textAlign: 'center' }}>
         <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" strokeWidth="1.5" strokeLinecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-        <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-1)', margin: 0 }}>No results for "{query}"</p>
+        <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-1)', margin: 0 }}>No results for "{query.startsWith('@') ? query.slice(1).trim() : query}"</p>
         <p style={{ fontSize: 12, color: 'var(--text-2)', margin: 0 }}>Try a different search term</p>
       </div>
     )
   }
 
   return (
-    <Suspense fallback={null}>
-      <SearchResults
-        live={{   results: liveResults   as ContentItem[], onShowAll: () => setLiveLimit(SEARCH_FULL)   }}
-        movies={{  results: movieResults  as ContentItem[], onShowAll: () => setMovieLimit(SEARCH_FULL)  }}
-        series={{  results: seriesResults as ContentItem[], onShowAll: () => setSeriesLimit(SEARCH_FULL) }}
-        onSelect={handleSelect}
+    <div style={{ display: 'flex', flexDirection: 'column' }}>
+      <DiscoverStrip
+        title="Live Channels" accent="var(--accent-live)" type="live"
+        items={liveResults as ContentItem[]} isLoading={liveFetching && liveResults.length === 0}
+        hasMore={liveResults.length > STRIP_MAX * SEARCH_ROWS}
+        onMore={() => { seedQuery('live', query); setView('live') }}
+        onSelectContent={handleSelect}
+        stripMax={STRIP_MAX} rows={SEARCH_ROWS}
       />
-    </Suspense>
+      <DiscoverStrip
+        title="Movies" accent="var(--accent-film)" type="movie"
+        items={movieResults as ContentItem[]} isLoading={movieFetching && movieResults.length === 0}
+        hasMore={movieResults.length > STRIP_MAX * SEARCH_ROWS}
+        onMore={() => { seedQuery('films', query); setView('films') }}
+        onSelectContent={handleSelect}
+        stripMax={STRIP_MAX} rows={SEARCH_ROWS}
+      />
+      <DiscoverStrip
+        title="Series" accent="var(--accent-series)" type="series"
+        items={seriesResults as ContentItem[]} isLoading={seriesFetching && seriesResults.length === 0}
+        hasMore={seriesResults.length > STRIP_MAX * SEARCH_ROWS}
+        onMore={() => { seedQuery('series', query); setView('series') }}
+        onSelectContent={handleSelect}
+        stripMax={STRIP_MAX} rows={SEARCH_ROWS}
+      />
+    </div>
   )
 }

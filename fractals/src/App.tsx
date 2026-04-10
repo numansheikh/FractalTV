@@ -75,15 +75,15 @@ function AppShell() {
       if (e.key === 'Escape') {
         const s = useSearchStore.getState()
         const a = useAppStore.getState()
-        // 1. Clear search query
-        if (s.query) { s.setQuery(''); return }
+        // 1. Clear search query for current view
+        if (s.queries[a.activeView]) { s.setQuery(''); return }
         // 2. Go back (previous view, or Home if none)
         if (a.activeView !== 'home') { a.goBack(); return }
         return
       }
 
       if (isTyping()) return
-      if ((e.metaKey || e.ctrlKey) && e.key === '1') { e.preventDefault(); setView('home'); useSearchStore.getState().setQuery('') }
+      if ((e.metaKey || e.ctrlKey) && e.key === '1') { e.preventDefault(); setView('home') }
       if ((e.metaKey || e.ctrlKey) && e.key === '2') { e.preventDefault(); setView('live') }
       if ((e.metaKey || e.ctrlKey) && e.key === '3') { e.preventDefault(); setView('films') }
       if ((e.metaKey || e.ctrlKey) && e.key === '4') { e.preventDefault(); setView('series') }
@@ -119,10 +119,10 @@ function AppShell() {
     const lastPhase: Record<string, string> = {}
     return api.on('sync:progress', (progress: any) => {
       const p = progress as SyncProgress & { sourceId: string }
-      if (p.phase === 'done') {
+      if (p.phase === 'done' || p.phase === 'cancelled') {
         setSyncProgress(p.sourceId, null)
         api.sources.list().then((list) => setSources(list as Source[]))
-        invalidateContentQueries()
+        if (p.phase === 'done') invalidateContentQueries()
       } else if (p.phase === 'error') {
         setSyncProgress(p.sourceId, null)
         updateSource(p.sourceId, { status: 'error', lastError: p.message })
@@ -204,7 +204,7 @@ function AppShell() {
     if (nav.category) clearSourceFilter()  // category navigation = clean browse, no leftover source filter
     if (nav.type) {
       const viewMap = { live: 'live', movie: 'films', series: 'series' } as const
-      setView(viewMap[nav.type]) // also resets categoryFilter to null
+      setView(viewMap[nav.type])
     }
     if (nav.category) setCategoryFilter(nav.category) // set after setView
     if (nav.sourceId) { clearSourceFilter(); toggleSourceFilter(nav.sourceId) }
@@ -225,8 +225,8 @@ function AppShell() {
     }}>
       {/* Nav Rail */}
       <NavRail
-        onOpenSources={() => setShowSources(true)}
-        onOpenSettings={() => setShowSettings(true)}
+        onOpenSources={() => setShowSources(!showSources)}
+        onOpenSettings={() => setShowSettings(!showSettings)}
       />
 
       {/* Main column */}

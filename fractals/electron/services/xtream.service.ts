@@ -115,6 +115,7 @@ export class XtreamService {
       duration?: string
       releaseDate?: string
     }>>
+    seriesInfo?: Record<string, any>
   }> {
     const url = this.buildApiUrl(serverUrl, username, password, 'get_series_info', `&series_id=${seriesId}`)
     const res = await fetch(url)

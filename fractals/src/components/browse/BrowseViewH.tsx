@@ -7,6 +7,7 @@ import { PosterCard } from './PosterCard'
 import { ChannelCard } from './ChannelCard'
 import { Pagination } from './Pagination'
 import { useSearchStore, ContentType } from '@/stores/search.store'
+import { useAppStore } from '@/stores/app.store'
 import { useSourcesStore } from '@/stores/sources.store'
 import { useUserStore } from '@/stores/user.store'
 import { buildColorMapFromSources } from '@/lib/sourceColors'
@@ -57,7 +58,9 @@ interface Props {
 }
 
 export function BrowseViewH({ onAddSource, onSyncSource, onRemoveSource, onSelectContent, sourcesCount }: Props) {
-  const { query, type, setType, activeCategory, setActiveCategory } = useSearchStore()
+  const { queries, type, setType, activeCategory, setActiveCategory } = useSearchStore()
+  const { activeView } = useAppStore()
+  const query = queries[activeView] ?? ''
   const { sources, selectedSourceIds } = useSourcesStore()
   const colorMap = buildColorMapFromSources(sources)
 
@@ -554,7 +557,7 @@ function SearchPane({ query, live, movies, series, onSelect, scopedTo }: {
       {total === 0 && !anyFetching && (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, paddingTop: 60 }}>
           <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ color: 'var(--color-text-muted)' }}><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" /></svg>
-          <p style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>No results for "{query}"</p>
+          <p style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>No results for "{query.startsWith('@') ? query.slice(1).trim() : query}"</p>
         </div>
       )}
 

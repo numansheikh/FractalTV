@@ -35,6 +35,9 @@ export const api = {
     sync: (sourceId: string) =>
       isElectron ? window.api.sources.sync(sourceId) : Promise.resolve({ success: false }),
 
+    cancelSync: (sourceId: string) =>
+      isElectron ? (window.api as any).sources.cancelSync(sourceId) : Promise.resolve({ ok: true }),
+
     accountInfo: (sourceId: string) =>
       isElectron ? window.api.sources.accountInfo(sourceId) : Promise.resolve(null),
 
@@ -60,8 +63,8 @@ export const api = {
   },
 
   search: {
-    query: (args: { query: string; type?: 'live' | 'movie' | 'series'; categoryName?: string; sourceIds?: string[]; limit?: number; offset?: number }) =>
-      isElectron ? window.api.search.query(args) : Promise.resolve([]),
+    query: (args: { query: string; type?: 'live' | 'movie' | 'series'; categoryName?: string; sourceIds?: string[]; limit?: number; offset?: number }): Promise<{ items: any[], total: number }> =>
+      isElectron ? window.api.search.query(args) : Promise.resolve({ items: [], total: 0 }),
   },
 
   content: {
@@ -145,20 +148,10 @@ export const api = {
   },
 
   enrichment: {
-    setApiKey: (key: string) =>
-      isElectron ? window.api.enrichment.setApiKey(key) : Promise.resolve({ success: false }),
     status: () =>
       isElectron ? window.api.enrichment.status() : Promise.resolve({ total: 0, enriched: 0, pending: 0 }),
-    start: (apiKey?: string) =>
-      isElectron ? window.api.enrichment.start(apiKey) : Promise.resolve({ success: false }),
-    enrichSingle: (contentId: string) =>
-      isElectron ? (window.api as any).enrichment.enrichSingle(contentId) : Promise.resolve({ success: false }),
-    enrichManual: (args: { contentId: string; title: string; year?: number }) =>
-      isElectron ? (window.api as any).enrichment.enrichManual(args) : Promise.resolve({ success: false }),
-    searchTmdb: (args: { title: string; year?: number; type: 'movie' | 'series' }) =>
-      isElectron ? (window.api as any).enrichment.searchTmdb(args) : Promise.resolve({ success: false }),
-    enrichById: (args: { contentId: string; tmdbId: number }) =>
-      isElectron ? (window.api as any).enrichment.enrichById(args) : Promise.resolve({ success: false }),
+    start: () =>
+      isElectron ? window.api.enrichment.start() : Promise.resolve({ success: false }),
   },
 
   epg: {
