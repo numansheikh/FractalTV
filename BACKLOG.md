@@ -1,26 +1,28 @@
 # Fractals — Backlog
 
-High-level buckets. Each bucket has a status, notes, and a pointer to the detailed doc that lives alongside it. Small, already-scoped bugs live in `fractals/docs/qa-cycle-2.md`.
+High-level buckets. Each bucket has a status, notes, and a pointer to the detailed doc that lives alongside it.
 
 ---
 
-## 1. Data & Search  *(in progress)*
+## 1. Data & Search  *(complete)*
 
-Canonical data model + search redesign + TMDB enrichment are one tightly-coupled effort. The sketch (provider layer + canonical identity + rich meta) is locked; the implementation split has been scoped.
+V3 canonical data model, pluggable enrichment pipeline, and search UI all shipped.
 
-**Status:** In progress via current queue.
+**Status:** Complete as of 2026-04-11.
 
-**Detailed plan:** `~/.claude/plans/scalable-leaping-cake.md`
-**Target visual:** `fractals/docs/data-model-diagram.html` (two-layer: provider streams → canonical → TMDB enrichment, free/pro tiers)
-
-**Notes:**
-- V2 schema already splits canonical / streams / user_data, has FTS5 on canonical, sync-time population, and a TMDB enrichment worker. The sketch is partially realized.
-- Only one sub-item is unblocked today: **refactor TMDB service into a pluggable `MetadataProvider` interface** (keeps TMDB as sole impl for now). Doesn't depend on any of the ambiguous decisions.
-- Everything else waits on four ambiguous decisions: (1) what counts as "light" vs "rich" meta, (2) canonical identity scheme, (3) merge policy, (4) where the canonical name comes from at sync time.
-- **Cross-references:** iptv-org integration (channel metadata source, same family as TMDB) belongs here, not with M3U parsing.
-- Absorbs the earlier "TMDB English title indexing" and cross-language search items.
-
-**Next action:** Resolve the 4 blockers, then open an implementation plan.
+**What shipped:**
+- V3 schema: `canonical_vod` / `canonical_series` / `canonical_live`, `streams`, `series_sources`, `stream_categories` — full association layer
+- Title normalizer (L14 strip-and-capture rules, NFKC, European diacritic fold, non-Latin passthrough)
+- Pluggable `MetadataProvider` interface; IMDb suggest + Wikidata + iptv-org providers implemented
+- Enrichment worker with rate limiter + circuit breaker
+- Advanced search parser (`@` prefix, language/quality/year/type tokens, dual-interpretation for numerics)
+- Per-tab search isolation (`queries: Record<string, string>` keyed by `activeView`)
+- Server-side search pagination matching browse grids
+- Sidebar hybrid: All/Favorites clear search, categories narrow within search, "Search (string)" restore entry
+- CommandBar revamp: unified input, ADV @ amber chip, sort button, source dots 12px
+- Category filter per-view (`categoryFilters: Record<string, string|null>`)
+- LiveSplitView search breadcrumb (`Search "bbc"` pill when entry from search)
+- "More →" from Home seeds target tab query
 
 ---
 
@@ -43,19 +45,21 @@ Three-tier split of the same React codebase via feature flags, plus M3U format w
 
 ---
 
-## 3. Source management  *(small bucket)*
+## 3. Source management  *(partially done)*
 
 Gaps and improvements to the add/sync source flow surfaced through real usage.
 
-**Status:** Items scoped, not started.
+**Status:** Cancel + background sync shipped. Assessment and friction gaps remain.
 
-**Items:**
-- **Sync fast-pass / background canonical split** — streams table populated first (dialog closes faster), canonical built in background with a status indicator
-- **Enrichment implementation assessment** — verify IMDb + Wikidata providers are actually implemented end-to-end
-- **Cancel button on add source dialog** — stops sync mid-flight but source stays in DB, restartable
-- **Gaps from usage** — catch-all for friction points found while using the add-source flow
+**Done:**
+- Cancel sync mid-flight (`sources:sync:cancel` IPC, terminates worker, resets status to idle)
+- Run in background (dialog dismisses, worker keeps running, SourceCard shows live progress)
 
-**Next action:** Pick off items one at a time; none depend on bucket 1 finishing.
+**Remaining:**
+- **Enrichment assessment** — verify IMDb + Wikidata providers work end-to-end with real sources
+- **Gaps from usage** — friction points to emerge from real usage (two sources being added 2026-04-12)
+
+**Next action:** Add sources, observe, pick off friction points.
 
 ---
 
@@ -72,7 +76,7 @@ Desktop (Electron) is stable. Expansion plan covers Android phone/tablet, Androi
 - Key abstractions needed before any platform work: `DataService` interface (Electron IPC vs Capacitor HTTP+SQLite), `PlayerAdapter` interface (HLS.js vs ExoPlayer vs AVPlayer vs AVPlay)
 - Capacitor is the primary mobile path; Tizen uses the same web build wrapped as `.wgt`
 
-**Next action:** Finish Electron stabilization first; defer Capacitor scaffolding until data model work lands.
+**Next action:** Defer until data model + source management settled.
 
 ---
 
@@ -80,10 +84,9 @@ Desktop (Electron) is stable. Expansion plan covers Android phone/tablet, Androi
 
 UX and player fixes that don't depend on the bigger architectural work. Each item is self-contained and can be picked off in its own session.
 
-**Status:** Open, independent of all other buckets.
+**Status:** Open, independent of all other buckets. Live TV nav breadcrumb now done.
 
 **Items:**
-- **Live TV nav polish** — `LiveSplitView` breadcrumb/origin context so the sidebar shows where the user came from (`Browsing: Sports`, `From: Search`, `From: Favorites`) and channel-surfing stays scoped. Also fix Discover Favorites pill mapping (currently routes to Browse Favorites, should return to Home Discover). Discuss approach before building.
 - **Series full-page view** — replace the cramped `SeriesDetail` slide panel for long-running series (many seasons, long episode lists). Full-screen real estate for season tabs + episode grid. Player's series chip on minimize targets this page instead of the slide panel.
 - **Player: EPG timeshift timeline in fullscreen** — catchup channels only. XMLTV parser and Full Guide panel already done; this is the player-side bottom bar.
 - **Player: episode stream 404 hang** — when an episode 404s, player hangs with spinner. Needs timeout + error overlay.
@@ -94,13 +97,11 @@ UX and player fixes that don't depend on the bigger architectural work. Each ite
 
 ## 6. Tech health  *(backlog)*
 
-Quality and hardening debt surfaced by the QA cycle 2 audit. Not blocking product work but worth chipping away at.
+Quality and hardening debt. Not blocking product work but worth chipping away at.
 
 **Status:** 30+ findings catalogued, no sweep in progress.
 
-**Detailed reference:** `fractals/docs/qa-cycle-2.md`
-
-**Top-of-list (P0/P1 from the audit):**
+**Top-of-list (P0/P1):**
 - Missing `profile_id` in `user_data` writes — watch position / favorites / watchlist writes may silently fail
 - `tsconfig.node.json` broken — TypeScript isn't actually type-checking
 - Hardcoded TMDB API key in source
@@ -119,5 +120,6 @@ Quality and hardening debt surfaced by the QA cycle 2 audit. Not blocking produc
 
 ## Cross-bucket notes
 
-- **Phase state:** Phase 0 (core) + Phase 1 (UX refinement) + Phase 2 (V2 data model cutover) all complete as of 2026-04-10. Phase 3 (multi-platform) not started.
-- **Next pick:** Data & Search (bucket 1). In progress via current queue.
+- **Phase state:** Phase 0–2.5 complete as of 2026-04-11 (V3 data model + search shipped). Phase 3 (multi-platform) not started.
+- **DB state:** Fresh wipe 2026-04-11. First real-world sync with two sources planned 2026-04-12.
+- **Current queue:** Empty. Next pick TBD after observing real-world sync.

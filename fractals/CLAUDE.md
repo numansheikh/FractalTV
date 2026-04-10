@@ -370,11 +370,12 @@ The data model has two distinct layers, loosely coupled via a bridge:
 - Background job: lazy batch enrichment after sync
 - Free key: 40 req/sec → full library enriched in minutes
 
-## Implementation status (as of 2026-04-10)
+## Implementation status (as of 2026-04-11)
 
 **Phase 0 — Complete.** Core scaffold, DB + Xtream sync, TMDB enrichment, FTS5 search, browse/search UI, video player, EPG, settings, user data.
 **Phase 1 — Complete.** UX refinement (pagination nav, escape behavior, library search).
-**Phase 2 — Complete.** V2 data model cutover: canonical + streams schema, all IPC handlers on v2, v1 tables dropped, TMDB enrichment writes to canonical, M3U sync worker rewritten, dead code removed (xtream.service.ts v1 sync methods, schema.ts v1 tables). DB renamed `fractaltv.db`. All known bugs fixed.
+**Phase 2 — Complete.** V2 data model cutover: canonical + streams schema, all IPC handlers on v2, v1 tables dropped, TMDB enrichment writes to canonical, M3U sync worker rewritten, dead code removed. DB renamed `fractaltv.db`.
+**Phase 2.5 — Complete.** V3 data model + search: `canonical_vod/series/live` split, association layer, title normalizer (L14), pluggable `MetadataProvider` interface, IMDb suggest + Wikidata + iptv-org providers, enrichment worker with rate limiter, advanced search parser (`@` prefix, token vocabularies, dual-interpretation), per-tab search isolation, server-side search pagination, CommandBar revamp (unified input + ADV @ chip), category filter per-view, LiveSplitView search breadcrumb, source sync cancel + run-in-background.
 **Phase 3 — Not started.** Capacitor for Android/iOS/TV, Tizen.
 
 ### v0.2.0 — completed features
