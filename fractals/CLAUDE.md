@@ -46,10 +46,7 @@ A cross-platform IPTV client that treats content as the primary abstraction, not
 ### Backend (Electron main process)
 - **Electron** (latest stable)
 - **better-sqlite3** for synchronous, fast local database
-- **sqlite-vec** extension for vector similarity search
-- **Drizzle ORM** for typed database queries
-- **@xenova/transformers** (transformers.js) for local embedding generation
-- **Node.js** worker threads for background tasks (sync, enrichment, embedding)
+- **Node.js** worker threads for background tasks (sync, delete)
 
 ### Mobile / TV
 - **Capacitor** for Android (phone/tablet/TV single APK) and iOS
@@ -60,28 +57,20 @@ A cross-platform IPTV client that treats content as the primary abstraction, not
 ```
 ┌──────────────────── ELECTRON MAIN PROCESS ────────────────────┐
 │                                                                │
-│  ┌─────────────┐  ┌─────────────┐  ┌───────────────────────┐ │
-│  │ Xtream Sync │  │  M3U Sync   │  │  TMDB Enrichment      │ │
-│  │ (N sources) │  │             │  │  (background worker)   │ │
-│  └──────┬──────┘  └──────┬──────┘  └───────────┬───────────┘ │
-│         └────────┬───────┘                      │             │
-│                  ▼                               │             │
+│  ┌─────────────┐  ┌─────────────┐                             │
+│  │ Xtream Sync │  │  M3U Sync   │  (worker threads)           │
+│  │ (N sources) │  │             │                              │
+│  └──────┬──────┘  └──────┬──────┘                              │
+│         └────────┬───────┘                                     │
+│                  ▼                                              │
 │  ┌─────────────────────────────────────────────────────────┐  │
-│  │              SQLite + sqlite-vec                         │  │
-│  │  • content (movies, series, episodes, channels)         │  │
-│  │  • sources (xtream accounts, m3u urls)                  │  │
-│  │  • embeddings (384-dim vectors per content item)        │  │
-│  │  • epg (program schedules)                              │  │
-│  │  • user_data (favorites, watch history, resume points)  │  │
+│  │              SQLite (better-sqlite3, WAL mode)           │  │
+│  │  • streams, series_sources (provider data)              │  │
+│  │  • categories, stream_categories                        │  │
+│  │  • stream/series/channel_user_data (favorites, etc.)    │  │
+│  │  • epg (programme schedules)                            │  │
+│  │  • sources, profiles, settings                          │  │
 │  └─────────────────────────────────────────────────────────┘  │
-│                  │                               │             │
-│                  │              ┌────────────────┘             │
-│                  ▼              ▼                              │
-│  ┌──────────────────────────────────────────┐                 │
-│  │  transformers.js (embedding worker)       │                 │
-│  │  Model: all-MiniLM-L6-v2 (~30MB)         │                 │
-│  │  Generates embeddings from enriched text  │                 │
-│  └──────────────────────────────────────────┘                 │
 │                                                                │
 │  IPC handlers: search, browse, play, sync, settings           │
 └───────────────────────┬────────────────────────────────────── ┘
@@ -119,74 +108,74 @@ The Electron backend doesn't exist. Instead:
 
 A `DataService` interface abstracts this — Electron and Capacitor implementations are swapped at runtime via a factory, same pattern as the legacy app but cleaner.
 
-## Database schema (conceptual)
+## Database schema (g1 — 12 tables, no canonical layer)
 
 ```
 sources
-  id, type (xtream|m3u), name, server_url, username, password, status, last_sync
+  id, type (xtream|m3u), name, server_url, username, password, status, last_sync, item_count, disabled
 
-content
-  id, source_id (FK), external_id (xtream stream_id), tmdb_id,
-  type (live|movie|series|episode),
-  title, original_title, year, plot, poster_url, backdrop_url,
-  rating_imdb, rating_tmdb, genres, languages, country,
-  director, cast (JSON array),
-  parent_id (FK, for episodes → series),
-  season_number, episode_number,
-  stream_url, container_extension,
-  catchup_supported (bool), catchup_days (int),
-  created_at, updated_at
+streams
+  id ({sourceId}:{type}:{streamId}), source_id (FK), type (live|movie|episode),
+  stream_id, title, thumbnail_url, container_extension, category_id,
+  tvg_id, epg_channel_id, catchup_supported, catchup_days,
+  stream_url (M3U only), parent_series_id (episodes → series_sources),
+  language_hint, origin_hint, quality_hint, year_hint, added_at
 
-content_sources  (for deduplication — same content from multiple sources)
-  content_id (FK), source_id (FK), stream_url, quality, priority
+stream_categories
+  stream_id (FK), category_id (FK)
 
-embeddings
-  content_id (FK), vector (BLOB, 384 floats)
+series_sources
+  id ({sourceId}:series:{seriesId}), source_id (FK), series_external_id, title,
+  thumbnail_url, category_id, language_hint, origin_hint, year_hint, added_at
 
-epg
-  id, channel_external_id, title, description,
-  start_time, end_time, source_id (FK)
+series_source_categories
+  series_source_id (FK), category_id (FK)
 
 categories
-  id, source_id (FK), name, type (live|movie|series), parent_id
+  id, source_id (FK), external_id, name, type (live|movie|series), sort_order
 
-user_data
-  content_id (FK), favorite (bool), watchlist (bool),
-  last_position (seconds), completed (bool),
-  last_watched_at
+epg
+  id, source_id (FK), channel_external_id, title, description, start_time, end_time
+
+stream_user_data
+  profile_id (FK), stream_id (FK → streams ON DELETE CASCADE),
+  is_favorite, is_watchlisted, rating, fav_sort_order,
+  watch_position, watch_duration, last_watched_at, completed
+
+series_user_data
+  profile_id (FK), series_source_id (FK → series_sources ON DELETE CASCADE),
+  is_favorite, is_watchlisted, rating, fav_sort_order
+
+channel_user_data
+  profile_id (FK), stream_id (FK → streams ON DELETE CASCADE),
+  is_favorite, fav_sort_order
 
 profiles
-  id, name, pin (nullable), is_child (bool)
+  id, name
 
-profile_user_data
-  profile_id (FK), content_id (FK), ... (same fields as user_data)
+settings
+  key, value
 ```
+
+**Sync user data preservation:** Sync workers backup user data rows into temp tables before deleting streams (CASCADE would wipe them), then restore after reinserting. Favorites, watchlist, ratings, watch positions all survive resync.
 
 ## Key design decisions
 
-### Multi-source deduplication
-When the same movie exists on multiple Xtream sources:
-1. Match by TMDB ID (fetched during enrichment based on title + year)
-2. Store as one `content` row, multiple `content_sources` rows
-3. UI shows one entry with "Available on 3 sources" — auto-picks best quality, user can override
+### Search architecture (g1 baseline)
+LIKE search on provider titles with 250ms debounce and min 2 character threshold. Three parallel queries (live, movie, series) via IPC. Results displayed per-type with independent pagination.
 
-### Search architecture
-Three layers, results merged and ranked:
-1. **SQLite FTS5** — full-text search on title, plot, cast, director, genres
-2. **sqlite-vec** — cosine similarity on embeddings for semantic search
-3. **Facet filters** — SQL WHERE clauses on structured fields (year, genre, type, language, rating)
+**Tiered search roadmap:**
+- g1: LIKE on provider titles (current)
+- g2: FTS5 on streams table
+- g3: FTS5 on canonical + bridge to streams
+- g4: embeddings / semantic (sqlite-vec in place, worker not built)
+- g5: cross-language resolution
 
-A single search query runs all three in parallel, results are merged with FTS matches weighted highest, semantic matches filling in gaps.
+### Multi-source deduplication (g2+)
+Not yet implemented. Same movie from two sources appears as two items. Will resolve via canonical identity layer keyed by TMDB ID.
 
-### Enrichment pipeline
-Background process on source sync:
-1. Xtream API returns raw content list (title, stream_id, category)
-2. For each item: query TMDB search API (title + year) → get tmdb_id
-3. Fetch TMDB details (plot, cast, director, genres, keywords, similar)
-4. Generate embedding from concatenated text: "{title}. {plot}. Genres: {genres}. Starring: {cast}. Directed by: {director}. Keywords: {keywords}"
-5. Store everything in SQLite
-
-Rate limiting: TMDB allows 40 requests/second. Enrichment is progressive — UI works immediately with raw Xtream data, enrichment fills in metadata over minutes/hours.
+### Enrichment (g2+)
+Hidden in g1 UI. Will return as TMDB enrichment writing to canonical tables.
 
 ### Catchup / Timeshift
 For live TV channels with catchup support:
@@ -338,161 +327,134 @@ These are defined in `:root` as dark defaults, then **bridged** via `[data-theme
 - Not a social app — no sharing, no public profiles, no cloud sync (for now)
 - Not a content provider — ships with zero content, user brings their own sources
 
-## Data model — vocabulary (locked 2026-04-09)
+## Data model — vocabulary (locked 2026-04-12)
 
-The data model has two distinct layers, loosely coupled via a bridge:
+### g1 — Provider data only (current)
 
-**Layer 1 — Provider data** (ephemeral, source-owned)
-- What M3U/Xtream APIs return: `stream_id`, `title`, `category_id`, `tvg_id`, `thumbnail_url`, container format
-- Three content types: **Live** (channels), **Movie** (VOD), **Series** (parent only; episodes fetched on demand)
+Single layer. What M3U/Xtream APIs return, stored directly.
+
+- Three content types: **Live** (channels), **Movie** (VOD), **Series** (parent only; episodes fetched on demand as streams with `parent_series_id`)
 - Radio = Live variant (same structure, different category)
 - Tied to subscription — goes away when source is removed/expired
+- User data (favorites, watchlist, ratings, positions) keyed by stream/series_source ID
+- User data survives resync via backup/restore pattern in sync workers
+- No deduplication — same content from two sources = two items
+- Title normalizer extracts `year_hint`, `language_hint`, `origin_hint`, `quality_hint` at sync time
 
-**Layer 2 — Canonical identity + enriched metadata** (persistent, source-independent)
-- TMDB-sourced: English title, original title, year, genres, poster/backdrop, vote_average (free tier minimum)
-- Pro tier adds: cast, director, keywords, overview, spoken_languages, similarity/embeddings
-- Parental rating: deferred (extra API call, fetch lazily on detail open)
-- Anchored by `tmdb_id` — the deduplication key across all sources
+### g2+ — Canonical identity layer (planned)
 
-**Bridge** (the pointer)
-- Multiple provider streams (different sources, languages, regions) → one canonical identity
-- Decoupled: deleting a source removes provider data, not canonical identity
-- Eviction policy: canonical records with **user interaction** (watched, favorited, rated, watchlisted) persist forever; uninteracted records are evictable (TTL / source removal)
+Will add a second layer:
+- TMDB-sourced canonical identity (English title, year, genres, poster, etc.)
+- Bridge: multiple provider streams → one canonical identity
+- Search target shifts from provider titles to canonical titles
+- Deduplication across sources via `tmdb_id`
 
-**Search target = canonical identity**, not provider data
-- Search index on clean TMDB titles → fast, single query, cross-language by design
-- "father" finds Arabic, French, German versions — all map to same canonical
-- Unenriched items fall back to provider title search
-- Free tier: title + year + type. Pro tier: cast, genres, keywords, similarity
+## Implementation status (as of 2026-04-12)
 
-**TMDB enrichment**
-- User brings their own free API key (current approach)
-- Background job: lazy batch enrichment after sync
-- Free key: 40 req/sec → full library enriched in minutes
-
-## Implementation status (as of 2026-04-10)
-
-**Phase 0 — Complete.** Core scaffold, DB + Xtream sync, TMDB enrichment, FTS5 search, browse/search UI, video player, EPG, settings, user data.
-**Phase 1 — Complete.** UX refinement (pagination nav, escape behavior, library search).
-**Phase 2 — Complete.** V2 data model cutover: canonical + streams schema, all IPC handlers on v2, v1 tables dropped, TMDB enrichment writes to canonical, M3U sync worker rewritten, dead code removed (xtream.service.ts v1 sync methods, schema.ts v1 tables). DB renamed `fractaltv.db`. All known bugs fixed.
+**Phase 0–2.5 — Complete.** Core through V3 data model.
+**g1 — Complete (2026-04-12).** Pure provider-data app. Stripped canonical tables, FTS, enrichment. 12 tables. LIKE search with debounce. User data survives resync.
+**g2–g5 — Not started.** Will build back: g2 (FTS→streams), g3 (FTS→canonical), g4+.
 **Phase 3 — Not started.** Capacitor for Android/iOS/TV, Tizen.
 
-### v0.2.0 — completed features
+### g1 features (current state)
 
 **Layout**
 - Three-zone layout: NavRail (48px, left) + content area + right-side slide panels
-- `AppShell.tsx` orchestrates the shell; `NavRail.tsx` for icon-only navigation
-- CommandBar (44px, top) always visible on all screens. Shows search + sort + source dots on browse views; shows only source dots on Home.
-- `BrowseSidebar.tsx` (168px, left of grid) shown on live/films/series views; bg-1 to contrast with bg-2 cards
+- CommandBar (44px, top) always visible. Shows search + sort + source dots on browse views; source dots only on Home.
+- `BrowseSidebar` (168px, left of grid) on live/films/series views
+- NavRail sources icon pulses during sync activity
 
-**Home screen — two modes**
-- `HomeView.tsx` — search bar in minimal hero area above content rows, mode toggle (Discover/My Channels) beside it
-- **Discover mode** — "Favorite Channels" + "Continue Watching" (movies, series) + "Watch Later" (watchlist) horizontal rows; hidden when empty
-- **My Channels mode** — drag-to-reorder grid of favorite channels only
-- Mode persisted in `app.store` (`homeMode`). Toggle in hero bar.
-- First-favorite prompt: shown once when user adds their first channel favorite while in Discover mode
-- Empty channels mode: dedicated empty state with "Browse channels" + "Switch to Discover" actions
+**Home screen**
+- Two modes: Discover (content strips) / My Channels (drag-to-reorder favorites grid)
+- Info strip shows live sync progress during sync, greeting + stats otherwise
+- Inline search results (debounced, min 2 chars)
 
-**Favorites / watchlist system**
-- `null` categoryFilter = "All" (default on cold start and when switching views)
-- `__favorites__` sentinel = Favorites sub-view
-- `BrowseSidebar` pinned section: "All" (default, top) + "Favorites" (heart icon, below) above scrolling category list
-- ContentArea empty state is context-aware: no sources / no favorites / empty category / no search results
-- Search query guards against sending `__favorites__` as categoryName to the DB
-- Session restore: `activeView` and `categoryFilter` persisted — app reopens exactly where left off
-- Disabled sources hidden from favorites, watchlist, and continue-watching queries (JOIN sources + disabled=0)
+**Search (g1 baseline)**
+- LIKE on provider titles, 250ms debounce, min 2 character threshold
+- Three parallel queries (live, movie, series) via IPC
+- `debouncedQueries` in search store — raw query for input display, debounced for IPC
 
-**Drag-to-reorder My Channels**
-- `@dnd-kit/core` + `@dnd-kit/sortable` — PointerSensor (6px activation), KeyboardSensor
-- `fav_sort_order INTEGER` column in `user_data` (SQLite migration, safe try/catch)
-- `user:favorites` IPC orders by `COALESCE(fav_sort_order, 999999) ASC, last_watched_at DESC`
-- `user:reorder-favorites` IPC persists new order in a transaction
-- Local `orderedIds` state for optimistic UI; rollback on API error
+**Browse**
+- VirtualGrid with dynamic row heights (16:9 for live, 2:3 for posters)
+- Per-view category filter persisted in store
+- Category sidebar auto-scrolls active item to center
+- Configurable grid page size (25/50/75/100/200)
 
-**User data (complete)**
-- Favorites, watchlist, ratings, history, positions, continue watching — all IPC-wired
-- Optimistic updates with rollback on all mutations
-- Library view: Favorites / Watchlist / History / Continue Watching tabs
-- Settings → Data tab: clear history / favorites / all data / reset preferences
-- `user_data.fav_sort_order` for manual channel ordering
-- Heart toggle in VirtualGrid list-view rows
+**Live TV**
+- Grid → Split View → Fullscreen navigation stack
+- Split view: 300px channel list + player + EPG strip
+- EPG: auto-expanded, styled description cards, now/next display
+- Full Guide: bottom sheet, 200px/hr timeline, 300px channel column, detail panel
+- Channel surf: `[`/`]` keys, Cmd+Up/Down, PgUp/PgDn
 
-**Episode persistence (critical fix)**
-- Episodes were never written to `content` table → `user_data` FK constraint caused silent position-save failure
-- `series:get-info` handler now upserts all episodes into `content` + `content_sources` on series open
-- Episode IDs use `{sourceId}:episode:{streamId}` format matching DB rows
-- `loadBulk` called for visible episodes so progress bars render immediately
+**Favorites / watchlist**
+- `__favorites__` sentinel in BrowseSidebar
+- Three user data tables: stream_user_data, series_user_data, channel_user_data
+- Optimistic updates with rollback
+- Drag-to-reorder My Channels (@dnd-kit)
+- User data survives resync (backup/restore around CASCADE delete)
 
 **Player**
-- Position saved on pause, on 10s interval, and on close (unmount)
-- Fixed race condition: position IPC now resolves before query cache is invalidated
-- Both `['home-continue']` and `['library','continue-watching']` invalidated on player close
-- `minWatchSeconds` threshold (default 5s) prevents accidental history entries
+- Position saved on pause, 10s interval, and close
+- `minWatchSeconds` threshold (default 5s)
+- EPG now/next overlay on fullscreen live (auto-hides with controls)
+- Category pill chip navigates back to browse category
 
-**Theming**
-- Two themes: `dark` (default) and `fractals-day` (light)
-- V2 token system (`--bg-0..4`, `--text-0..3`, `--border-*`, `--accent-*`) used everywhere
-- Sidebar uses `--bg-1` (panel level), cards use `--bg-2` — maintains visual separation
+**Detail panels**
+- Movies: 380px slide panel, breadcrumbs pinned top, category link
+- Series: 720px double-width, season coins + episode list
+- Action buttons: play/resume, favorite, watchlist, star rating, clear history
+- External player + enrichment sections hidden (g2+)
 
-### post-v0.2.0 — additional completed work
+**Settings**
+- Appearance: theme picker, font picker
+- Interface: home mode, strip width, grid page size, timezone override (system default toggle + manual picker)
+- Player: engine, min watch seconds, controls mode
+- Data: clear history / favorites / all data / reset
 
-**EPG Full Guide panel (Phase 0)**
-- `EpgGuide.tsx` — bottom sheet (73vh), timeline grid (Guide B style), sliding detail panel
-- `epg:guide` IPC fetches programmes for all channel IDs in a 24h window
-- `content:get-catchup-url` IPC builds timeshift URL via `xtreamService.buildCatchupUrl`
-- Guide → Watch: live/future calls `onSwitchChannel`; past programmes with catchup call `onFullscreen` with `_catchupUrl` pre-set on the ContentItem
-- "Full Guide" button in `EpgStrip` (inside `LiveSplitView`) opens the guide sheet
-
-**NavRail visible in split view (task 2.1)**
-- `LiveSplitView` container uses `position: fixed; left: 48px` so the 48px NavRail stays exposed and clickable
-
-**Category chip + sidebar improvements**
-- Category breadcrumb chip in detail panels (and EPG guide) navigates to that category: calls `handleBreadcrumbNav` in `App.tsx`, which clears the search query, clears the source filter, sets the active view, then sets `categoryFilter`
-- `BrowseSidebar` auto-scrolls the active category item to center (`scrollIntoView({ block: 'center' })`) when `categoryFilter` changes externally (e.g. navigating from a detail panel or EPG)
-
-**UX refinement — Phase 1 fixes (commit 8346275d)**
-- **Fix 1: Pagination navigation** — "Show all →" in search results now navigates to view (Films/Live/Series) + clears search, instead of expanding inline. Clean separation between search preview (20 items) and full browsable view.
-- **Fix 2: Escape behavior** — Verified working: capture phase + stopImmediatePropagation on all overlays (Player, ContentDetail, etc.) prevents Escape from leaking. App.tsx fallback chain: clear search → clear category → clear source → home. Hierarchical, state-preserving.
-- **Fix 3: Library search** — Client-side live search input in Library view filters all tabs (Continue Watching, Favorites, Watchlist, History) by title instantly. Shows dynamic match counts per tab (e.g. "Favorites 3/24"). Search persists across tab switches.
+**EPG**
+- `has_epg_data` computed via EXISTS subquery on epg table
+- Times respect timezone override via shared `fmtTime` utility
+- Full Guide: 300px channel column, 200px/hr timeline scale
 
 ## Key architecture decisions (implemented)
 
 - **Worker threads for heavy operations** — Sync and delete run in `electron/workers/` via `worker_threads`, each opening its own better-sqlite3 connection (WAL mode allows concurrent access). Prevents main process blocking on 200k+ row operations.
 
-- **Hybrid FTS5 + LIKE search** — FTS5 for fast ranked prefix matches, LIKE for substring matches ("dar" finds "undark"). Results merged with deduplication. Space-aware tokenization: trailing space = exact word, no trailing space = prefix.
+- **Sync user data preservation** — Sync workers backup stream_user_data, series_user_data, channel_user_data into temp tables before deleting streams (CASCADE would wipe them), then restore rows whose IDs still exist after reinserting. Clean sync + favorites survive.
+
+- **LIKE search with debounce (g1)** — LIKE `%query%` on provider titles. 250ms debounce in search store (`debouncedQueries`), min 2 character threshold. g2+ will add FTS5.
 
 - **Source-scoped content IDs** — Format `{sourceId}:{type}:{streamId}` ensures correct credentials used for playback. Same stream_id on same server returns HTTP 405 with wrong account credentials.
 
-- **On-demand TMDB enrichment** — ContentDetail panel auto-triggers enrichment when opened for unenriched movie/series. Multi-candidate title cleaning: strips language prefixes ("EN - "), extracts embedded years ("(2015)"), tries with/without subtitles after ":" or " - ". Manual search fallback with choosable results list when auto fails. "Wrong match?" link for re-matching already-enriched content.
+- **Unified ContentDetail panel** — Movies and series both use the same side panel. Series gets double-width (720px vs 380px) with a left column for season coin selector + episode list, right column for identical metadata layout. Panel stays mounted behind player so users can pick episodes without re-navigating.
 
-- **Unified ContentDetail panel** — Movies and series both use the same side panel. Series gets double-width (720px vs 380px) with a left column for season coin selector + episode list, right column for identical metadata layout. Panel stays mounted behind player so users can pick episodes without re-navigating. SeriesView.tsx is deprecated (unused).
-
-- **Special character search** — Queries containing `[`, `]`, `(`, `)`, `-`, `_` flip search priority to LIKE-first (preserves special chars) with FTS5 filling remaining slots. Normal queries use FTS5-first.
-
-- **Layered Escape handling** — All overlay Escape handlers use `addEventListener('keydown', handler, true)` (capture phase) + `e.stopImmediatePropagation()`. Player defers ContentDetail Escape via `isPlaying` prop. Prevents Escape from leaking to lower layers (e.g., clearing SearchBar query).
+- **Layered Escape handling** — All overlay Escape handlers use `addEventListener('keydown', handler, true)` (capture phase) + `e.stopImmediatePropagation()`. Player defers ContentDetail Escape via `isPlaying` prop. Prevents Escape from leaking to lower layers.
 
 - **Source identity colors** — Each source gets a distinct hue from a palette ordered for maximum visual distance. Dots show source color (not generic green/red status). Red only for error/expired. Source color bars shown on all card types (ChannelCard, PosterCard, list rows).
 
 - **Source ID quad fallback** — Always resolve `primarySourceId` as: `item.primarySourceId ?? item.primary_source_id ?? (item as any).source_ids ?? item.id?.split(':')[0]`. Some channels have `primary_source_id = NULL` in the DB; the content ID (`{sourceId}:{type}:{streamId}`) is the reliable last resort.
 
+- **Shared timezone-aware time formatting** — `src/lib/time.ts` exports `fmtTime(unix)` that reads timezone from app store. Used by LiveSplitView, EpgGuide, TimeshiftBar.
+
 ## Known limitations & open work
 
-High-level backlog lives in `../BACKLOG.md` (five buckets: Data & Search, Product shape, Multi-platform, Experience polish, Tech health). Quality/hardening debt is catalogued in `docs/qa-cycle-2.md`. Highlights:
+- **No FTS / enrichment / canonical (g1)** — Search is LIKE only. No TMDB metadata. No deduplication across sources. All deferred to g2+.
 
-- **International character search (partial)** — European diacritics handled via `any-ascii`. Arabic, Hebrew, Cyrillic, CJK not yet transliterated. Cross-language resolution is part of the Data & Search bucket.
+- **Episode stream hang** — Player shows infinite spinner when episode URL 404s. Needs timeout + error overlay.
 
-- **Semantic / embedding search not yet wired** — Schema and `sqlite-vec` extension in place; worker not built. Deferred — will be reconsidered as part of the Data & Search rework.
+- **Diacritic search** — "forg" misses "Forgöraren". anyAscii folding issue, deferred to g2 (FTS will handle this).
 
-- **EPG timeshift timeline not yet implemented** — XMLTV parser, EPG strip, and Full Guide panel are done. Timeshift bottom bar in the fullscreen player is pending (Experience polish bucket).
+- **Black screen bug** — Occasional idle black screen requiring Cmd+R. Undiagnosed, needs DevTools console output. Deferred.
 
-- **Episodes not indexed in FTS5** — `series:get-info` upserts episodes into `content` but not `content_fts`. Low priority (users search series, not episodes).
+- **International character search** — European diacritics partially handled. Arabic, Hebrew, Cyrillic, CJK not transliterated. Cross-language is g5.
 
-- **Continue Watching not browsable in live/films/series views** — Works on Home and Library only.
+- **EPG timeshift bar** — Full Guide panel done. Timeshift bottom bar in fullscreen player pending.
 
-- **Capacitor / mobile not yet implemented** — Multi-platform reach bucket.
+- **Capacitor / mobile not yet implemented** — Phase 3.
 
 ## Data quirks to be aware of
 
-- **Same series from two sources appears twice in Favorites** — Content rows are source-scoped (`{sourceId}:{type}:{streamId}`). Until two sources' series are merged via TMDB ID match during enrichment, they are separate items. Both get favorited separately and appear as two rows. Expected behavior; will self-resolve once enrichment runs.
+- **Same series from two sources appears twice in Favorites** — Content rows are source-scoped (`{sourceId}:{type}:{streamId}`). No deduplication until g3 (canonical layer). Expected behavior for g1.
 
-- **Series appearing under Films Favorites** — Some IPTV providers store limited series / mini-series with `type = 'movie'` in their Xtream API. The app stores whatever type the provider returns. A series like "The Queen's Gambit" may appear under Films not Series.
+- **Series appearing under Films** — Some IPTV providers store mini-series with `type = 'movie'`. The app stores whatever type the provider returns.
