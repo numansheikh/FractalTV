@@ -38,6 +38,9 @@ interface AppState {
   hasSeenChannelsModePrompt: boolean
   homeStripSize: number
 
+  // Timezone (null = system default)
+  timezone: string | null
+
   // Player settings
   minWatchSeconds: number
   controlsMode: 'never' | 'auto-2' | 'auto-3' | 'auto-5' | 'always'
@@ -67,6 +70,7 @@ interface AppState {
   setHomeMode: (m: 'discover' | 'channels') => void
   setHomeStripSize: (n: number) => void
   setHasSeenChannelsModePrompt: (v: boolean) => void
+  setTimezone: (tz: string | null) => void
   setMinWatchSeconds: (n: number) => void
   setControlsMode: (m: 'never' | 'auto-2' | 'auto-3' | 'auto-5' | 'always') => void
   setPlayerMode: (m: 'hidden' | 'fullscreen' | 'mini') => void
@@ -95,6 +99,7 @@ export const useAppStore = create<AppState>()(
       homeMode: 'discover',
       hasSeenChannelsModePrompt: false,
       homeStripSize: 10,
+      timezone: null,
       minWatchSeconds: 5,
       controlsMode: 'auto-3',
       playerMode: 'hidden',
@@ -136,6 +141,7 @@ export const useAppStore = create<AppState>()(
       setHomeMode: (homeMode) => set({ homeMode }),
       setHomeStripSize: (homeStripSize) => set({ homeStripSize }),
       setHasSeenChannelsModePrompt: (hasSeenChannelsModePrompt) => set({ hasSeenChannelsModePrompt }),
+      setTimezone: (timezone) => set({ timezone }),
       setMinWatchSeconds: (minWatchSeconds) => set({ minWatchSeconds }),
       setControlsMode: (controlsMode) => set({ controlsMode }),
       setPlayerMode: (playerMode) => set({ playerMode }),
@@ -151,6 +157,7 @@ export const useAppStore = create<AppState>()(
         homeMode: s.homeMode,
         hasSeenChannelsModePrompt: s.hasSeenChannelsModePrompt,
         homeStripSize: s.homeStripSize,
+        timezone: s.timezone,
         minWatchSeconds: s.minWatchSeconds,
         controlsMode: s.controlsMode,
       }),

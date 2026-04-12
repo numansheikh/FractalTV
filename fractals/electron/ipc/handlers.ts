@@ -147,7 +147,7 @@ const G1_STREAM_SELECT = `
   NULL                AS tmdb_id,
   0                   AS enriched,
   NULL                AS enriched_at,
-  0                   AS has_epg_data
+  EXISTS(SELECT 1 FROM epg WHERE epg.channel_external_id = s.epg_channel_id AND epg.source_id = s.source_id LIMIT 1) AS has_epg_data
 `
 
 const G1_SERIES_SELECT = `

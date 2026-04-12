@@ -11,7 +11,7 @@ import {
 import { CSS } from '@dnd-kit/utilities'
 import { useAppStore } from '@/stores/app.store'
 import { useSearchStore } from '@/stores/search.store'
-import { useSourcesStore } from '@/stores/sources.store'
+import { useSourcesStore, type Source, type SyncProgress } from '@/stores/sources.store'
 import { buildColorMapFromSources } from '@/lib/sourceColors'
 import { api } from '@/lib/api'
 import { ContentItem } from '@/lib/types'
@@ -183,6 +183,62 @@ function getGreeting() {
   return 'Good evening'
 }
 
+const SYNC_PHASE_LABELS: Record<string, string> = {
+  categories: 'Downloading categories…',
+  live: 'Fetching channels…',
+  movies: 'Fetching movies…',
+  series: 'Fetching series…',
+  fetching: 'Downloading playlist…',
+  parsing: 'Parsing playlist…',
+  content: 'Importing content…',
+}
+
+function HomeInfoStrip({ sources, syncProgress }: { sources: Source[]; syncProgress: Record<string, SyncProgress | null> }) {
+  const activeSyncs = Object.entries(syncProgress)
+    .filter(([, p]) => p && p.phase !== 'done' && p.phase !== 'error')
+    .map(([id, p]) => {
+      const src = sources.find((s) => s.id === id)
+      const pct = p!.total > 0 ? Math.round((p!.current / p!.total) * 100) : 0
+      const msg = p!.message || SYNC_PHASE_LABELS[p!.phase] || p!.phase
+      return { name: src?.name ?? 'Source', msg, pct }
+    })
+
+  const stripStyle: React.CSSProperties = {
+    display: 'flex', alignItems: 'center', gap: 6,
+    fontSize: 11, color: 'var(--text-2)',
+    fontFamily: 'var(--font-ui)',
+    height: 14, lineHeight: '14px',
+    paddingLeft: 2,
+  }
+
+  if (activeSyncs.length > 0) {
+    const s = activeSyncs[0]
+    return (
+      <div style={{ ...stripStyle, color: 'var(--accent-interactive)', animation: 'pulse 2s ease-in-out infinite' }}>
+        <span>{s.name}: {s.msg}</span>
+        {s.pct > 0 && <span style={{ fontFamily: 'var(--font-mono)' }}>{s.pct}%</span>}
+        {activeSyncs.length > 1 && (
+          <span style={{ color: 'var(--text-2)' }}>+{activeSyncs.length - 1} more</span>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div style={stripStyle}>
+      <span>{getGreeting()}</span>
+      {sources.length > 0 && (
+        <>
+          <span style={{ color: 'var(--border-default)', fontSize: 10 }}>·</span>
+          <span>{sources.reduce((sum, s) => sum + (s.itemCount ?? 0), 0).toLocaleString()} titles</span>
+          <span style={{ color: 'var(--border-default)', fontSize: 10 }}>·</span>
+          <span>{sources.length} {sources.length === 1 ? 'source' : 'sources'}</span>
+        </>
+      )}
+    </div>
+  )
+}
+
 interface Props {
   onSelectContent: (item: ContentItem) => void
 }
@@ -193,9 +249,10 @@ export function HomeView({ onSelectContent }: Props) {
     homeMode, setHomeMode,
     setShowSources, setChannelSurfContext,
   } = useAppStore()
-  const { queries, setQuery, seedQuery } = useSearchStore()
+  const { queries, debouncedQueries, setQuery, seedQuery } = useSearchStore()
   const query = queries['home'] ?? ''
-  const { sources } = useSourcesStore()
+  const debouncedQuery = debouncedQueries['home'] ?? ''
+  const { sources, syncProgress } = useSourcesStore()
   const { theme } = useTheme()
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -327,23 +384,7 @@ export function HomeView({ onSelectContent }: Props) {
         </div>
 
         {/* Row 2 — informative strip (always present, never collapses) */}
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 6,
-          fontSize: 11, color: 'var(--text-2)',
-          fontFamily: 'var(--font-ui)',
-          height: 14, lineHeight: '14px',
-          paddingLeft: 2,
-        }}>
-          <span>{getGreeting()}</span>
-          {sources.length > 0 && (
-            <>
-              <span style={{ color: 'var(--border-default)', fontSize: 10 }}>·</span>
-              <span>{sources.reduce((sum, s) => sum + (s.itemCount ?? 0), 0).toLocaleString()} titles</span>
-              <span style={{ color: 'var(--border-default)', fontSize: 10 }}>·</span>
-              <span>{sources.length} {sources.length === 1 ? 'source' : 'sources'}</span>
-            </>
-          )}
-        </div>
+        <HomeInfoStrip sources={sources} syncProgress={syncProgress} />
       </div>
 
       {/* Content area — scrollable */}
@@ -353,7 +394,7 @@ export function HomeView({ onSelectContent }: Props) {
         position: 'relative',
       }}>
         {query ? (
-          <HomeSearchResults query={query} onSelectContent={onSelectContent} />
+          <HomeSearchResults query={debouncedQuery} onSelectContent={onSelectContent} />
         ) : effectiveMode === 'channels'
           ? (channelsFavLoaded && channelsFavData.length === 0
               ? (

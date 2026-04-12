@@ -272,8 +272,15 @@ function AppearanceTab({ theme, font, setTheme, setFont }: {
 }
 
 /* ── Interface tab ────────────────────────────────────────────── */
+const COMMON_TIMEZONES = Intl.supportedValuesOf('timeZone')
+
 function InterfaceTab() {
-  const { pageSize, setPageSize, homeMode, setHomeMode, homeStripSize, setHomeStripSize } = useAppStore()
+  const { pageSize, setPageSize, homeMode, setHomeMode, homeStripSize, setHomeStripSize, timezone, setTimezone } = useAppStore()
+  const systemTz = Intl.DateTimeFormat().resolvedOptions().timeZone
+  const [tzSearch, setTzSearch] = useState('')
+  const filteredTz = tzSearch
+    ? COMMON_TIMEZONES.filter((tz) => tz.toLowerCase().includes(tzSearch.toLowerCase()))
+    : COMMON_TIMEZONES
   const snap = (v: number, opts: number[]) => opts.reduce((a, b) => Math.abs(b - v) < Math.abs(a - v) ? b : a)
   const pageOpts = [25, 50, 100, 200, 500]
   const stripOpts = [5, 6, 7, 8, 9, 10, 12, 15]
@@ -336,6 +343,73 @@ function InterfaceTab() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <SegmentedPicker label="Grid page size" value={pageSize} options={[25, 50, 75, 100, 200]}
             onChange={(v) => setPageSize(v)} />
+        </div>
+      </section>
+
+      <section>
+        <SectionLabel>Timezone</SectionLabel>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={{ fontSize: 11, color: 'var(--text-1)' }}>Use system timezone</span>
+            <button
+              onClick={() => setTimezone(timezone === null ? systemTz : null)}
+              style={{
+                width: 36, height: 20, borderRadius: 10, border: 'none', cursor: 'pointer',
+                background: timezone === null ? 'var(--accent-interactive)' : 'var(--bg-3)',
+                position: 'relative', transition: 'background 0.15s',
+              }}
+            >
+              <div style={{
+                width: 16, height: 16, borderRadius: 8, background: '#fff',
+                position: 'absolute', top: 2,
+                left: timezone === null ? 18 : 2,
+                transition: 'left 0.15s',
+              }} />
+            </button>
+          </div>
+          <span style={{ fontSize: 10, color: 'var(--text-2)' }}>
+            System: {systemTz}
+          </span>
+          {timezone !== null && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
+              <input
+                value={tzSearch}
+                onChange={(e) => setTzSearch(e.target.value)}
+                placeholder="Search timezones..."
+                style={{
+                  fontSize: 11, padding: '5px 8px', borderRadius: 6,
+                  border: '1px solid var(--border-default)', background: 'var(--bg-2)',
+                  color: 'var(--text-0)', outline: 'none', fontFamily: 'var(--font-ui)',
+                }}
+              />
+              <div style={{
+                maxHeight: 160, overflowY: 'auto', borderRadius: 6,
+                border: '1px solid var(--border-default)', background: 'var(--bg-2)',
+              }}>
+                {filteredTz.map((tz) => {
+                  const active = timezone === tz
+                  return (
+                    <button
+                      key={tz}
+                      onClick={() => { setTimezone(tz); setTzSearch('') }}
+                      style={{
+                        display: 'block', width: '100%', textAlign: 'left',
+                        padding: '4px 8px', fontSize: 10, fontFamily: 'var(--font-mono)',
+                        background: active ? 'var(--accent-interactive-dim)' : 'transparent',
+                        color: active ? 'var(--accent-interactive)' : 'var(--text-1)',
+                        border: 'none', cursor: 'pointer',
+                        fontWeight: active ? 600 : 400,
+                      }}
+                      onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'var(--bg-3)' }}
+                      onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = active ? 'var(--accent-interactive-dim)' : 'transparent' }}
+                    >
+                      {tz}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
         </div>
       </section>
     </div>

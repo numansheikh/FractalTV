@@ -8,6 +8,7 @@ import { useSourcesStore } from '@/stores/sources.store'
 import { useUserStore } from '@/stores/user.store'
 import { buildColorMapFromSources } from '@/lib/sourceColors'
 import { api } from '@/lib/api'
+import { fmtTime } from '@/lib/time'
 import { EpgGuide } from './EpgGuide'
 
 interface Props {
@@ -24,7 +25,7 @@ export function LiveSplitView({ channel, onFullscreen, onSwitchChannel, onClose 
   const qc = useQueryClient()
 
   const [search, setSearch] = useState('')
-  const [epgExpanded, setEpgExpanded] = useState(false)
+  const [epgExpanded, setEpgExpanded] = useState(true)
   const [showGuide, setShowGuide] = useState(false)
   const [categoryName, setCategoryName] = useState<string | null>(null)
 
@@ -505,10 +506,6 @@ function EpgStrip({ channel, expanded, onToggle, onOpenGuide }: { channel: Conte
     ? Math.min(100, Math.max(0, ((Date.now() / 1000 - now.startTime) / (now.endTime - now.startTime)) * 100))
     : null
 
-  const fmtTime = (unix: number) => {
-    const d = new Date(unix * 1000)
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-  }
 
   return (
     <div
@@ -518,7 +515,7 @@ function EpgStrip({ channel, expanded, onToggle, onOpenGuide }: { channel: Conte
         background: 'var(--bg-1)',
         borderTop: '1px solid var(--border-default)',
         overflow: 'hidden',
-        height: expanded ? 200 : 86,
+        height: expanded ? 260 : 86,
         transition: 'height 220ms cubic-bezier(0.32,0.72,0,1)',
         display: 'flex', flexDirection: 'column',
         cursor: 'pointer',
@@ -591,19 +588,38 @@ function EpgStrip({ channel, expanded, onToggle, onOpenGuide }: { channel: Conte
 
       {/* Expanded — description + upcoming */}
       {expanded && (
-        <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', borderTop: '1px solid var(--border-subtle)', padding: '10px 14px', gap: 8 }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', borderTop: '1px solid var(--border-subtle)', padding: '12px 14px', gap: 10 }} onClick={(e) => e.stopPropagation()}>
           {now?.description && (
-            <p style={{ fontSize: 11, color: 'var(--text-2)', margin: 0, lineHeight: 1.5, display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-              {now.description}
-            </p>
+            <div style={{
+              padding: '10px 12px', borderRadius: 8,
+              background: 'color-mix(in srgb, var(--accent-live) 6%, var(--bg-2))',
+              border: '1px solid color-mix(in srgb, var(--accent-live) 12%, var(--border-subtle))',
+            }}>
+              <p style={{ fontSize: 11, color: 'var(--text-1)', margin: 0, lineHeight: 1.6, display: '-webkit-box', WebkitLineClamp: 4, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                {now.description}
+              </p>
+            </div>
           )}
           {!now && <p style={{ fontSize: 11, color: 'var(--text-3)', margin: 0, fontStyle: 'italic' }}>No EPG data — sync your source to load program guide</p>}
           {next && (
-            <div style={{ display: 'flex', gap: 6, alignItems: 'flex-start' }}>
-              <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.06em', flexShrink: 0, marginTop: 2 }}>Up next</span>
+            <div style={{
+              padding: '8px 12px', borderRadius: 8,
+              background: 'var(--bg-2)',
+              border: '1px solid var(--border-subtle)',
+              display: 'flex', gap: 8, alignItems: 'flex-start',
+            }}>
+              <span style={{
+                fontSize: 8, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em',
+                color: 'var(--text-3)', flexShrink: 0, marginTop: 3,
+                padding: '1px 5px', borderRadius: 3,
+                background: 'var(--bg-3)',
+              }}>Next</span>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{next.title}</div>
-                {next.description && <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{next.description}</div>}
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-0)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {next.title}
+                  {next.startTime && <span style={{ fontSize: 9, color: 'var(--text-3)', fontFamily: 'var(--font-mono)', marginLeft: 6 }}>{fmtTime(next.startTime)}</span>}
+                </div>
+                {next.description && <div style={{ fontSize: 10, color: 'var(--text-2)', marginTop: 3, lineHeight: 1.5, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{next.description}</div>}
               </div>
             </div>
           )}

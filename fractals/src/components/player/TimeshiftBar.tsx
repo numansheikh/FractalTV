@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { api } from '@/lib/api'
+import { fmtTime } from '@/lib/time'
 
 interface Programme {
   id: string
@@ -21,10 +22,6 @@ interface Props {
 const HOUR_PX = 200
 const BAR_HEIGHT = 52
 
-const fmtTime = (unix: number) => {
-  const d = new Date(unix * 1000)
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-}
 
 export function TimeshiftBar({ contentId, catchupDays, onPlayCatchup, onGoLive, isTimeshift, currentProg }: Props) {
   const [programmes, setProgrammes] = useState<Programme[]>([])

@@ -63,8 +63,9 @@ function navBtnStyle(disabled: boolean): React.CSSProperties {
 export function ContentArea({ sort, onSelectContent, onAddSource }: Props) {
   const { activeView, typeFilter, categoryFilters, selectedSourceIds, viewMode, pageSize, setChannelSurfContext } = useAppStore()
   const categoryFilter = categoryFilters[activeView] ?? null
-  const { queries } = useSearchStore()
-  const query = queries[activeView] ?? ''
+  const { queries, debouncedQueries } = useSearchStore()
+  const query = debouncedQueries[activeView] ?? ''
+  const rawQuery = queries[activeView] ?? ''
   const { loadBulk } = useUserStore()
   const { sources } = useSourcesStore()
   const [ready, setReady] = useState(false)
@@ -243,7 +244,7 @@ export function ContentArea({ sort, onSelectContent, onAddSource }: Props) {
                 <EmptyState
                   icon={<HeartIcon />}
                   title="No matching favorites"
-                  description={`No favorited ${typeLabel} match "${query.replace(/^@/, '').trim()}".`}
+                  description={`No favorited ${typeLabel} match "${rawQuery.replace(/^@/, '').trim()}".`}
                 />
               )
             }
@@ -252,7 +253,7 @@ export function ContentArea({ sort, onSelectContent, onAddSource }: Props) {
                 <EmptyState
                   icon={<PlayIcon />}
                   title="No results"
-                  description={`Nothing matched "${query}" in this view.`}
+                  description={`Nothing matched "${rawQuery}" in this view.`}
                 />
               )
             }

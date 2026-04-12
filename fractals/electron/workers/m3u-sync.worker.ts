@@ -159,6 +159,21 @@ async function run() {
 
     send('categories', catMap.size, catMap.size, `${catMap.size} categories`)
 
+    // ── Backup user data before wipe (survives CASCADE) ─────────────────
+    db.prepare(`CREATE TEMP TABLE IF NOT EXISTS _bak_stream_ud AS SELECT * FROM stream_user_data WHERE 0`).run()
+    db.prepare(`CREATE TEMP TABLE IF NOT EXISTS _bak_channel_ud AS SELECT * FROM channel_user_data WHERE 0`).run()
+    db.prepare(`DELETE FROM _bak_stream_ud`).run()
+    db.prepare(`DELETE FROM _bak_channel_ud`).run()
+
+    db.prepare(`
+      INSERT INTO _bak_stream_ud SELECT sud.* FROM stream_user_data sud
+      JOIN streams s ON s.id = sud.stream_id WHERE s.source_id = ?
+    `).run(sourceId)
+    db.prepare(`
+      INSERT INTO _bak_channel_ud SELECT cud.* FROM channel_user_data cud
+      JOIN streams s ON s.id = cud.stream_id WHERE s.source_id = ?
+    `).run(sourceId)
+
     // ── Wipe existing streams for this source ───────────────────────────
     db.prepare(`DELETE FROM stream_categories WHERE stream_id IN (SELECT id FROM streams WHERE source_id = ?)`).run(sourceId)
     db.prepare(`DELETE FROM streams WHERE source_id = ?`).run(sourceId)
@@ -222,6 +237,18 @@ async function run() {
       const done = Math.min(i + BATCH, entries.length)
       send('content', done, entries.length, `Items: ${done.toLocaleString()}/${entries.length.toLocaleString()}`)
     }
+
+    // ── Restore user data (only for streams that still exist) ────────────
+    db.prepare(`
+      INSERT OR IGNORE INTO stream_user_data SELECT b.* FROM _bak_stream_ud b
+      WHERE EXISTS (SELECT 1 FROM streams WHERE id = b.stream_id)
+    `).run()
+    db.prepare(`
+      INSERT OR IGNORE INTO channel_user_data SELECT b.* FROM _bak_channel_ud b
+      WHERE EXISTS (SELECT 1 FROM streams WHERE id = b.stream_id)
+    `).run()
+    db.prepare(`DROP TABLE IF EXISTS _bak_stream_ud`).run()
+    db.prepare(`DROP TABLE IF EXISTS _bak_channel_ud`).run()
 
     // ── Finalize ─────────────────────────────────────────────────────────
     db.prepare('UPDATE categories SET content_synced = 1 WHERE source_id = ?').run(sourceId)

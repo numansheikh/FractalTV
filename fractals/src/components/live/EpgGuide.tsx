@@ -2,13 +2,14 @@ import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { ContentItem } from '@/lib/types'
 import { api } from '@/lib/api'
+import { fmtTime } from '@/lib/time'
 import { useSourcesStore } from '@/stores/sources.store'
 import { buildColorMapFromSources } from '@/lib/sourceColors'
 
 // ── Layout constants ──────────────────────────────────────────────────────────
-const HOUR_PX = 260       // pixels per hour
+const HOUR_PX = 200       // pixels per hour
 const ROW_H = 50          // row height in px
-const CH_COL_W = 168      // channel list column width
+const CH_COL_W = 300      // channel list column width
 const DETAIL_W = 240      // detail panel width
 const TOTAL_HOURS = 24    // 24h window fetched
 const EPG_PAGE_SIZE = 100 // channels per EPG fetch batch
@@ -136,10 +137,6 @@ export function EpgGuide({ channels, activeChannel, onSwitchChannel, onFullscree
   // Escape is handled by LiveSplitView (registered first, owns the chain)
 
   // ── Helpers ───────────────────────────────────────────────────────────────
-  const fmtTime = (unix: number) => {
-    const d = new Date(unix * 1000)
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-  }
   const fmtDur = (startTime: number, endTime: number) => {
     const mins = Math.round((endTime - startTime) / 60)
     return mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`

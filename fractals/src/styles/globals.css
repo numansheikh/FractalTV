@@ -295,6 +295,11 @@ input::placeholder {
   to { transform: rotate(360deg); }
 }
 
+@keyframes nav-pulse {
+  0%, 100% { opacity: 0.5; filter: drop-shadow(0 0 0px currentColor); }
+  50%      { opacity: 1;   filter: drop-shadow(0 0 6px currentColor); }
+}
+
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.3; }

@@ -1,5 +1,6 @@
 import { ActiveView } from '@/lib/types'
 import { useAppStore } from '@/stores/app.store'
+import { useSourcesStore } from '@/stores/sources.store'
 import { useTheme } from '@/hooks/useTheme'
 
 const NAV_ITEMS: { id: ActiveView; label: string; shortcut: string }[] = [
@@ -26,6 +27,8 @@ interface Props {
 export function NavRail({ onOpenSources, onOpenSettings }: Props) {
   const { activeView, setView } = useAppStore()
   const { theme, setTheme } = useTheme()
+  const syncProgress = useSourcesStore((s) => s.syncProgress)
+  const isSyncing = Object.values(syncProgress).some((p) => p && p.phase !== 'done' && p.phase !== 'error')
 
   return (
     <div style={{
@@ -72,7 +75,9 @@ export function NavRail({ onOpenSources, onOpenSettings }: Props) {
       </RailButton>
 
       <RailButton label="Sources" shortcut="" isActive={false} activeColor="var(--accent-interactive)" onClick={onOpenSources}>
-        <span style={{ color: 'var(--text-2)' }}><LayersIcon /></span>
+        <span style={{ color: isSyncing ? 'var(--accent-interactive)' : 'var(--text-2)', animation: isSyncing ? 'nav-pulse 2s ease-in-out infinite' : 'none' }}>
+          <LayersIcon />
+        </span>
       </RailButton>
 
       <RailButton label="Settings" shortcut="⌘," isActive={false} activeColor="var(--accent-interactive)" onClick={onOpenSettings}>
