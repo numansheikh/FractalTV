@@ -36,12 +36,18 @@ function formatExpDate(expDate: string | null | undefined): { label: string; col
   return { label: `Expires ${date}`, color: 'var(--accent-success)' }
 }
 
-const PHASE_LABELS: Record<SyncProgress['phase'], string> = {
-  categories: 'Syncing categories',
-  live: 'Syncing live channels',
-  movies: 'Syncing movies',
-  series: 'Syncing series',
-  done: 'Done',
+const PHASE_LABELS: Partial<Record<string, string>> = {
+  categories: 'Fetching categories',
+  live: 'Importing channels',
+  movies: 'Importing movies',
+  series: 'Importing series',
+  done: 'Preparing search…',
+  'indexing-live': 'Indexing channels',
+  'indexing-movies': 'Indexing movies',
+  'indexing-series': 'Indexing series',
+  'indexing-done': 'Search ready',
+  enriching: 'Enriching library',
+  'enriching-done': 'Enrichment complete',
   error: 'Error',
 }
 
@@ -91,7 +97,7 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
   }
 
 
-  const isSyncing = progress !== null && progress.phase !== 'done' && progress.phase !== 'error'
+  const isSyncing = progress !== null && progress.phase !== 'enriching-done' && progress.phase !== 'error'
   const syncPct = progress && progress.total > 0
     ? Math.min(100, Math.round((progress.current / progress.total) * 100))
     : 0
@@ -193,7 +199,7 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
           </span>
         </div>
       )}
-      {/* Top row: dot + name + actions */}
+      {/* Top row: dot + name */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <div style={{
           width: 8, height: 8, borderRadius: '50%',
@@ -207,16 +213,30 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
         }}>
           {source.name}
         </span>
-        {!editMode && (
-          <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
-            <ActionButton
-              icon={isSyncing
-                ? <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ animation: 'spin 1s linear infinite' }}><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
-                : <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" /><path d="M8 16H3v5" /></svg>
-              }
-              onClick={() => onSync(source.id)} disabled={isSyncing}>
-              {isSyncing ? 'Syncing…' : 'Sync'}
-            </ActionButton>
+      </div>
+      {/* Actions row */}
+      {!editMode && (
+        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            {isSyncing ? (
+              <ActionButton
+                icon={<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="6" y="6" width="12" height="12" rx="1" /></svg>}
+                onClick={() => api.sources.cancelSync(source.id)}>
+                Cancel
+              </ActionButton>
+            ) : (
+              <>
+                <ActionButton
+                  icon={<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" /><path d="M8 16H3v5" /></svg>}
+                  onClick={() => onSync(source.id)}>
+                  Sync
+                </ActionButton>
+                <ActionButton
+                  icon={<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg>}
+                  onClick={() => api.sources.reindex(source.id)}>
+                  Re-index
+                </ActionButton>
+              </>
+            )}
             <ActionButton
               icon={<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>}
               onClick={handleTest} disabled={testing}>
@@ -238,9 +258,8 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
               onClick={handleDelete}>
               Delete
             </ActionButton>
-          </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* URL row */}
       <div style={{

@@ -19,6 +19,7 @@ const SeriesDetail = lazy(() => import('@/components/detail/SeriesDetail').then(
 const SettingsPanel = lazy(() => import('@/components/settings/SettingsPanel').then((m) => ({ default: m.SettingsPanel })))
 const SourcesPanel = lazy(() => import('@/components/sources/SourcesPanel').then((m) => ({ default: m.SourcesPanel })))
 const LiveSplitView = lazy(() => import('@/components/live/LiveSplitView').then((m) => ({ default: m.LiveSplitView })))
+const AddSourceModal = lazy(() => import('@/components/sources/AddSourceForm').then((m) => ({ default: m.AddSourceModal })))
 
 export function App() {
   const [queryClient] = useState(() => new QueryClient({
@@ -45,6 +46,8 @@ function AppShell() {
     playerMode, setPlayerMode,
   } = useAppStore()
 
+  const [showAddModal, setShowAddModal] = useState(false)
+
   // Guard against StrictMode double-mount triggering duplicate syncs
   const syncingIds = useRef(new Set<string>())
 
@@ -53,12 +56,17 @@ function AppShell() {
     api.sources.list().then((list) => {
       const loaded = list as Source[]
       setSources(loaded)
-      for (const src of loaded) {
-        if (!src.disabled && !src.lastSync) {
-          handleSync(src.id)
+      if (loaded.length === 0) {
+        // First launch or factory reset — open add source modal directly
+        setShowAddModal(true)
+      } else {
+        for (const src of loaded) {
+          if (!src.disabled && !src.lastSync) {
+            handleSync(src.id)
+          }
         }
+        api.sources.startupCheck()
       }
-      if (loaded.length > 0) api.sources.startupCheck()
     })
 
     // Global keyboard shortcuts — skip when user is typing in an input/textarea
@@ -67,7 +75,7 @@ function AppShell() {
       return el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement
     }
     const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === ',') { e.preventDefault(); setShowSettings(true); return }
+      if ((e.metaKey || e.ctrlKey) && e.key === ',') { e.preventDefault(); setShowSettings(true); setShowSources(false); return }
       if ((e.metaKey || e.ctrlKey) && e.key === 'r') { e.preventDefault(); window.location.reload(); return }
 
       // Escape — universal "back" chain (bubble phase, so overlays win via capture+stopImmediatePropagation)
@@ -119,10 +127,22 @@ function AppShell() {
     const lastPhase: Record<string, string> = {}
     return api.on('sync:progress', (progress: any) => {
       const p = progress as SyncProgress & { sourceId: string }
-      if (p.phase === 'done' || p.phase === 'cancelled') {
+      if (p.phase === 'done') {
+        // Phase 1 complete — browse is ready. Keep dot alive; indexing will continue updating it.
+        invalidateContentQueries()
+        api.sources.list().then((list) => setSources(list as Source[]))
+        setSyncProgress(p.sourceId, { phase: p.phase, current: p.current, total: p.total, message: 'Preparing search…' })
+      } else if (p.phase === 'indexing-done') {
+        // Indexing complete — search is ready, but enrichment follows. Don't
+        // clear the progress dot yet; keep it showing "Search ready" until the
+        // enrichment worker sends its first progress message.
+        invalidateContentQueries()
+        api.sources.list().then((list) => setSources(list as Source[]))
+        setSyncProgress(p.sourceId, { phase: p.phase, current: 0, total: 0, message: 'Search ready' })
+      } else if (p.phase === 'enriching-done' || p.phase === 'cancelled') {
         setSyncProgress(p.sourceId, null)
         api.sources.list().then((list) => setSources(list as Source[]))
-        if (p.phase === 'done') invalidateContentQueries()
+        if (p.phase === 'enriching-done') invalidateContentQueries()
       } else if (p.phase === 'error') {
         setSyncProgress(p.sourceId, null)
         updateSource(p.sourceId, { status: 'error', lastError: p.message })
@@ -146,11 +166,8 @@ function AppShell() {
       await api.sources.sync(sourceId)
     } finally {
       syncingIds.current.delete(sourceId)
+      // Progress is cleared by the 'indexing-done' event; don't clear here.
     }
-    setSyncProgress(sourceId, null)
-    const list = await api.sources.list()
-    setSources(list as Source[])
-    invalidateContentQueries()
   }
 
   const handleRemove = async (sourceId: string) => {
@@ -225,8 +242,8 @@ function AppShell() {
     }}>
       {/* Nav Rail */}
       <NavRail
-        onOpenSources={() => setShowSources(!showSources)}
-        onOpenSettings={() => setShowSettings(!showSettings)}
+        onOpenSources={() => { const next = !showSources; setShowSources(next); if (next) setShowSettings(false) }}
+        onOpenSettings={() => { const next = !showSettings; setShowSettings(next); if (next) setShowSources(false) }}
       />
 
       {/* Main column */}
@@ -235,7 +252,7 @@ function AppShell() {
         <ContentArea
           sort={sort}
           onSelectContent={handleSelectContent}
-          onAddSource={() => setShowSources(true)}
+          onAddSource={() => { const { sources } = useSourcesStore.getState(); if (sources.length === 0) setShowAddModal(true); else setShowSources(true) }}
         />
       </div>
 
@@ -249,6 +266,20 @@ function AppShell() {
         onSurfChannel={surfChannel}
         onChipClick={handlePlayerChipClick}
       />
+
+      {/* Shared scrim for Settings/Sources panels — stays mounted through panel switches to prevent flicker */}
+      {(showSettings || showSources) && (
+        <div
+          onClick={() => { setShowSettings(false); setShowSources(false) }}
+          style={{
+            position: 'fixed', inset: 0,
+            background: 'rgba(0,0,0,0.45)',
+            backdropFilter: 'blur(3px)',
+            WebkitBackdropFilter: 'blur(3px)',
+            zIndex: 40,
+          }}
+        />
+      )}
 
       {/* Overlay panels — rendered via Suspense/lazy */}
       <Suspense fallback={null}>
@@ -281,17 +312,25 @@ function AppShell() {
             onClose={() => setSplitViewChannel(null)}
           />
         )}
-        {/* Settings */}
+        {/* Settings — suppressScrim: shared scrim above handles it */}
         {showSettings && (
-          <SettingsPanel onClose={() => setShowSettings(false)} />
+          <SettingsPanel onClose={() => setShowSettings(false)} suppressScrim />
         )}
-        {/* Sources */}
+        {/* Sources — suppressScrim: shared scrim above handles it */}
         {showSources && (
           <SourcesPanel
             onClose={() => setShowSources(false)}
             onSync={handleSync}
             onRemove={handleRemove}
             onAdded={handleSourceAdded}
+            suppressScrim
+          />
+        )}
+        {/* First-launch / direct add source modal */}
+        {showAddModal && (
+          <AddSourceModal
+            onAdded={() => { setShowAddModal(false); handleSourceAdded() }}
+            onCancel={() => setShowAddModal(false)}
           />
         )}
       </Suspense>

@@ -123,6 +123,7 @@ async function run() {
   db.pragma('journal_mode = WAL')
   db.pragma('synchronous = normal')
   db.pragma('foreign_keys = ON')
+  db.pragma('busy_timeout = 30000')
 
   try {
     db.prepare('UPDATE sources SET status = ? WHERE id = ?').run('syncing', sourceId)

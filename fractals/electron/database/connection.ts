@@ -55,6 +55,7 @@ export function getDb() {
   _sqlite.pragma('synchronous = normal')
   _sqlite.pragma('foreign_keys = ON')
   _sqlite.pragma('cache_size = -64000') // 64MB cache
+  _sqlite.pragma('busy_timeout = 10000') // safety net for the sync.worker download phase (still a separate connection)
 
   _db = drizzle(_sqlite, { schema })
 
@@ -232,6 +233,23 @@ function createTables(db: Database.Database) {
       tokenize = 'unicode61 remove_diacritics 2'
     );
 
+    -- ─── Lite-tier raw FTS (mirrors streams.title / series_sources.title) ──
+    -- Used by the Lite tier search path: no normalization, no dedup, no
+    -- canonical join. Maintained by the AFTER triggers below so the rowid
+    -- always equals the source table's implicit rowid → simple JOIN at
+    -- query time. Standard+ tiers ignore these tables and route through
+    -- canonical_*_fts instead.
+
+    CREATE VIRTUAL TABLE IF NOT EXISTS streams_fts USING fts5(
+      title,
+      tokenize = 'unicode61 remove_diacritics 2'
+    );
+
+    CREATE VIRTUAL TABLE IF NOT EXISTS series_sources_fts USING fts5(
+      title,
+      tokenize = 'unicode61 remove_diacritics 2'
+    );
+
     -- ─── Streams (raw provider inventory + L14 hints + polymorphic FK) ─
     -- Single-table design (associations merged into streams — no JOIN on the
     -- canonical→display path). Polymorphic FK: exactly one of canonical_vod_id,
@@ -402,6 +420,32 @@ function createTables(db: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_series_ud_watchlist     ON canonical_series_user_data(profile_id, is_watchlisted);
     CREATE INDEX IF NOT EXISTS idx_stream_ud_recent        ON stream_user_data(profile_id, last_watched_at);
     CREATE INDEX IF NOT EXISTS idx_channel_ud_favorites    ON channel_user_data(profile_id, is_favorite);
+
+    -- ─── Lite-tier FTS triggers ───────────────────────────────────────
+    -- These keep streams_fts / series_sources_fts in lockstep with the
+    -- base tables. The trigger fires inside whatever transaction the
+    -- sync.worker is using, so populate happens automatically without
+    -- changing sync.worker.ts. Cheap (~5–10s extra on 100k rows).
+
+    CREATE TRIGGER IF NOT EXISTS streams_ai AFTER INSERT ON streams BEGIN
+      INSERT INTO streams_fts(rowid, title) VALUES (new.rowid, new.title);
+    END;
+    CREATE TRIGGER IF NOT EXISTS streams_ad AFTER DELETE ON streams BEGIN
+      DELETE FROM streams_fts WHERE rowid = old.rowid;
+    END;
+    CREATE TRIGGER IF NOT EXISTS streams_au AFTER UPDATE OF title ON streams BEGIN
+      UPDATE streams_fts SET title = new.title WHERE rowid = old.rowid;
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS series_sources_ai AFTER INSERT ON series_sources BEGIN
+      INSERT INTO series_sources_fts(rowid, title) VALUES (new.rowid, new.title);
+    END;
+    CREATE TRIGGER IF NOT EXISTS series_sources_ad AFTER DELETE ON series_sources BEGIN
+      DELETE FROM series_sources_fts WHERE rowid = old.rowid;
+    END;
+    CREATE TRIGGER IF NOT EXISTS series_sources_au AFTER UPDATE OF title ON series_sources BEGIN
+      UPDATE series_sources_fts SET title = new.title WHERE rowid = old.rowid;
+    END;
   `)
 
   // Reset any sources stuck in 'syncing' from a previous crashed/killed run
@@ -409,6 +453,16 @@ function createTables(db: Database.Database) {
 
   // Insert default profile if not exists
   db.prepare(`INSERT OR IGNORE INTO profiles (id, name) VALUES ('default', 'Default')`).run()
+
+  // Default indexing tier — Standard on Electron desktop. FRACTALS_TIER env
+  // var overrides on every boot (for dev:lite / dev:standard / dev:rich scripts).
+  // Without the env var, INSERT OR IGNORE preserves whatever the user last chose.
+  const tierOverride = process.env.FRACTALS_TIER?.toLowerCase()
+  if (tierOverride && ['lite', 'standard', 'rich', 'ultimate'].includes(tierOverride)) {
+    db.prepare(`INSERT OR REPLACE INTO settings (key, value) VALUES ('indexing_tier', ?)`).run(tierOverride)
+  } else {
+    db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES ('indexing_tier', 'standard')`).run()
+  }
 }
 
 /** Read a setting value. Returns null if not set. */

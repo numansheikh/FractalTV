@@ -22,7 +22,8 @@ export function AddSourceModal({ onAdded, onCancel }: Props) {
   const [mode, setMode] = useState<SourceMode>('xtream')
   const [m3uInput, setM3uInput] = useState<M3uInputMode>('url')
   const [step, setStep] = useState<Step>('form')
-  const [xtreamForm, setXtreamForm] = useState({ name: '', serverUrl: '', username: '', password: '' })
+  const [xtreamForm, setXtreamForm] = useState({ name: '', host: '', port: '8080', username: '', password: '' })
+  const [xtreamProtocol, setXtreamProtocol] = useState<'http' | 'https'>('http')
   const [m3uForm, setM3uForm] = useState({ name: '', m3uUrl: '', filePath: '' })
   const [colorIndex, setColorIndex] = useState<number>(() => useSourcesStore.getState().sources.length % 8)
   const [testResult, setTestResult] = useState<TestResult | null>(null)
@@ -48,8 +49,13 @@ export function AddSourceModal({ onAdded, onCancel }: Props) {
 
   const m3uValue = m3uInput === 'file' ? m3uForm.filePath : m3uForm.m3uUrl
 
+  // Combine protocol + host + port into a full server URL for API calls
+  const xtreamServerUrl = xtreamForm.host
+    ? `${xtreamProtocol}://${xtreamForm.host}${xtreamForm.port ? `:${xtreamForm.port}` : ''}`
+    : ''
+
   const canTest = mode === 'xtream'
-    ? !!(xtreamForm.serverUrl && xtreamForm.username && xtreamForm.password)
+    ? !!(xtreamForm.host && xtreamForm.username && xtreamForm.password)
     : !!m3uValue
 
   const canAdd = step === 'tested' && testResult?.success === true
@@ -62,7 +68,7 @@ export function AddSourceModal({ onAdded, onCancel }: Props) {
     try {
       if (mode === 'xtream') {
         const result = await api.sources.testXtream({
-          serverUrl: xtreamForm.serverUrl,
+          serverUrl: xtreamServerUrl,
           username: xtreamForm.username,
           password: xtreamForm.password,
         })
@@ -96,17 +102,13 @@ export function AddSourceModal({ onAdded, onCancel }: Props) {
     let sourceId: string | undefined
 
     if (mode === 'xtream') {
-      const name =
-        xtreamForm.name.trim() ||
-        (() => {
-          try {
-            return new URL(xtreamForm.serverUrl.startsWith('http') ? xtreamForm.serverUrl : `http://${xtreamForm.serverUrl}`).hostname
-          } catch {
-            return xtreamForm.serverUrl
-          }
-        })()
-
-      const result = await api.sources.addXtream({ ...xtreamForm, name })
+      const name = xtreamForm.name.trim() || xtreamForm.host || xtreamServerUrl
+      const result = await api.sources.addXtream({
+        name,
+        serverUrl: xtreamServerUrl,
+        username: xtreamForm.username,
+        password: xtreamForm.password,
+      })
       if (!result.success) {
         setStep('error')
         setError(result.error ?? 'Failed to add source')
@@ -143,9 +145,21 @@ export function AddSourceModal({ onAdded, onCancel }: Props) {
     setSyncMessage('Starting sync…')
     setSyncingSourceId(sourceId)
     await api.sources.setColor(sourceId, colorIndex)
+    // Refresh sources store so the color + new entry appear immediately in NavRail/CommandBar
+    api.sources.list().then((list) => useSourcesStore.getState().setSources(list as any))
+    // Prime the sync progress so the NavRail pulsing dot appears immediately
+    useSourcesStore.getState().setSyncProgress(sourceId, { phase: 'categories', current: 0, total: 0, message: 'Connecting…' })
 
+    let dismissed = false
     const unsub = api.on('sync:progress', (progress: any) => {
       setSyncMessage(progress.message ?? '')
+      // Auto-dismiss once writing starts (total > 0 = all streams fetched, writing begins)
+      if (!dismissed && (progress.total ?? 0) > 0 && progress.phase !== 'categories') {
+        dismissed = true
+        unsub()
+        onAdded()
+        return
+      }
       if (progress.phase === 'done' || progress.phase === 'error') {
         unsub()
         if (progress.phase === 'done') {
@@ -180,6 +194,8 @@ export function AddSourceModal({ onAdded, onCancel }: Props) {
     setError('')
     setSyncMessage('')
     setColorIndex(sourceCount)
+    setXtreamForm({ name: '', host: '', port: '8080', username: '', password: '' })
+    setXtreamProtocol('http')
   }
 
   const formChanged = () => {
@@ -261,23 +277,78 @@ export function AddSourceModal({ onAdded, onCancel }: Props) {
             }}
           />
 
-          {/* Color picker */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-            <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-2)', letterSpacing: '0.04em', textTransform: 'uppercase', fontFamily: 'var(--font-ui)' }}>
-              Color
-            </label>
-            <ColorPicker selected={colorIndex} onPick={setColorIndex} />
-          </div>
-
           {mode === 'xtream' ? (
             <>
-              <FormField
-                label="Server URL"
-                placeholder="http://provider.example.com:8080"
-                value={xtreamForm.serverUrl}
-                onChange={(v) => { setXtreamForm(f => ({ ...f, serverUrl: v })); formChanged() }}
-                required
-              />
+              {/* Server URL — split into protocol toggle + host + port */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-2)', letterSpacing: '0.04em', textTransform: 'uppercase', fontFamily: 'var(--font-ui)' }}>
+                  Server URL <span style={{ color: 'var(--accent-danger)', marginLeft: 2 }}>*</span>
+                </label>
+                {/* Protocol + host row */}
+                <div style={{ display: 'flex', gap: 6, alignItems: 'stretch' }}>
+                  {/* Protocol toggle */}
+                  <div style={{ display: 'flex', borderRadius: 7, overflow: 'hidden', border: '1px solid var(--border-default)', flexShrink: 0 }}>
+                    {(['http', 'https'] as const).map((proto) => (
+                      <button
+                        key={proto}
+                        type="button"
+                        onClick={() => { setXtreamProtocol(proto); formChanged() }}
+                        style={{
+                          padding: '0 8px', height: 32, fontSize: 10, fontWeight: 700,
+                          fontFamily: 'var(--font-mono)', cursor: 'pointer', border: 'none',
+                          borderLeft: proto === 'https' ? '1px solid var(--border-default)' : 'none',
+                          background: xtreamProtocol === proto ? 'var(--accent-interactive)' : 'var(--bg-2)',
+                          color: xtreamProtocol === proto ? '#fff' : 'var(--text-3)',
+                          transition: 'background 0.1s, color 0.1s',
+                        }}
+                      >
+                        {proto}
+                      </button>
+                    ))}
+                  </div>
+                  {/* Host input */}
+                  <input
+                    type="text"
+                    placeholder="provider.example.com"
+                    value={xtreamForm.host}
+                    onChange={(e) => {
+                      let v = e.target.value
+                      // Strip protocol if pasted in
+                      const protoMatch = v.match(/^(https?):\/\/(.*)/)
+                      if (protoMatch) { setXtreamProtocol(protoMatch[1] as 'http' | 'https'); v = protoMatch[2] }
+                      // Strip port if pasted in
+                      const portMatch = v.match(/^([^:]+):(\d+)(.*)$/)
+                      if (portMatch) { v = portMatch[1] + portMatch[3]; setXtreamForm(f => ({ ...f, host: v, port: portMatch[2] })); formChanged(); return }
+                      setXtreamForm(f => ({ ...f, host: v })); formChanged()
+                    }}
+                    onKeyDown={(e) => e.stopPropagation()}
+                    style={{
+                      flex: 1, height: 32, background: 'var(--bg-0)', border: '1px solid var(--border-default)',
+                      borderRadius: 7, padding: '0 10px', fontSize: 11, color: 'var(--text-0)',
+                      caretColor: 'var(--accent-interactive)', outline: 'none', fontFamily: 'var(--font-ui)',
+                      transition: 'border-color 0.15s', boxSizing: 'border-box',
+                    }}
+                    onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--accent-interactive)' }}
+                    onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--border-default)' }}
+                  />
+                  {/* Port input */}
+                  <input
+                    type="text"
+                    placeholder="8080"
+                    value={xtreamForm.port}
+                    onChange={(e) => { setXtreamForm(f => ({ ...f, port: e.target.value })); formChanged() }}
+                    onKeyDown={(e) => e.stopPropagation()}
+                    style={{
+                      width: 58, height: 32, background: 'var(--bg-0)', border: '1px solid var(--border-default)',
+                      borderRadius: 7, padding: '0 8px', fontSize: 11, color: 'var(--text-0)',
+                      caretColor: 'var(--accent-interactive)', outline: 'none', fontFamily: 'var(--font-mono)',
+                      transition: 'border-color 0.15s', boxSizing: 'border-box', textAlign: 'center',
+                    }}
+                    onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--accent-interactive)' }}
+                    onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--border-default)' }}
+                  />
+                </div>
+              </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                 <FormField
                   label="Username"
@@ -307,10 +378,11 @@ export function AddSourceModal({ onAdded, onCancel }: Props) {
               {m3uInput === 'url' ? (
                 <FormField
                   label="M3U URL"
-                  placeholder="http://example.com/playlist.m3u"
+                  placeholder="example.com/playlist.m3u"
                   value={m3uForm.m3uUrl}
                   onChange={(v) => { setM3uForm(f => ({ ...f, m3uUrl: v })); formChanged() }}
                   required
+                  isUrl
                 />
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -351,6 +423,14 @@ export function AddSourceModal({ onAdded, onCancel }: Props) {
               )}
             </>
           )}
+
+          {/* Color picker — bottom, it's personalization not a required field */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+            <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-2)', letterSpacing: '0.04em', textTransform: 'uppercase', fontFamily: 'var(--font-ui)' }}>
+              Color
+            </label>
+            <ColorPicker selected={colorIndex} onPick={setColorIndex} />
+          </div>
 
           {/* Test result feedback */}
           {step === 'tested' && testResult && (
@@ -442,7 +522,7 @@ export function AddSourceModal({ onAdded, onCancel }: Props) {
                 </button>
                 <button
                   type="button"
-                  onClick={onCancel}
+                  onClick={onAdded}
                   style={{
                     flex: 1, padding: '8px 0', borderRadius: 7, fontSize: 11, fontWeight: 600,
                     background: 'var(--bg-3)', border: '1px solid var(--border-default)',
@@ -503,11 +583,14 @@ export function AddSourceModal({ onAdded, onCancel }: Props) {
                   onClick={handleTest}
                   disabled={!canTest || step === 'testing'}
                   style={{
-                    flex: 1, padding: '8px 0', borderRadius: 7, fontSize: 11, fontWeight: 500,
-                    background: 'var(--bg-3)', border: '1px solid var(--border-default)',
-                    color: 'var(--text-0)', cursor: 'pointer',
+                    flex: 1, padding: '8px 0', borderRadius: 7, fontSize: 11, fontWeight: 600,
+                    background: canAdd ? 'var(--bg-3)' : 'var(--accent-interactive)',
+                    border: canAdd ? '1px solid var(--border-default)' : 'none',
+                    color: canAdd ? 'var(--text-1)' : '#fff',
+                    cursor: (!canTest || step === 'testing') ? 'default' : 'pointer',
                     fontFamily: 'var(--font-ui)',
                     opacity: (!canTest || step === 'testing') ? 0.4 : 1,
+                    transition: 'background 0.15s, color 0.15s, opacity 0.1s',
                   }}
                 >
                   {step === 'testing' ? 'Testing…' : 'Test'}
@@ -518,13 +601,16 @@ export function AddSourceModal({ onAdded, onCancel }: Props) {
                   disabled={!canAdd}
                   style={{
                     flex: 1, padding: '8px 0', borderRadius: 7, fontSize: 11, fontWeight: 600,
-                    background: 'var(--accent-interactive)', border: 'none',
-                    color: '#fff', cursor: 'pointer', transition: 'opacity 0.1s',
+                    background: canAdd ? 'var(--accent-interactive)' : 'var(--bg-3)',
+                    border: canAdd ? 'none' : '1px solid var(--border-default)',
+                    color: canAdd ? '#fff' : 'var(--text-3)',
+                    cursor: canAdd ? 'pointer' : 'default',
                     fontFamily: 'var(--font-ui)',
-                    opacity: !canAdd ? 0.4 : 1,
+                    opacity: 1,
+                    transition: 'background 0.15s, color 0.15s',
                   }}
                   onMouseEnter={(e) => { if (canAdd) e.currentTarget.style.opacity = '0.88' }}
-                  onMouseLeave={(e) => { e.currentTarget.style.opacity = !canAdd ? '0.4' : '1' }}
+                  onMouseLeave={(e) => { e.currentTarget.style.opacity = '1' }}
                 >
                   Add
                 </button>
@@ -583,11 +669,26 @@ function SubTabBtn({ label, active, onClick }: { label: string; active: boolean;
 
 /* ── Field ──────────────────────────────────────────────────────── */
 function FormField({
-  label, placeholder, value, onChange, type = 'text', required,
+  label, placeholder, value, onChange, type = 'text', required, isUrl,
 }: {
   label: string; placeholder: string; value: string
-  onChange: (v: string) => void; type?: string; required?: boolean
+  onChange: (v: string) => void; type?: string; required?: boolean; isUrl?: boolean
 }) {
+  const handleBlur = (e: React.FocusEvent<HTMLInputElement>) => {
+    e.currentTarget.style.borderColor = 'var(--border-default)'
+    if (isUrl && value.trim() && !/^https?:\/\//i.test(value.trim())) {
+      onChange('http://' + value.trim())
+    }
+  }
+
+  const toggleProtocol = () => {
+    if (value.startsWith('https://')) onChange(value.replace('https://', 'http://'))
+    else if (value.startsWith('http://')) onChange(value.replace('http://', 'https://'))
+  }
+
+  const hasProtocol = /^https?:\/\//i.test(value)
+  const isHttps = value.startsWith('https://')
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
       <label style={{
@@ -603,6 +704,7 @@ function FormField({
         placeholder={placeholder}
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => e.stopPropagation()}
         required={required}
         style={{
           background: 'var(--bg-0)', border: '1px solid var(--border-default)',
@@ -612,8 +714,32 @@ function FormField({
           width: '100%', boxSizing: 'border-box',
         }}
         onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--accent-interactive)' }}
-        onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--border-default)' }}
+        onBlur={handleBlur}
       />
+      {isUrl && value.trim().length > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <span style={{ fontSize: 9, color: 'var(--text-3)', fontFamily: 'var(--font-ui)' }}>Protocol:</span>
+          {(['http', 'https'] as const).map((proto) => {
+            const active = isHttps ? proto === 'https' : proto === 'http'
+            return (
+              <button
+                key={proto}
+                type="button"
+                onClick={toggleProtocol}
+                style={{
+                  padding: '1px 7px', borderRadius: 3, fontSize: 9, fontWeight: 600,
+                  fontFamily: 'var(--font-mono)', cursor: 'pointer', border: 'none',
+                  background: active ? 'var(--accent-interactive)' : 'var(--bg-3)',
+                  color: active ? '#fff' : 'var(--text-3)',
+                  transition: 'background 0.1s, color 0.1s',
+                }}
+              >
+                {proto}
+              </button>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }

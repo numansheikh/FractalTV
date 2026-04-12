@@ -14,6 +14,7 @@ try {
   db.pragma('journal_mode = WAL')
   db.pragma('synchronous = normal')
   db.pragma('foreign_keys = ON')
+  db.pragma('busy_timeout = 30000')
 
   db.transaction(() => {
     // stream_categories cascade from streams via FK ON DELETE CASCADE

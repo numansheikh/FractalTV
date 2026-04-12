@@ -11,6 +11,18 @@ import { m3uService } from '../services/m3u.service'
 import { syncEpg, getNowNext } from '../services/epg.service'
 import { normalizeForSearch } from '../lib/normalize'
 import { parseQuery } from '../services/search/query-parser'
+import {
+  startEnrichment,
+  cancelEnrichment,
+  cancelAllEnrichment,
+  isEnriching,
+} from '../services/enrichment/enrichment.service'
+import {
+  startIndexing,
+  cancelIndexing,
+  cancelAllIndexing,
+  isIndexing,
+} from '../services/indexing/indexing.service'
 
 // ─── Minimal row interfaces ─────────────────────────────────────────────────
 
@@ -63,37 +75,74 @@ function dbPath(): string {
   )
 }
 
-// ─── Enrichment worker kick ────────────────────────────────────────────────
-// The enrichment worker is idempotent: it only touches canonicals with
-// oracle_status='pending', so calling it repeatedly is cheap. We fire it on
-// boot and after every successful sync. A single instance at a time — the
-// `enrichmentWorkerActive` flag guards against overlap.
-// `activeSyncWorkers` allows cancel mid-flight.
+// ─── Sync worker registry ─────────────────────────────────────────────────
+// Sync still runs as a worker thread (network-bound HTTP fetch + bulk
+// inserts). Indexing and enrichment both run in the main process via
+// services that share the main sqlite connection — their writes can't race
+// against user-data IPC writes.
+//
+// Write-lock policy:
+//   - Sync (worker)  → indexing (main) → enrichment (main).
+//   - Only one separate-connection writer ever exists (sync), and only
+//     during the brief download phase. Indexing and enrichment serialize
+//     naturally on the JS event loop with user-data handlers.
 
-let enrichmentWorkerActive = false
 const activeSyncWorkers = new Map<string, Worker>()
 
-export function kickEnrichment(): void {
-  if (enrichmentWorkerActive) return
-  enrichmentWorkerActive = true
-  const workerPath = join(__dirname, 'enrichment.worker.js')
-  try {
-    const worker = new Worker(workerPath, {
-      workerData: { dbPath: dbPath(), userDataPath: app.getPath('userData') },
-    })
-    worker.on('message', (msg: any) => {
-      if (msg?.type === 'done') {
-        console.log('[enrichment] done:', msg.stats)
-      } else if (msg?.type === 'error') {
-        console.warn('[enrichment] error:', msg.message)
+function sendToWin(win: BrowserWindow | null, channel: string, payload: any) {
+  if (win && !win.isDestroyed()) win.webContents.send(channel, payload)
+}
+
+// ─── Tier gates ────────────────────────────────────────────────────────
+// Tiered experience model — see /Users/numan/.claude/plans/eventual-exploring-wolf.md
+//   lite:     g1 only + raw streams_fts (no canonical, no enrichment)
+//   standard: g1 + g3 (canonical + canonical_*_fts) — full search, dedup
+//   rich:     standard + keyless enrichment (iptv-org / IMDb / Wikidata)
+//   ultimate: rich + TMDB
+// Default is 'standard'. Each kick site reads the setting lazily so a
+// runtime tier change in Settings takes effect on the next sync/reindex
+// without an app restart.
+type IndexingTier = 'lite' | 'standard' | 'rich' | 'ultimate'
+function getIndexingTier(): IndexingTier {
+  const v = (getSetting('indexing_tier') ?? 'standard').toLowerCase()
+  if (v === 'lite' || v === 'standard' || v === 'rich' || v === 'ultimate') return v
+  return 'standard'
+}
+
+function kickIndexing(sourceId: string) {
+  // Fire-and-forget: the service emits its own progress + indexing-done.
+  // Chain enrichment only when indexing completed normally — skip the
+  // chain on cancel or error so a cancelled re-index doesn't drag a
+  // background drain along with it.
+  const tier = getIndexingTier()
+
+  // Lite: no canonical/FTS pass at all. Search runs against streams_fts
+  // (populated by triggers in connection.ts during the sync writes).
+  // Emit indexing-done + enriching-done so the renderer clears the progress dot.
+  if (tier === 'lite') {
+    const win = BrowserWindow.getAllWindows()[0]
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('sync:progress', { sourceId, phase: 'indexing-done', current: 0, total: 0, message: 'Search ready' })
+      win.webContents.send('sync:progress', { sourceId, phase: 'enriching-done', current: 0, total: 0, message: '' })
+    }
+    return
+  }
+
+  startIndexing(sourceId)
+    .then((result) => {
+      if (result !== 'completed') return
+      // Enrichment is keyless metadata fetching — only useful for Rich+.
+      if (tier === 'rich' || tier === 'ultimate') {
+        startEnrichment(sourceId)
+      } else {
+        // Standard: no enrichment. Emit enriching-done to clear the progress dot.
+        const win = BrowserWindow.getAllWindows()[0]
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('sync:progress', { sourceId, phase: 'enriching-done', current: 0, total: 0, message: '' })
+        }
       }
     })
-    worker.on('error', (err) => { console.warn('[enrichment] worker error:', err) })
-    worker.on('exit', () => { enrichmentWorkerActive = false })
-  } catch (err) {
-    enrichmentWorkerActive = false
-    console.warn('[enrichment] failed to spawn worker:', err)
-  }
+    .catch((err) => console.warn(`[indexing:${sourceId}] kick error:`, err))
 }
 
 function runEpgSync(sqlite: ReturnType<typeof getSqlite>, win: BrowserWindow | null, sourceId: string, src: any) {
@@ -170,6 +219,77 @@ function resolveContent(sqlite: ReturnType<typeof getSqlite>, contentId: string)
 /** SELECT fragment for streams → canonical_vod/live/episode joins. */
 // Max rows fetched internally for search to compute accurate totals.
 const SEARCH_TOTAL_CAP = 2000
+
+// ─── Search-specific lean SELECTs ─────────────────────────────────────────
+// Search results only need fields the grid/card renders: id, title, type,
+// source, thumbnail, category. No EPG, no enrichment, no canonical JOINs.
+// Detail panel fetches full data on click via content:get.
+
+const SEARCH_STREAM_SELECT = `
+  s.id,
+  s.source_id         AS primary_source_id,
+  s.source_id         AS source_ids,
+  s.stream_id         AS external_id,
+  s.type,
+  s.title,
+  s.category_id,
+  s.thumbnail_url     AS poster_url,
+  NULL                AS year,
+  0                   AS enriched,
+  0                   AS has_epg_data
+`
+
+const SEARCH_STREAM_SELECT_CANONICAL = `
+  s.id,
+  s.source_id         AS primary_source_id,
+  s.source_id         AS source_ids,
+  s.stream_id         AS external_id,
+  s.type,
+  s.title,
+  s.category_id,
+  COALESCE(cv.poster_url, cl.logo_url, s.thumbnail_url) AS poster_url,
+  cv.year             AS year,
+  CASE
+    WHEN cv.oracle_status = 'resolved' OR cl.oracle_status = 'resolved'
+      THEN 1 ELSE 0
+  END                 AS enriched,
+  0                   AS has_epg_data
+`
+
+const SEARCH_STREAM_JOINS_CANONICAL = `
+  LEFT JOIN canonical_vod  cv ON cv.id = s.canonical_vod_id
+  LEFT JOIN canonical_live cl ON cl.id = s.canonical_live_id
+`
+
+const SEARCH_SERIES_SELECT = `
+  ss.id,
+  ss.source_id                    AS primary_source_id,
+  ss.source_id                    AS source_ids,
+  ss.series_external_id           AS external_id,
+  'series'                        AS type,
+  ss.title,
+  ss.category_id,
+  ss.thumbnail_url                AS poster_url,
+  NULL                            AS year,
+  0                               AS enriched,
+  0                               AS has_epg_data
+`
+
+const SEARCH_SERIES_SELECT_CANONICAL = `
+  ss.id,
+  ss.source_id                    AS primary_source_id,
+  ss.source_id                    AS source_ids,
+  ss.series_external_id           AS external_id,
+  'series'                        AS type,
+  ss.title,
+  ss.category_id,
+  COALESCE(cs.poster_url, ss.thumbnail_url) AS poster_url,
+  cs.year                         AS year,
+  CASE WHEN cs.oracle_status = 'resolved' THEN 1 ELSE 0 END AS enriched,
+  0                               AS has_epg_data
+`
+
+// ─── Full SELECTs (browse, detail, favorites, EPG — not search) ───────────
 
 const STREAM_SELECT = `
   s.id,
@@ -263,9 +383,10 @@ export function registerHandlers() {
   // No-op in V3 — per-type FTS is populated inline by the sync worker.
   rebuildFtsIfNeeded().catch(console.error)
 
-  // Kick the enrichment worker once on startup so pending canonicals from
-  // prior sessions get drained even if no new sync is triggered.
-  kickEnrichment()
+  // No startup enrichment kick. Pending canonicals from a prior session
+  // resume on the next sync/re-index — indexing-done chains to enrichment
+  // via kickIndexing. Manual resume is available via the 'enrichment:start'
+  // IPC (Settings → Diagnostics) if needed.
 
   // ── Ping ────────────────────────────────────────────────────────────────
   ipcMain.handle('ping', () => 'pong')
@@ -421,7 +542,20 @@ export function registerHandlers() {
     return { count: parsed.sources.length }
   })
 
-  ipcMain.handle('sources:factory-reset', () => {
+  ipcMain.handle('sources:factory-reset', async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    // Kill all in-flight workers and notify renderer before wiping data.
+    const killPromises: Promise<number>[] = []
+    for (const [id, w] of activeSyncWorkers) {
+      activeSyncWorkers.delete(id)
+      win?.webContents.send('sync:progress', { sourceId: id, phase: 'cancelled', current: 0, total: 0, message: '' })
+      killPromises.push(w.terminate())
+    }
+    // Cancel all main-process indexing + enrichment drains (AbortController
+    // aborts the in-flight loop on the next batch boundary — no worker to kill).
+    cancelAllIndexing()
+    cancelAllEnrichment()
+    await Promise.all(killPromises)
     const sqlite = getSqlite()
     sqlite.pragma('foreign_keys = OFF')
     try {
@@ -589,38 +723,28 @@ export function registerHandlers() {
       activeSyncWorkers.set(sourceId, worker)
 
       worker.on('message', (msg: any) => {
+        if (!activeSyncWorkers.has(sourceId)) return // cancelled — drop all messages
         if (msg.type === 'progress') {
-          win?.webContents.send('sync:progress', {
-            sourceId, phase: msg.phase, current: msg.current, total: msg.total, message: msg.message,
-          })
+          sendToWin(win, 'sync:progress', { sourceId, phase: msg.phase, current: msg.current, total: msg.total, message: msg.message })
         } else if (msg.type === 'done') {
           activeSyncWorkers.delete(sourceId)
-          win?.webContents.send('sync:progress', {
-            sourceId, phase: 'done', current: msg.totalItems, total: msg.totalItems,
-            message: `Synced ${msg.catCount} categories, ${msg.totalItems.toLocaleString()} items`,
-          })
+          sendToWin(win, 'sync:progress', { sourceId, phase: 'done', current: msg.totalItems, total: msg.totalItems, message: `Synced ${msg.catCount} categories, ${msg.totalItems.toLocaleString()} items` })
           resolve({ success: true })
-          // Kick EPG + enrichment in background.
           const src = sqlite.prepare('SELECT * FROM sources WHERE id = ?').get(sourceId) as SourceRow | undefined
           if (src?.server_url) runEpgSync(sqlite, win, sourceId, src)
-          kickEnrichment()
+          // Enrichment chains off indexing-done inside kickIndexing — no co-kick.
+          kickIndexing(sourceId)
         } else if (msg.type === 'warning') {
-          win?.webContents.send('sync:progress', {
-            sourceId, phase: 'warning', current: 0, total: 0, message: msg.message,
-          })
+          sendToWin(win, 'sync:progress', { sourceId, phase: 'warning', current: 0, total: 0, message: msg.message })
         } else if (msg.type === 'error') {
-          win?.webContents.send('sync:progress', {
-            sourceId, phase: 'error', current: 0, total: 0, message: msg.message,
-          })
+          sendToWin(win, 'sync:progress', { sourceId, phase: 'error', current: 0, total: 0, message: msg.message })
           resolve({ success: false, error: msg.message })
         }
       })
 
       worker.on('error', (err) => {
         activeSyncWorkers.delete(sourceId)
-        win?.webContents.send('sync:progress', {
-          sourceId, phase: 'error', current: 0, total: 0, message: String(err),
-        })
+        sendToWin(win, 'sync:progress', { sourceId, phase: 'error', current: 0, total: 0, message: String(err) })
         resolve({ success: false, error: String(err) })
       })
 
@@ -631,15 +755,67 @@ export function registerHandlers() {
     })
   })
 
+  // ── Re-index ────────────────────────────────────────────────────────────
+  // Phase-2-only re-run for a single source: clears FTS and canonical FKs on
+  // this source's streams/series, then kicks the indexing service. The
+  // service re-upserts canonical rows (ON CONFLICT DO UPDATE SET
+  // normalized_title = excluded.normalized_title), so any normalizer
+  // changes flow through.
+  ipcMain.handle('sources:reindex', (_event, sourceId: string) => {
+    if (activeSyncWorkers.has(sourceId) || isIndexing(sourceId) || isEnriching(sourceId)) {
+      return { success: false, error: 'Sync, indexing, or enrichment already in progress' }
+    }
+    const sqlite = getSqlite()
+    const tx = sqlite.transaction(() => {
+      // VOD: clear FTS for canonicals this source's movie streams reference, then null the FKs.
+      sqlite.prepare(`
+        DELETE FROM canonical_vod_fts WHERE canonical_id IN (
+          SELECT DISTINCT canonical_vod_id FROM streams
+          WHERE source_id = ? AND canonical_vod_id IS NOT NULL
+        )
+      `).run(sourceId)
+      sqlite.prepare(`UPDATE streams SET canonical_vod_id = NULL WHERE source_id = ? AND type = 'movie'`).run(sourceId)
+
+      // Live: same pattern.
+      sqlite.prepare(`
+        DELETE FROM canonical_live_fts WHERE canonical_id IN (
+          SELECT DISTINCT canonical_live_id FROM streams
+          WHERE source_id = ? AND canonical_live_id IS NOT NULL
+        )
+      `).run(sourceId)
+      sqlite.prepare(`UPDATE streams SET canonical_live_id = NULL WHERE source_id = ? AND type = 'live'`).run(sourceId)
+
+      // Series: FTS only (canonical_series rows are written by sync.worker, not by the indexing
+      // worker — a true full-depth series recompute requires re-running sync).
+      sqlite.prepare(`
+        DELETE FROM canonical_series_fts WHERE canonical_id IN (
+          SELECT DISTINCT canonical_series_id FROM series_sources WHERE source_id = ?
+        )
+      `).run(sourceId)
+    })
+    tx()
+    kickIndexing(sourceId)
+    return { success: true }
+  })
+
   // ── Sync cancel ─────────────────────────────────────────────────────────
-  ipcMain.handle('sources:sync:cancel', async (event, sourceId: string) => {
+  ipcMain.handle('sources:sync:cancel', (event, sourceId: string) => {
     const win = BrowserWindow.fromWebContents(event.sender)
-    const worker = activeSyncWorkers.get(sourceId)
-    if (worker) {
-      activeSyncWorkers.delete(sourceId)
-      worker.terminate()
-      getSqlite().prepare('UPDATE sources SET status = ? WHERE id = ?').run('idle', sourceId)
+    const syncWorker = activeSyncWorkers.get(sourceId)
+    const indexing = isIndexing(sourceId)
+    const enriching = isEnriching(sourceId)
+    // Delete from sync worker map first — this gates the message forwarder so
+    // no more progress events arrive after cancel.
+    if (syncWorker) activeSyncWorkers.delete(sourceId)
+    if (syncWorker || indexing || enriching) {
+      getSqlite().prepare('UPDATE sources SET status = ? WHERE id = ?').run('active', sourceId)
       win?.webContents.send('sync:progress', { sourceId, phase: 'cancelled', current: 0, total: 0, message: '' })
+      // Sync worker: terminate async (UI is already cleared above).
+      syncWorker?.terminate()
+      // Indexing service: abort the loop on the next batch boundary.
+      if (indexing) cancelIndexing(sourceId)
+      // Enrichment: abort the async drain loop — service emits enriching-done on finally.
+      if (enriching) cancelEnrichment(sourceId)
     }
     return { ok: true }
   })
@@ -780,6 +956,21 @@ export function registerHandlers() {
     // Empty query (or @ with nothing else) → browse path.
     if (!parsed.titleQuery && !parsed.langFilter && !parsed.yearFilter && !parsed.typeFilter) {
       return runBrowseSearch(effectiveType, categoryName, filterIds, limit, offset)
+    }
+
+    // Short query guard — single-char prefix queries (e.g. "a*") force FTS5 to
+    // rank tens of thousands of matches, blocking the main thread for seconds.
+    // Require at least 2 non-whitespace characters before hitting the DB.
+    const strippedQuery = rawQuery.replace(/[@\s]/g, '')
+    if (strippedQuery.length < 2) return { items: [], total: 0 }
+
+    // Lite tier: skip canonical FTS entirely, run streams_fts directly.
+    // No dedup, no diacritic folding beyond unicode61 remove_diacritics 2,
+    // no year separation. Per-source raw title search.
+    const LITE_SEARCH_CAP = 200
+    if (getIndexingTier() === 'lite') {
+      const lite = runLiteSearch(sqlite, rawQuery, effectiveType, categoryName, filterIds, LITE_SEARCH_CAP)
+      return { items: lite.slice(offset, offset + limit), total: lite.length }
     }
 
     if (parsed.isAdvanced) {
@@ -1251,8 +1442,10 @@ export function registerHandlers() {
   ipcMain.handle('enrichment:search-tmdb',   deprecatedEnrichment('search-tmdb'))
   ipcMain.handle('enrichment:enrich-by-id',  deprecatedEnrichment('enrich-by-id'))
   ipcMain.handle('enrichment:start', async () => {
-    kickEnrichment()
-    return { success: true, message: 'Keyless enrichment kicked' }
+    const sqlite = getSqlite()
+    const sources = sqlite.prepare('SELECT id FROM sources WHERE disabled = 0').all() as { id: string }[]
+    for (const { id } of sources) startEnrichment(id)
+    return { success: true, message: 'Keyless enrichment kicked (per-source)' }
   })
 
   // ── Categories ────────────────────────────────────────────────────────
@@ -1352,6 +1545,70 @@ export function registerHandlers() {
 
 // ─── Helpers: browse + search ─────────────────────────────────────────────
 
+// Lite-tier search: query the raw `streams_fts` and `series_sources_fts`
+// triggers-maintained mirrors. Lean SELECT — no canonical JOINs, no EPG.
+function runLiteSearch(
+  sqlite: ReturnType<typeof getSqlite>,
+  rawQuery: string,
+  type: 'live' | 'movie' | 'series' | undefined,
+  categoryName: string | undefined,
+  filterIds: string[],
+  limit: number
+): unknown[] {
+  const ftsExpr = buildFtsExpression(rawQuery)
+  if (!ftsExpr) return []
+
+  const sourceList = filterIds.map(() => '?').join(',')
+  const results: unknown[] = []
+
+  if (!type || type === 'live' || type === 'movie') {
+    const typeConds = type ? `AND s.type = ?` : `AND s.type IN ('live','movie')`
+    const typeParams: unknown[] = type ? [type] : []
+    const catJoin = categoryName
+      ? `JOIN stream_categories sc ON sc.stream_id = s.id JOIN categories cat ON cat.id = sc.category_id AND cat.name = ?`
+      : ''
+    const catParams: unknown[] = categoryName ? [categoryName] : []
+    try {
+      results.push(...sqlite.prepare(`
+        SELECT ${SEARCH_STREAM_SELECT}
+        FROM streams_fts fts
+        JOIN streams s ON s.rowid = fts.rowid
+        ${catJoin}
+        WHERE streams_fts MATCH ?
+          ${typeConds}
+          AND s.source_id IN (${sourceList})
+        ORDER BY fts.rank
+        LIMIT ?
+      `).all(...catParams, ftsExpr, ...typeParams, ...filterIds, limit) as unknown[])
+    } catch (err) {
+      console.warn('[search:lite] streams_fts failed:', (err as Error).message)
+    }
+  }
+
+  if (!type || type === 'series') {
+    const catJoin = categoryName
+      ? `JOIN series_source_categories ssc ON ssc.series_source_id = ss.id JOIN categories cat ON cat.id = ssc.category_id AND cat.name = ?`
+      : ''
+    const catParams: unknown[] = categoryName ? [categoryName] : []
+    try {
+      results.push(...sqlite.prepare(`
+        SELECT ${SEARCH_SERIES_SELECT}
+        FROM series_sources_fts fts
+        JOIN series_sources ss ON ss.rowid = fts.rowid
+        ${catJoin}
+        WHERE series_sources_fts MATCH ?
+          AND ss.source_id IN (${sourceList})
+        ORDER BY fts.rank
+        LIMIT ?
+      `).all(...catParams, ftsExpr, ...filterIds, limit) as unknown[])
+    } catch (err) {
+      console.warn('[search:lite] series_sources_fts failed:', (err as Error).message)
+    }
+  }
+
+  return results.slice(0, limit)
+}
+
 function buildFtsExpression(rawQuery: string): string | null {
   const quotedMatch = rawQuery.match(/^"(.+)"$/)
   if (quotedMatch) {
@@ -1389,10 +1646,10 @@ function queryStreamsByFts(
   const catParams: unknown[] = categoryName ? [categoryName] : []
   try {
     return sqlite.prepare(`
-      SELECT ${STREAM_SELECT}
+      SELECT ${SEARCH_STREAM_SELECT_CANONICAL}
       FROM ${ftsTable} fts
       JOIN streams s ON s.${fkColumn} = fts.canonical_id AND s.type = ?
-      ${STREAM_JOINS}
+      ${SEARCH_STREAM_JOINS_CANONICAL}
       ${catJoin}
       WHERE ${ftsTable} MATCH ?
         AND s.source_id IN (${sourceList})
@@ -1419,7 +1676,7 @@ function querySeriesByFts(
   const catParams: unknown[] = categoryName ? [categoryName] : []
   try {
     return sqlite.prepare(`
-      SELECT ${SERIES_SELECT}
+      SELECT ${SEARCH_SERIES_SELECT_CANONICAL}
       FROM canonical_series_fts fts
       JOIN canonical_series cs ON cs.id = fts.canonical_id
       JOIN series_sources ss ON ss.canonical_series_id = cs.id
@@ -1458,9 +1715,9 @@ function runLikeFallback(
       : ''
     const catParams: unknown[] = categoryName ? [categoryName] : []
     const rows = sqlite.prepare(`
-      SELECT ${STREAM_SELECT}
+      SELECT ${SEARCH_STREAM_SELECT_CANONICAL}
       FROM streams s
-      ${STREAM_JOINS}
+      ${SEARCH_STREAM_JOINS_CANONICAL}
       ${catJoin}
       WHERE ${likeConds} ${typeConds} AND s.source_id IN (${sourceList})
       ORDER BY s.added_at DESC
@@ -1476,7 +1733,7 @@ function runLikeFallback(
       : ''
     const catParams: unknown[] = categoryName ? [categoryName] : []
     const rows = sqlite.prepare(`
-      SELECT ${SERIES_SELECT}
+      SELECT ${SEARCH_SERIES_SELECT_CANONICAL}
       FROM series_sources ss
       LEFT JOIN canonical_series cs ON cs.id = ss.canonical_series_id
       ${catJoin}
@@ -1694,16 +1951,16 @@ function queryStreamsByFtsAdvanced(
   const langParam: unknown[] = langFilter ? [langFilter] : []
   // L5 year soft boost: ±1 year → rank higher, no exclusion.
   const yearBoost = yearFilter != null
-    ? `(CASE WHEN ABS(COALESCE(cv.year, cs.year, 0) - ?) <= 1 THEN 1 ELSE 0 END) DESC,`
+    ? `(CASE WHEN ABS(COALESCE(cv.year, 0) - ?) <= 1 THEN 1 ELSE 0 END) DESC,`
     : ''
   const yearBoostParam: unknown[] = yearFilter != null ? [yearFilter] : []
 
   try {
     return sqlite.prepare(`
-      SELECT ${STREAM_SELECT}
+      SELECT ${SEARCH_STREAM_SELECT_CANONICAL}
       FROM ${ftsTable} fts
       JOIN streams s ON s.${fkColumn} = fts.canonical_id AND s.type = ?
-      ${STREAM_JOINS}
+      ${SEARCH_STREAM_JOINS_CANONICAL}
       ${catJoin}
       WHERE ${ftsTable} MATCH ?
         AND s.source_id IN (${sourceList})
@@ -1741,7 +1998,7 @@ function querySeriesByFtsAdvanced(
 
   try {
     return sqlite.prepare(`
-      SELECT ${SERIES_SELECT}
+      SELECT ${SEARCH_SERIES_SELECT_CANONICAL}
       FROM canonical_series_fts fts
       JOIN canonical_series cs ON cs.id = fts.canonical_id
       JOIN series_sources ss ON ss.canonical_series_id = cs.id
@@ -1777,13 +2034,13 @@ function queryStreamsByLangYear(
   const catParams: unknown[] = categoryName ? [categoryName] : []
   const langCond  = langFilter  ? `AND s.language_hint = ?`  : ''
   const langParam: unknown[] = langFilter ? [langFilter] : []
-  const yearCond  = yearFilter != null ? `AND ABS(COALESCE(cv.year, cs.year, 0) - ?) <= 1` : ''
+  const yearCond  = yearFilter != null ? `AND ABS(COALESCE(cv.year, 0) - ?) <= 1` : ''
   const yearParam: unknown[] = yearFilter != null ? [yearFilter] : []
 
   return sqlite.prepare(`
-    SELECT ${STREAM_SELECT}
+    SELECT ${SEARCH_STREAM_SELECT_CANONICAL}
     FROM streams s
-    ${STREAM_JOINS}
+    ${SEARCH_STREAM_JOINS_CANONICAL}
     ${catJoin}
     WHERE s.type = ? AND s.source_id IN (${sourceList}) ${langCond} ${yearCond}
     ORDER BY s.added_at DESC
@@ -1811,7 +2068,7 @@ function querySeriesByLangYear(
   const yearParam: unknown[] = yearFilter != null ? [yearFilter] : []
 
   return sqlite.prepare(`
-    SELECT ${SERIES_SELECT}
+    SELECT ${SEARCH_SERIES_SELECT_CANONICAL}
     FROM series_sources ss
     LEFT JOIN canonical_series cs ON cs.id = ss.canonical_series_id
     ${catJoin}
@@ -1850,9 +2107,9 @@ function runAdvancedLikeFallback(
     const catParams: unknown[] = categoryName ? [categoryName] : []
     const likeConds = words.map(() => `s.title LIKE ?`).join(' AND ') || '1=1'
     const rows = sqlite.prepare(`
-      SELECT ${STREAM_SELECT}
+      SELECT ${SEARCH_STREAM_SELECT_CANONICAL}
       FROM streams s
-      ${STREAM_JOINS}
+      ${SEARCH_STREAM_JOINS_CANONICAL}
       ${catJoin}
       WHERE ${likeConds} ${streamTypeCond} ${langCond} AND s.source_id IN (${sourceList})
       ORDER BY s.added_at DESC
@@ -1869,7 +2126,7 @@ function runAdvancedLikeFallback(
     const catParams: unknown[] = categoryName ? [categoryName] : []
     const seriesLangCond = langFilter ? `AND ss.language_hint = ?` : ''
     const rows = sqlite.prepare(`
-      SELECT ${SERIES_SELECT}
+      SELECT ${SEARCH_SERIES_SELECT_CANONICAL}
       FROM series_sources ss
       LEFT JOIN canonical_series cs ON cs.id = ss.canonical_series_id
       ${catJoin}

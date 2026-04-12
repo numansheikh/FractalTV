@@ -38,6 +38,11 @@ interface WorkerData {
 const { sourceId, dbPath, serverUrl, username, password } = workerData as WorkerData
 
 function send(phase: string, current: number, total: number, message: string) {
+  if (total > 0) {
+    console.log(`[sync] ${phase} ${current}/${total} — ${message}`)
+  } else {
+    console.log(`[sync] ${phase} — ${message}`)
+  }
   parentPort?.postMessage({ type: 'progress', phase, current, total, message })
 }
 function sendError(message: string) {
@@ -85,6 +90,7 @@ async function run() {
   db.pragma('journal_mode = WAL')
   db.pragma('synchronous = normal')
   db.pragma('foreign_keys = ON')
+  db.pragma('busy_timeout = 30000')
 
   const sourceExistsStmt = db.prepare('SELECT 1 FROM sources WHERE id = ?')
   const sourceExists = (): boolean => !!sourceExistsStmt.get(sourceId)
@@ -132,14 +138,10 @@ async function run() {
     db.prepare(`DELETE FROM streams WHERE source_id = ?`).run(sourceId)
 
     // ── Prepared statements ────────────────────────────────────────────────
-
-    const insertVodCanonical = db.prepare(`
-      INSERT INTO canonical_vod (normalized_title, year, content_hash)
-      VALUES (?, ?, ?)
-      ON CONFLICT(content_hash) DO UPDATE SET normalized_title = excluded.normalized_title
-      RETURNING id
-    `)
-    const selectVodByHash = db.prepare(`SELECT id FROM canonical_vod WHERE content_hash = ?`)
+    // Phase 1 (sync): raw writes only — no canonical/FTS for live or movies.
+    // Series canonical is written here (NOT NULL FK on series_sources requires it),
+    // but without FTS. The indexing worker handles canonical+FTS for live+movies
+    // and adds FTS for series after sync completes.
 
     const insertSeriesCanonical = db.prepare(`
       INSERT INTO canonical_series (normalized_title, year, content_hash)
@@ -148,30 +150,6 @@ async function run() {
       RETURNING id
     `)
     const selectSeriesByHash = db.prepare(`SELECT id FROM canonical_series WHERE content_hash = ?`)
-
-    const insertLiveCanonical = db.prepare(`
-      INSERT INTO canonical_live (canonical_name, content_hash)
-      VALUES (?, ?)
-      ON CONFLICT(content_hash) DO UPDATE SET canonical_name = excluded.canonical_name
-      RETURNING id
-    `)
-    const selectLiveByHash = db.prepare(`SELECT id FROM canonical_live WHERE content_hash = ?`)
-
-    const insertVodFts = db.prepare(`
-      INSERT INTO canonical_vod_fts (canonical_id, normalized_title, multilingual_labels)
-      VALUES (?, ?, '')
-    `)
-    const selectVodFtsByCanonical = db.prepare(`SELECT 1 FROM canonical_vod_fts WHERE canonical_id = ?`)
-    const insertSeriesFts = db.prepare(`
-      INSERT INTO canonical_series_fts (canonical_id, normalized_title, multilingual_labels)
-      VALUES (?, ?, '')
-    `)
-    const selectSeriesFtsByCanonical = db.prepare(`SELECT 1 FROM canonical_series_fts WHERE canonical_id = ?`)
-    const insertLiveFts = db.prepare(`
-      INSERT INTO canonical_live_fts (canonical_id, canonical_name, categories)
-      VALUES (?, ?, '')
-    `)
-    const selectLiveFtsByCanonical = db.prepare(`SELECT 1 FROM canonical_live_fts WHERE canonical_id = ?`)
 
     const insertStreamLive = db.prepare(`
       INSERT INTO streams (
@@ -227,74 +205,24 @@ async function run() {
     const insertSC = db.prepare(`INSERT OR IGNORE INTO stream_categories (stream_id, category_id) SELECT ?, ? WHERE EXISTS (SELECT 1 FROM categories WHERE id = ?)`)
     const insertSSC = db.prepare(`INSERT OR IGNORE INTO series_source_categories (series_source_id, category_id) SELECT ?, ? WHERE EXISTS (SELECT 1 FROM categories WHERE id = ?)`)
 
-    /**
-     * Upsert a canonical row by content_hash. We use INSERT … RETURNING id,
-     * and if that collides (ON CONFLICT DO UPDATE triggers RETURNING on the
-     * updated row too), better-sqlite3's RETURNING returns the existing id.
-     * Fall back to a SELECT for older sqlite versions.
-     */
-    function upsertVodCanonical(normalizedTitle: string, year: number | null, type: 'movie' | 'series'): { id: number; created: boolean } {
-      const hash = vodContentHash(normalizedTitle, year, type)
-      if (type === 'movie') {
-        try {
-          const row = insertVodCanonical.get(normalizedTitle, year, hash) as { id: number } | undefined
-          if (row?.id) {
-            const fts = selectVodFtsByCanonical.get(row.id)
-            if (!fts) insertVodFts.run(row.id, normalizedTitle)
-            return { id: row.id, created: true }
-          }
-        } catch {}
-        const existing = selectVodByHash.get(hash) as { id: number } | undefined
-        if (existing?.id) {
-          const fts = selectVodFtsByCanonical.get(existing.id)
-          if (!fts) insertVodFts.run(existing.id, normalizedTitle)
-          return { id: existing.id, created: false }
-        }
-        throw new Error(`Failed to upsert canonical_vod for hash ${hash}`)
-      } else {
-        try {
-          const row = insertSeriesCanonical.get(normalizedTitle, year, hash) as { id: number } | undefined
-          if (row?.id) {
-            const fts = selectSeriesFtsByCanonical.get(row.id)
-            if (!fts) insertSeriesFts.run(row.id, normalizedTitle)
-            return { id: row.id, created: true }
-          }
-        } catch {}
-        const existing = selectSeriesByHash.get(hash) as { id: number } | undefined
-        if (existing?.id) {
-          const fts = selectSeriesFtsByCanonical.get(existing.id)
-          if (!fts) insertSeriesFts.run(existing.id, normalizedTitle)
-          return { id: existing.id, created: false }
-        }
-        throw new Error(`Failed to upsert canonical_series for hash ${hash}`)
-      }
-    }
-
-    function upsertLiveCanonical(canonicalName: string, tvgId: string | null): { id: number; created: boolean } {
-      const hash = liveContentHash(tvgId, canonicalName)
+    // Series canonical only — no FTS (indexing worker adds FTS later).
+    function upsertSeriesCanonical(normalizedTitle: string, year: number | null): number {
+      const hash = vodContentHash(normalizedTitle, year, 'series')
       try {
-        const row = insertLiveCanonical.get(canonicalName, hash) as { id: number } | undefined
-        if (row?.id) {
-          const fts = selectLiveFtsByCanonical.get(row.id)
-          if (!fts) insertLiveFts.run(row.id, canonicalName)
-          return { id: row.id, created: true }
-        }
+        const row = insertSeriesCanonical.get(normalizedTitle, year, hash) as { id: number } | undefined
+        if (row?.id) return row.id
       } catch {}
-      const existing = selectLiveByHash.get(hash) as { id: number } | undefined
-      if (existing?.id) {
-        const fts = selectLiveFtsByCanonical.get(existing.id)
-        if (!fts) insertLiveFts.run(existing.id, canonicalName)
-        return { id: existing.id, created: false }
-      }
-      throw new Error(`Failed to upsert canonical_live for hash ${hash}`)
+      const existing = selectSeriesByHash.get(hash) as { id: number } | undefined
+      if (existing?.id) return existing.id
+      throw new Error(`Failed to upsert canonical_series for hash ${hash}`)
     }
 
     // ── Live streams ───────────────────────────────────────────────────────
-    send('live', 0, 0, 'Fetching channels…')
+    send('live', 0, 0, 'Downloading channel list…')
     const liveResult = await fetchJson<any[]>(`${apiBase}&action=get_live_streams`, FETCH_TIMEOUT, 'live_streams')
     const liveStreams = liveResult.data || []
     if (liveResult.error) sendWarning('Failed to fetch live channels — timed out or server error')
-    send('live', 0, liveStreams.length, `Saving ${liveStreams.length.toLocaleString()} channels…`)
+    send('live', 0, liveStreams.length, `Importing ${liveStreams.length.toLocaleString()} channels…`)
 
     if (!sourceExists()) { console.log('[SyncWorker] Source deleted before live insert — aborting'); sendDone(0, 0); db.close(); return }
 
@@ -304,10 +232,7 @@ async function run() {
         const cid = `${sourceId}:live:${s.stream_id}`
         const rawTitle: string = s.name || `Channel ${s.stream_id}`
         const normalized = normalizeTitle(rawTitle)
-        const canonicalName = normalized.normalizedTitle || rawTitle.toLowerCase()
         const tvgId: string | null = s.epg_channel_id || null
-
-        const { id: canonicalLiveId } = upsertLiveCanonical(canonicalName, tvgId)
 
         insertStreamLive.run(
           cid, sourceId, String(s.stream_id), rawTitle,
@@ -318,7 +243,7 @@ async function run() {
           normalized.originHint || null,
           normalized.qualityHint || null,
           normalized.year || null,
-          canonicalLiveId
+          null  // canonical_live_id — set by indexing worker
         )
         if (s.category_id) {
           const catId = `${sourceId}:live:${s.category_id}`
@@ -328,15 +253,15 @@ async function run() {
     })
     for (let i = 0; i < liveStreams.length; i += BATCH) {
       batchLive(liveStreams.slice(i, i + BATCH))
-      send('live', Math.min(i + BATCH, liveStreams.length), liveStreams.length, `Channels: ${Math.min(i + BATCH, liveStreams.length)}/${liveStreams.length}`)
+      send('live', Math.min(i + BATCH, liveStreams.length), liveStreams.length, `Importing channels: ${Math.min(i + BATCH, liveStreams.length).toLocaleString()} / ${liveStreams.length.toLocaleString()}`)
     }
 
     // ── VOD streams ────────────────────────────────────────────────────────
-    send('movies', 0, 0, 'Fetching movies…')
+    send('movies', 0, 0, 'Downloading movie list…')
     const vodResult = await fetchJson<any[]>(`${apiBase}&action=get_vod_streams`, FETCH_TIMEOUT, 'vod_streams')
     const vodStreams = vodResult.data || []
     if (vodResult.error) sendWarning('Failed to fetch movies — timed out or server error')
-    send('movies', 0, vodStreams.length, `Saving ${vodStreams.length.toLocaleString()} movies…`)
+    send('movies', 0, vodStreams.length, `Importing ${vodStreams.length.toLocaleString()} movies…`)
 
     if (!sourceExists()) { console.log('[SyncWorker] Source deleted before VOD insert — aborting'); sendDone(0, 0); db.close(); return }
 
@@ -349,12 +274,6 @@ async function run() {
         const providerYear = Number.isFinite(providerYearRaw as number) ? (providerYearRaw as number) : null
         const year = normalized.year ?? providerYear
 
-        const { id: canonicalVodId } = upsertVodCanonical(
-          normalized.normalizedTitle || rawTitle.toLowerCase(),
-          year,
-          'movie'
-        )
-
         insertStreamMovie.run(
           cid, sourceId, String(s.stream_id), rawTitle,
           s.stream_icon || null, s.container_extension || null, s.category_id || null,
@@ -362,7 +281,7 @@ async function run() {
           normalized.originHint || null,
           normalized.qualityHint || null,
           year || null,
-          canonicalVodId
+          null  // canonical_vod_id — set by indexing worker
         )
         if (s.category_id) {
           const catId = `${sourceId}:movie:${s.category_id}`
@@ -372,17 +291,17 @@ async function run() {
     })
     for (let i = 0; i < vodStreams.length; i += BATCH) {
       batchVod(vodStreams.slice(i, i + BATCH))
-      send('movies', Math.min(i + BATCH, vodStreams.length), vodStreams.length, `Movies: ${Math.min(i + BATCH, vodStreams.length)}/${vodStreams.length}`)
+      send('movies', Math.min(i + BATCH, vodStreams.length), vodStreams.length, `Importing movies: ${Math.min(i + BATCH, vodStreams.length).toLocaleString()} / ${vodStreams.length.toLocaleString()}`)
     }
 
     // ── Series parents ─────────────────────────────────────────────────────
     // Episodes are lazy-fetched on series open (Phase D Q5); here we only
     // record the series shell into `series_sources` + canonical_series.
-    send('series', 0, 0, 'Fetching series…')
+    send('series', 0, 0, 'Downloading series list…')
     const seriesResult = await fetchJson<any[]>(`${apiBase}&action=get_series`, FETCH_TIMEOUT, 'series')
     const seriesList = seriesResult.data || []
     if (seriesResult.error) sendWarning('Failed to fetch series — timed out or server error')
-    send('series', 0, seriesList.length, `Saving ${seriesList.length.toLocaleString()} series…`)
+    send('series', 0, seriesList.length, `Importing ${seriesList.length.toLocaleString()} series…`)
 
     if (!sourceExists()) { console.log('[SyncWorker] Source deleted before series insert — aborting'); sendDone(0, 0); db.close(); return }
 
@@ -395,10 +314,9 @@ async function run() {
         const providerYear = Number.isFinite(providerYearRaw as number) ? (providerYearRaw as number) : null
         const year = normalized.year ?? providerYear
 
-        const { id: canonicalSeriesId } = upsertVodCanonical(
+        const canonicalSeriesId = upsertSeriesCanonical(
           normalized.normalizedTitle || rawTitle.toLowerCase(),
           year,
-          'series'
         )
 
         insertSeriesSource.run(
@@ -417,15 +335,12 @@ async function run() {
     })
     for (let i = 0; i < seriesList.length; i += BATCH) {
       batchSeries(seriesList.slice(i, i + BATCH))
-      send('series', Math.min(i + BATCH, seriesList.length), seriesList.length, `Series: ${Math.min(i + BATCH, seriesList.length)}/${seriesList.length}`)
+      send('series', Math.min(i + BATCH, seriesList.length), seriesList.length, `Importing series: ${Math.min(i + BATCH, seriesList.length).toLocaleString()} / ${seriesList.length.toLocaleString()}`)
     }
 
-    // ── Sweep orphan canonicals (L12 empty-canonical GC) ───────────────────
-    db.exec(`
-      DELETE FROM canonical_vod WHERE id NOT IN (SELECT canonical_vod_id FROM streams WHERE canonical_vod_id IS NOT NULL);
-      DELETE FROM canonical_series WHERE id NOT IN (SELECT canonical_series_id FROM series_sources WHERE canonical_series_id IS NOT NULL);
-      DELETE FROM canonical_live WHERE id NOT IN (SELECT canonical_live_id FROM streams WHERE canonical_live_id IS NOT NULL);
-    `)
+    // ── Sweep orphan series canonicals (vod/live swept by indexing worker) ──
+    send('series', seriesList.length, seriesList.length, 'Finalizing…')
+    db.prepare(`DELETE FROM canonical_series WHERE id NOT IN (SELECT canonical_series_id FROM series_sources WHERE canonical_series_id IS NOT NULL)`).run()
 
     // ── Finalize ───────────────────────────────────────────────────────────
     if (!sourceExists()) { console.log('[SyncWorker] Source deleted before finalize — aborting'); sendDone(0, 0); db.close(); return }

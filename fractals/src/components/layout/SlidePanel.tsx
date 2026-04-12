@@ -8,9 +8,11 @@ interface Props {
   children: React.ReactNode
   /** When true, the scrim and Escape handler are suppressed (player is on top) */
   suppressClose?: boolean
+  /** When true, the scrim is not rendered (caller manages it externally) */
+  suppressScrim?: boolean
 }
 
-export function SlidePanel({ open, onClose, width = 420, children, suppressClose = false }: Props) {
+export function SlidePanel({ open, onClose, width = 420, children, suppressClose = false, suppressScrim = false }: Props) {
   // Capture-phase Escape handler
   useEffect(() => {
     if (!open || suppressClose) return
@@ -28,8 +30,8 @@ export function SlidePanel({ open, onClose, width = 420, children, suppressClose
     <AnimatePresence>
       {open && (
         <>
-          {/* Scrim */}
-          {!suppressClose && (
+          {/* Scrim — suppressed when caller manages it (e.g. shared scrim across exclusive panels) */}
+          {!suppressClose && !suppressScrim && (
             <motion.div
               key="scrim"
               initial={{ opacity: 0 }}
@@ -39,7 +41,9 @@ export function SlidePanel({ open, onClose, width = 420, children, suppressClose
               onClick={onClose}
               style={{
                 position: 'fixed', inset: 0,
-                background: 'rgba(0,0,0,0.55)',
+                background: 'rgba(0,0,0,0.45)',
+                backdropFilter: 'blur(3px)',
+                WebkitBackdropFilter: 'blur(3px)',
                 zIndex: 40,
               }}
             />

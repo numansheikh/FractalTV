@@ -6,6 +6,9 @@
   "main": "dist-electron/main/main.js",
   "scripts": {
     "dev": "electron-vite dev",
+    "dev:lite": "FRACTALS_TIER=lite FRACTALS_DB=lite electron-vite dev",
+    "dev:standard": "FRACTALS_TIER=standard FRACTALS_DB=standard electron-vite dev",
+    "dev:rich": "FRACTALS_TIER=rich FRACTALS_DB=rich electron-vite dev",
     "dev:web": "electron-vite dev --mode web",
     "build": "electron-vite build",
     "build:electron": "pnpm build && electron-builder",

@@ -19,6 +19,12 @@ const PHASE_LABEL: Record<string, string> = {
   movies: 'Movies',
   series: 'Series',
   done: 'Done',
+  'indexing-live': 'Indexing channels',
+  'indexing-movies': 'Indexing movies',
+  'indexing-series': 'Indexing series',
+  'indexing-done': 'Search ready',
+  enriching: 'Enriching library',
+  'enriching-done': 'Enrichment complete',
   error: 'Error',
 }
 

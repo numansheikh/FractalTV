@@ -14,7 +14,7 @@ export default defineConfig({
           'sync.worker': resolve(__dirname, 'electron/workers/sync.worker.ts'),
           'delete.worker': resolve(__dirname, 'electron/workers/delete.worker.ts'),
           'm3u-sync.worker': resolve(__dirname, 'electron/workers/m3u-sync.worker.ts'),
-          'enrichment.worker': resolve(__dirname, 'electron/workers/enrichment.worker.ts'),
+          'indexing-compute.worker': resolve(__dirname, 'electron/services/indexing/indexing-compute.worker.ts'),
         },
       },
     },

@@ -25,7 +25,7 @@ interface AppState {
   selectedSourceIds: string[]
 
   // View mode (grid vs list — live TV only)
-  viewMode: 'grid' | 'list'
+  liveViewMode: 'grid' | 'list'
 
   // Browse page size
   pageSize: number
@@ -89,7 +89,7 @@ export const useAppStore = create<AppState>()(
       typeFilter: 'all',
       categoryFilters: {},
       selectedSourceIds: [],
-      viewMode: 'grid',
+      liveViewMode: 'grid',
       pageSize: 60,
       sort: 'updated:desc',
       homeMode: 'discover',
@@ -101,7 +101,7 @@ export const useAppStore = create<AppState>()(
 
       setView: (activeView) => set((s) => ({ activeView, previousView: s.activeView })),
       goBack: () => set((s) => ({ activeView: s.previousView ?? 'home', previousView: null })),
-      setViewMode: (viewMode) => set({ viewMode }),
+      setViewMode: (liveViewMode) => set({ liveViewMode }),
       setPageSize: (pageSize) => set({ pageSize }),
       setSort: (sort) => set({ sort }),
       setSelectedContent: (selectedContent) => set({ selectedContent }),
@@ -143,9 +143,8 @@ export const useAppStore = create<AppState>()(
     {
       name: 'fractals-app',
       partialize: (s) => ({
-        activeView: s.activeView,
         categoryFilters: s.categoryFilters,
-        viewMode: s.viewMode,
+        liveViewMode: s.liveViewMode,
         pageSize: s.pageSize,
         sort: s.sort,
         homeMode: s.homeMode,

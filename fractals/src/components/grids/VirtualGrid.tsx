@@ -238,7 +238,9 @@ export function VirtualGrid({ items, onSelect, viewMode = 'grid', isLoading, con
   }, [])
 
   const isList = viewMode === 'list'
-  const isLive = items[0]?.type === 'live'
+  // Prefer the explicit contentType prop; fall back to first-item heuristic only if
+  // the caller didn't pass one. Prevents mid-fetch layout flash and mixed-type misrender.
+  const isLive = contentType === 'live' || (contentType == null && items[0]?.type === 'live')
   const gap = isList ? 2 : 8
   const colGap = isList ? 8 : gap
   const padding = 16
@@ -258,9 +260,15 @@ export function VirtualGrid({ items, onSelect, viewMode = 'grid', isLoading, con
       ? Math.max(2, Math.floor((availableWidth + gap) / (minCardWidth + gap)))
       : 2
 
-  const rows: ContentItem[][] = []
+  const rows: (ContentItem | null)[][] = []
   for (let i = 0; i < items.length; i += columns) {
     rows.push(items.slice(i, i + columns))
+  }
+  // Pad last row so all rows have equal column count — prevents last-row cards from
+  // stretching wider, which breaks the 2:3 aspect ratio and clips the metadata strip.
+  if (!isList && rows.length > 0) {
+    const last = rows[rows.length - 1]
+    while (last.length < columns) last.push(null)
   }
 
   const virtualizer = useVirtualizer({
@@ -354,9 +362,9 @@ export function VirtualGrid({ items, onSelect, viewMode = 'grid', isLoading, con
                   : 'transparent',
               }}
             >
-              {row.map((item) => (
+              {row.map((item, idx) => (
                 <div
-                  key={item.id}
+                  key={item ? item.id : `pad-${virtualRow.index}-${idx}`}
                   style={isList ? {
                     flex: 1,
                     minWidth: 0,
@@ -369,12 +377,12 @@ export function VirtualGrid({ items, onSelect, viewMode = 'grid', isLoading, con
                     overflow: 'hidden',
                   }}
                 >
-                  {isList
+                  {item && (isList
                     ? <ChannelListRow item={item} onClick={onSelect} />
                     : item.type === 'live'
                       ? <ChannelCard item={item} onClick={onSelect} />
                       : <PosterCard item={item} onClick={onSelect} />
-                  }
+                  )}
                 </div>
               ))}
             </div>

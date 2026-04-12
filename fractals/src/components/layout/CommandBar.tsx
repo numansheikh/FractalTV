@@ -175,7 +175,7 @@ interface Props {
 
 export function CommandBar({ sort, onSortChange }: Props) {
   const { queries, setQuery } = useSearchStore()
-  const { selectedSourceIds, toggleSourceFilter, activeView, viewMode, setViewMode } = useAppStore()
+  const { selectedSourceIds, toggleSourceFilter, activeView, liveViewMode: viewMode, setViewMode } = useAppStore()
   const query = queries[activeView] ?? ''
   const { sources } = useSourcesStore()
   const colorMap = buildColorMapFromSources(sources)
@@ -191,7 +191,14 @@ export function CommandBar({ sort, onSortChange }: Props) {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === '/' || ((e.metaKey || e.ctrlKey) && e.key === 'k')) {
+      const el = document.activeElement
+      const isTyping = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault()
+        inputRef.current?.focus()
+        return
+      }
+      if (e.key === '/' && !isTyping) {
         e.preventDefault()
         inputRef.current?.focus()
       }

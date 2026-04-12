@@ -15,6 +15,7 @@ import {
 
 interface Props {
   onClose: () => void
+  suppressScrim?: boolean
 }
 
 type PlayerPref = 'artplayer' | 'mpv' | 'vlc'
@@ -30,7 +31,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'about',      label: 'About' },
 ]
 
-export function SettingsPanel({ onClose }: Props) {
+export function SettingsPanel({ onClose, suppressScrim }: Props) {
   const qc = useQueryClient()
   const { theme, font, setTheme, setFont } = useTheme()
   const [activeTab, setActiveTab] = useState<Tab>('appearance')
@@ -73,7 +74,7 @@ export function SettingsPanel({ onClose }: Props) {
   const pct = enrichProgress ? Math.round((enrichProgress.done / enrichProgress.total) * 100) : null
 
   return (
-    <SlidePanel open={true} onClose={onClose} width={520}>
+    <SlidePanel open={true} onClose={onClose} width={480} suppressScrim={suppressScrim}>
       {/* Header */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -557,7 +558,7 @@ function DataTab({ enrichStatus, enrichProgress, enrichMsg, pct, isPending, onSt
         // Reset persisted UI preferences to defaults
         useAppStore.setState({
           sort: 'updated:desc',
-          viewMode: 'grid',
+          liveViewMode: 'grid',
           pageSize: 60,
           homeMode: 'discover',
           hasSeenChannelsModePrompt: false,
