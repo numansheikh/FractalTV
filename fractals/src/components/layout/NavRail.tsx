@@ -28,7 +28,10 @@ export function NavRail({ onOpenSources, onOpenSettings }: Props) {
   const { activeView, setView } = useAppStore()
   const { theme, setTheme } = useTheme()
   const syncProgress = useSourcesStore((s) => s.syncProgress)
+  const indexProgress = useSourcesStore((s) => s.indexProgress)
   const isSyncing = Object.values(syncProgress).some((p) => p && p.phase !== 'done' && p.phase !== 'error')
+  const isIndexing = Object.values(indexProgress).some((p) => p && p.phase !== 'done' && p.phase !== 'error')
+  const isActive = isSyncing || isIndexing
 
   return (
     <div style={{
@@ -75,7 +78,7 @@ export function NavRail({ onOpenSources, onOpenSettings }: Props) {
       </RailButton>
 
       <RailButton label="Sources" shortcut="" isActive={false} activeColor="var(--accent-interactive)" onClick={onOpenSources}>
-        <span style={{ color: isSyncing ? 'var(--accent-interactive)' : 'var(--text-2)', animation: isSyncing ? 'nav-pulse 2s ease-in-out infinite' : 'none' }}>
+        <span style={{ color: isActive ? 'var(--accent-interactive)' : 'var(--text-2)', animation: isActive ? 'nav-pulse 2s ease-in-out infinite' : 'none' }}>
           <LayersIcon />
         </span>
       </RailButton>

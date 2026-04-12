@@ -124,27 +124,30 @@ export function ContentArea({ sort, onSelectContent, onAddSource }: Props) {
 
   const isLoading = isFavoritesFilter ? favLoading : browseLoading
 
+  const ftsEnabled = useAppStore((s) => s.ftsEnabled)
   const searchBase = {
     query,
     categoryName: categoryFilter && categoryFilter !== '__favorites__' ? categoryFilter : undefined,
     sourceIds: selectedSourceIds.length ? selectedSourceIds : undefined,
+    ftsEnabled,
+    ftsFallback: true,
   }
   const searchOffset = (page - 1) * pageSize
   const serverSearchEnabled = !!query && !isFavoritesFilter
   const { data: liveSearchData, isFetching: liveSearchFetching } = useQuery({
-    queryKey: ['search', query, 'live',   categoryFilter, selectedSourceIds, page, pageSize],
+    queryKey: ['search', query, 'live',   categoryFilter, selectedSourceIds, page, pageSize, ftsEnabled],
     queryFn: () => api.search.query({ ...searchBase, type: 'live',   limit: pageSize, offset: searchOffset }),
     enabled: serverSearchEnabled && (!contentType || contentType === 'live'),
     staleTime: 10_000,
   })
   const { data: movieSearchData, isFetching: movieSearchFetching } = useQuery({
-    queryKey: ['search', query, 'movie',  categoryFilter, selectedSourceIds, page, pageSize],
+    queryKey: ['search', query, 'movie',  categoryFilter, selectedSourceIds, page, pageSize, ftsEnabled],
     queryFn: () => api.search.query({ ...searchBase, type: 'movie',  limit: pageSize, offset: searchOffset }),
     enabled: serverSearchEnabled && (!contentType || contentType === 'movie'),
     staleTime: 10_000,
   })
   const { data: seriesSearchData, isFetching: seriesSearchFetching } = useQuery({
-    queryKey: ['search', query, 'series', categoryFilter, selectedSourceIds, page, pageSize],
+    queryKey: ['search', query, 'series', categoryFilter, selectedSourceIds, page, pageSize, ftsEnabled],
     queryFn: () => api.search.query({ ...searchBase, type: 'series', limit: pageSize, offset: searchOffset }),
     enabled: serverSearchEnabled && (!contentType || contentType === 'series'),
     staleTime: 10_000,

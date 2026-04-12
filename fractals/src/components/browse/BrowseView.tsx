@@ -112,21 +112,22 @@ export function BrowseView({ onAddSource, onSyncSource, onRemoveSource, onSelect
   const [seriesLimit, setSeriesLimit] = useState(defaultSeries)
   useEffect(() => { setLiveLimit(defaultLive); setMovieLimit(defaultMovie); setSeriesLimit(defaultSeries) }, [query])
 
+  const ftsEnabled = useAppStore((s) => s.ftsEnabled)
   const { data: liveSearchResults   = [], isFetching: liveFetching   } = useQuery({
-    queryKey: ['search', query, 'live',   activeCategory, selectedSourceIds, liveLimit],
-    queryFn: () => api.search.query({ query, type: 'live',   categoryName: activeCategory ?? undefined, sourceIds: srcFilter, limit: liveLimit }),
+    queryKey: ['search', query, 'live',   activeCategory, selectedSourceIds, liveLimit, ftsEnabled],
+    queryFn: () => api.search.query({ query, type: 'live',   categoryName: activeCategory ?? undefined, sourceIds: srcFilter, limit: liveLimit, ftsEnabled, ftsFallback: true }),
     enabled: isSearching && (type === 'all' || type === 'live'),
     placeholderData: (prev) => prev,
   })
   const { data: movieSearchResults  = [], isFetching: movieFetching  } = useQuery({
-    queryKey: ['search', query, 'movie',  activeCategory, selectedSourceIds, movieLimit],
-    queryFn: () => api.search.query({ query, type: 'movie',  categoryName: activeCategory ?? undefined, sourceIds: srcFilter, limit: movieLimit }),
+    queryKey: ['search', query, 'movie',  activeCategory, selectedSourceIds, movieLimit, ftsEnabled],
+    queryFn: () => api.search.query({ query, type: 'movie',  categoryName: activeCategory ?? undefined, sourceIds: srcFilter, limit: movieLimit, ftsEnabled, ftsFallback: true }),
     enabled: isSearching && (type === 'all' || type === 'movie'),
     placeholderData: (prev) => prev,
   })
   const { data: seriesSearchResults = [], isFetching: seriesFetching } = useQuery({
-    queryKey: ['search', query, 'series', activeCategory, selectedSourceIds, seriesLimit],
-    queryFn: () => api.search.query({ query, type: 'series', categoryName: activeCategory ?? undefined, sourceIds: srcFilter, limit: seriesLimit }),
+    queryKey: ['search', query, 'series', activeCategory, selectedSourceIds, seriesLimit, ftsEnabled],
+    queryFn: () => api.search.query({ query, type: 'series', categoryName: activeCategory ?? undefined, sourceIds: srcFilter, limit: seriesLimit, ftsEnabled, ftsFallback: true }),
     enabled: isSearching && (type === 'all' || type === 'series'),
     placeholderData: (prev) => prev,
   })

@@ -35,9 +35,12 @@ interface SourcesState {
   selectedSourceIds: string[]
   /** Live sync progress per source, keyed by sourceId. Null = not syncing. */
   syncProgress: Record<string, SyncProgress | null>
+  /** FTS indexing progress per source, keyed by sourceId. Null = not indexing. */
+  indexProgress: Record<string, SyncProgress | null>
   setSources: (sources: Source[]) => void
   updateSource: (id: string, patch: Partial<Source>) => void
   setSyncProgress: (sourceId: string, progress: SyncProgress | null) => void
+  setIndexProgress: (sourceId: string, progress: SyncProgress | null) => void
   toggleSourceFilter: (id: string) => void
   clearSourceFilter: () => void
 }
@@ -46,11 +49,14 @@ export const useSourcesStore = create<SourcesState>((set) => ({
   sources: [],
   selectedSourceIds: [],
   syncProgress: {},
+  indexProgress: {},
   setSources: (sources) => set({ sources }),
   updateSource: (id, patch) =>
     set((s) => ({ sources: s.sources.map((src) => (src.id === id ? { ...src, ...patch } : src)) })),
   setSyncProgress: (sourceId, progress) =>
     set((s) => ({ syncProgress: { ...s.syncProgress, [sourceId]: progress } })),
+  setIndexProgress: (sourceId, progress) =>
+    set((s) => ({ indexProgress: { ...s.indexProgress, [sourceId]: progress } })),
   toggleSourceFilter: (id) =>
     set((s) => {
       const has = s.selectedSourceIds.includes(id)

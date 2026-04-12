@@ -22,6 +22,7 @@ export const api = {
     setColor: (sourceId: string, colorIndex: number) => ipcRenderer.invoke('sources:set-color', sourceId, colorIndex),
     sync: (sourceId: string) => ipcRenderer.invoke('sources:sync', sourceId),
     cancelSync: (sourceId: string) => ipcRenderer.invoke('sources:sync:cancel', sourceId),
+    buildFts: (sourceId: string) => ipcRenderer.invoke('sources:build-fts', sourceId),
     accountInfo: (sourceId: string) => ipcRenderer.invoke('sources:account-info', sourceId),
     startupCheck: () => ipcRenderer.invoke('sources:startup-check'),
     totalCount: () => ipcRenderer.invoke('sources:total-count'),
@@ -38,7 +39,7 @@ export const api = {
 
   // Search
   search: {
-    query: (args: { query: string; type?: 'live' | 'movie' | 'series'; sourceIds?: string[]; limit?: number; offset?: number }) =>
+    query: (args: { query: string; type?: 'live' | 'movie' | 'series'; sourceIds?: string[]; limit?: number; offset?: number; ftsEnabled?: boolean; ftsFallback?: boolean }) =>
       ipcRenderer.invoke('search:query', args),
   },
 

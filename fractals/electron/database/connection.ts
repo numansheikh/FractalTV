@@ -260,6 +260,15 @@ function createTables(db: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_series_ud_favorites     ON series_user_data(profile_id, is_favorite);
     CREATE INDEX IF NOT EXISTS idx_series_ud_watchlist     ON series_user_data(profile_id, is_watchlisted);
     CREATE INDEX IF NOT EXISTS idx_channel_ud_favorites    ON channel_user_data(profile_id, is_favorite);
+
+    -- ─── FTS5 (g2) ──────────────────────────────────────────────────
+    CREATE VIRTUAL TABLE IF NOT EXISTS content_fts USING fts5(
+      id UNINDEXED,
+      source_id UNINDEXED,
+      type UNINDEXED,
+      title,
+      tokenize = 'unicode61 remove_diacritics 2'
+    );
   `)
 
   // Reset any sources stuck in 'syncing' from a previous crashed/killed run

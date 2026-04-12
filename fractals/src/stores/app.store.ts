@@ -41,6 +41,9 @@ interface AppState {
   // Timezone (null = system default)
   timezone: string | null
 
+  // FTS search mode (g2). false = g1 LIKE search. true = FTS5 search.
+  ftsEnabled: boolean
+
   // Player settings
   minWatchSeconds: number
   controlsMode: 'never' | 'auto-2' | 'auto-3' | 'auto-5' | 'always'
@@ -71,6 +74,7 @@ interface AppState {
   setHomeStripSize: (n: number) => void
   setHasSeenChannelsModePrompt: (v: boolean) => void
   setTimezone: (tz: string | null) => void
+  setFtsEnabled: (v: boolean) => void
   setMinWatchSeconds: (n: number) => void
   setControlsMode: (m: 'never' | 'auto-2' | 'auto-3' | 'auto-5' | 'always') => void
   setPlayerMode: (m: 'hidden' | 'fullscreen' | 'mini') => void
@@ -100,6 +104,7 @@ export const useAppStore = create<AppState>()(
       hasSeenChannelsModePrompt: false,
       homeStripSize: 10,
       timezone: null,
+      ftsEnabled: false,
       minWatchSeconds: 5,
       controlsMode: 'auto-3',
       playerMode: 'hidden',
@@ -142,6 +147,7 @@ export const useAppStore = create<AppState>()(
       setHomeStripSize: (homeStripSize) => set({ homeStripSize }),
       setHasSeenChannelsModePrompt: (hasSeenChannelsModePrompt) => set({ hasSeenChannelsModePrompt }),
       setTimezone: (timezone) => set({ timezone }),
+      setFtsEnabled: (ftsEnabled) => set({ ftsEnabled }),
       setMinWatchSeconds: (minWatchSeconds) => set({ minWatchSeconds }),
       setControlsMode: (controlsMode) => set({ controlsMode }),
       setPlayerMode: (playerMode) => set({ playerMode }),
@@ -158,6 +164,7 @@ export const useAppStore = create<AppState>()(
         hasSeenChannelsModePrompt: s.hasSeenChannelsModePrompt,
         homeStripSize: s.homeStripSize,
         timezone: s.timezone,
+        ftsEnabled: s.ftsEnabled,
         minWatchSeconds: s.minWatchSeconds,
         controlsMode: s.controlsMode,
       }),

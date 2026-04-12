@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { SlidePanel } from '@/components/layout/SlidePanel'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { useSourcesStore } from '@/stores/sources.store'
+import { useAppStore } from '@/stores/app.store'
 import { SourceCard } from './SourceCard'
 import { AddSourceModal } from './AddSourceForm'
 
@@ -15,6 +16,7 @@ interface Props {
 
 export function SourcesPanel({ onClose, onSync, onRemove, onAdded, suppressScrim }: Props) {
   const { sources } = useSourcesStore()
+  const { ftsEnabled, setFtsEnabled } = useAppStore()
   const [showAddModal, setShowAddModal] = useState(false)
 
   const handleAdded = (sourceId: string) => {
@@ -38,6 +40,24 @@ export function SourcesPanel({ onClose, onSync, onRemove, onAdded, suppressScrim
           }}>
             Sources
           </span>
+          {/* FTS toggle */}
+          <button
+            onClick={() => setFtsEnabled(!ftsEnabled)}
+            title={ftsEnabled ? 'FTS search active — click to switch to basic search' : 'Basic search — click to switch to FTS search'}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 5,
+              padding: '3px 10px', borderRadius: 12,
+              fontSize: 10, fontWeight: 600, fontFamily: 'var(--font-ui)',
+              border: `1px solid ${ftsEnabled ? 'var(--accent-interactive)' : 'var(--border-default)'}`,
+              background: ftsEnabled ? 'color-mix(in srgb, var(--accent-interactive) 15%, transparent)' : 'transparent',
+              color: ftsEnabled ? 'var(--accent-interactive)' : 'var(--text-2)',
+              cursor: 'pointer',
+              transition: 'all 0.15s',
+            }}
+          >
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            FTS {ftsEnabled ? 'ON' : 'OFF'}
+          </button>
           <button
             onClick={onClose}
             style={{

@@ -38,6 +38,9 @@ export const api = {
     cancelSync: (sourceId: string) =>
       isElectron ? (window.api as any).sources.cancelSync(sourceId) : Promise.resolve({ ok: true }),
 
+    buildFts: (sourceId: string): Promise<{ success: boolean; total?: number; error?: string }> =>
+      isElectron ? (window.api as any).sources.buildFts(sourceId) : Promise.resolve({ success: false, error: 'Not in Electron' }),
+
     accountInfo: (sourceId: string) =>
       isElectron ? window.api.sources.accountInfo(sourceId) : Promise.resolve(null),
 
@@ -63,7 +66,7 @@ export const api = {
   },
 
   search: {
-    query: (args: { query: string; type?: 'live' | 'movie' | 'series'; categoryName?: string; sourceIds?: string[]; limit?: number; offset?: number }): Promise<{ items: any[], total: number }> =>
+    query: (args: { query: string; type?: 'live' | 'movie' | 'series'; categoryName?: string; sourceIds?: string[]; limit?: number; offset?: number; ftsEnabled?: boolean; ftsFallback?: boolean }): Promise<{ items: any[], total: number }> =>
       isElectron ? window.api.search.query(args) : Promise.resolve({ items: [], total: 0 }),
   },
 

@@ -116,6 +116,10 @@ function resolveContent(sqlite: ReturnType<typeof getSqlite>, contentId: string)
 // Max rows fetched internally for search to compute accurate totals.
 const SEARCH_TOTAL_CAP = 2000
 
+// g2: FTS join target — the table that content_fts.id maps to.
+// g2 = streams/series_sources directly.  g3 will swap this to canonical.
+const FTS_JOIN_TARGET = 'streams' as const
+
 // ─── g1 SELECT fragments — streams-only, no canonical joins ──────────────
 const G1_STREAM_SELECT = `
   s.id,
@@ -552,6 +556,82 @@ export function registerHandlers() {
     return { ok: true }
   })
 
+  // ── FTS indexing (g2) ────────────────────────────────────────────────────
+  // Builds content_fts rows for a single source. Runs on main thread —
+  // INSERT...SELECT for 300K rows is ~1-2s in SQLite, no worker needed.
+  ipcMain.handle('sources:build-fts', async (event, sourceId: string) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const sqlite = getSqlite()
+
+    const source = sqlite.prepare('SELECT id FROM sources WHERE id = ?').get(sourceId) as { id: string } | undefined
+    if (!source) return { success: false, error: 'Source not found' }
+
+    const send = (phase: string, current: number, total: number, message: string) =>
+      win?.webContents.send('fts:progress', { sourceId, phase, current, total, message })
+
+    try {
+      // Wipe existing FTS rows for this source
+      sqlite.prepare('DELETE FROM content_fts WHERE source_id = ?').run(sourceId)
+
+      // Count streams + series for progress
+      const streamCount = (sqlite.prepare('SELECT COUNT(*) as n FROM streams WHERE source_id = ?').get(sourceId) as CountRow).n
+      const seriesCount = (sqlite.prepare('SELECT COUNT(*) as n FROM series_sources WHERE source_id = ?').get(sourceId) as CountRow).n
+      const total = streamCount + seriesCount
+
+      send('indexing-streams', 0, total, `Indexing ${streamCount.toLocaleString()} streams…`)
+
+      // Batch insert streams into FTS
+      const BATCH = 5000
+      let indexed = 0
+      const insertStreamFts = sqlite.prepare(`
+        INSERT INTO content_fts (id, source_id, type, title)
+        SELECT id, source_id, type, title FROM streams
+        WHERE source_id = ? AND rowid > ? ORDER BY rowid LIMIT ?
+      `)
+      let lastRowid = 0
+      while (true) {
+        const maxRow = sqlite.prepare(
+          `SELECT MAX(rowid) as m FROM (SELECT rowid FROM streams WHERE source_id = ? AND rowid > ? ORDER BY rowid LIMIT ?)`
+        ).get(sourceId, lastRowid, BATCH) as { m: number | null }
+        if (!maxRow.m) break
+
+        insertStreamFts.run(sourceId, lastRowid, BATCH)
+        lastRowid = maxRow.m
+        indexed += Math.min(BATCH, streamCount - indexed)
+        send('indexing-streams', Math.min(indexed, streamCount), total, `Streams: ${Math.min(indexed, streamCount).toLocaleString()}/${streamCount.toLocaleString()}`)
+      }
+
+      send('indexing-series', streamCount, total, `Indexing ${seriesCount.toLocaleString()} series…`)
+
+      // Batch insert series_sources into FTS
+      const insertSeriesFts = sqlite.prepare(`
+        INSERT INTO content_fts (id, source_id, type, title)
+        SELECT id, source_id, 'series', title FROM series_sources
+        WHERE source_id = ? AND rowid > ? ORDER BY rowid LIMIT ?
+      `)
+      lastRowid = 0
+      let seriesIndexed = 0
+      while (true) {
+        const maxRow = sqlite.prepare(
+          `SELECT MAX(rowid) as m FROM (SELECT rowid FROM series_sources WHERE source_id = ? AND rowid > ? ORDER BY rowid LIMIT ?)`
+        ).get(sourceId, lastRowid, BATCH) as { m: number | null }
+        if (!maxRow.m) break
+
+        insertSeriesFts.run(sourceId, lastRowid, BATCH)
+        lastRowid = maxRow.m
+        seriesIndexed += Math.min(BATCH, seriesCount - seriesIndexed)
+        send('indexing-series', streamCount + Math.min(seriesIndexed, seriesCount), total,
+          `Series: ${Math.min(seriesIndexed, seriesCount).toLocaleString()}/${seriesCount.toLocaleString()}`)
+      }
+
+      send('done', total, total, `Indexed ${total.toLocaleString()} items`)
+      return { success: true, total }
+    } catch (err) {
+      send('error', 0, 0, String(err))
+      return { success: false, error: String(err) }
+    }
+  })
+
   // ── EPG ─────────────────────────────────────────────────────────────────
   ipcMain.handle('epg:sync', async (event, sourceId: string) => {
     const win = BrowserWindow.fromWebContents(event.sender)
@@ -665,9 +745,11 @@ export function registerHandlers() {
     sourceIds?: string[]
     limit?: number
     offset?: number
+    ftsEnabled?: boolean
+    ftsFallback?: boolean
   }) => {
     const sqlite = getSqlite()
-    const { categoryName, sourceIds, limit = 50, offset = 0 } = args
+    const { categoryName, sourceIds, limit = 50, offset = 0, ftsEnabled, ftsFallback } = args
     const rawQuery = (args.query ?? '').trim()
 
     const enabledSources = (sqlite.prepare(`SELECT id FROM sources WHERE disabled = 0`).all() as { id: string }[]).map(r => r.id)
@@ -683,17 +765,39 @@ export function registerHandlers() {
       return runBrowseSearch(effectiveType, categoryName, filterIds, limit, offset)
     }
 
-    // ── g1: LIKE search on provider titles ────────────────────────────────
+    const searchFn = ftsEnabled ? { streams: g2SearchStreams, series: g2SearchSeries } : { streams: g1SearchStreams, series: g1SearchSeries }
+
     const all: unknown[] = []
 
     if (!effectiveType || effectiveType === 'movie') {
-      all.push(...g1SearchStreams(rawQuery, 'movie', categoryName, filterIds, SEARCH_TOTAL_CAP))
+      all.push(...searchFn.streams(rawQuery, 'movie', categoryName, filterIds, SEARCH_TOTAL_CAP))
     }
     if (!effectiveType || effectiveType === 'live') {
-      all.push(...g1SearchStreams(rawQuery, 'live', categoryName, filterIds, SEARCH_TOTAL_CAP))
+      all.push(...searchFn.streams(rawQuery, 'live', categoryName, filterIds, SEARCH_TOTAL_CAP))
     }
     if (!effectiveType || effectiveType === 'series') {
-      all.push(...g1SearchSeries(rawQuery, categoryName, filterIds, SEARCH_TOTAL_CAP))
+      all.push(...searchFn.series(rawQuery, categoryName, filterIds, SEARCH_TOTAL_CAP))
+    }
+
+    // FTS fallback: if FTS returned < 10, augment with LIKE results (deduped)
+    if (ftsEnabled && ftsFallback && all.length < 10) {
+      const seen = new Set(all.map((r: any) => r.id))
+      const likeResults: unknown[] = []
+      if (!effectiveType || effectiveType === 'movie') {
+        likeResults.push(...g1SearchStreams(rawQuery, 'movie', categoryName, filterIds, SEARCH_TOTAL_CAP))
+      }
+      if (!effectiveType || effectiveType === 'live') {
+        likeResults.push(...g1SearchStreams(rawQuery, 'live', categoryName, filterIds, SEARCH_TOTAL_CAP))
+      }
+      if (!effectiveType || effectiveType === 'series') {
+        likeResults.push(...g1SearchSeries(rawQuery, categoryName, filterIds, SEARCH_TOTAL_CAP))
+      }
+      for (const r of likeResults) {
+        if (!seen.has((r as any).id)) {
+          all.push(r)
+          seen.add((r as any).id)
+        }
+      }
     }
 
     return { items: all.slice(offset, offset + limit), total: all.length }
@@ -1253,6 +1357,70 @@ function g1SearchSeries(
     ORDER BY ss.added_at DESC
     LIMIT ?
   `).all(...catParams, ...likeParams, ...filterIds, limit) as unknown[]
+}
+
+// ─── g2 search: FTS5 on content_fts, join back to streams/series_sources ────
+function g2SearchStreams(
+  query: string,
+  type: 'live' | 'movie' | undefined,
+  categoryName: string | undefined,
+  filterIds: string[],
+  limit: number
+): unknown[] {
+  const sqlite = getSqlite()
+  const sourceList = filterIds.map(() => '?').join(',')
+  const ftsQuery = buildFtsQuery(query)
+  if (!ftsQuery) return []
+  const typeConds = type ? `AND s.type = ?` : `AND s.type IN ('live','movie')`
+  const typeParams: unknown[] = type ? [type] : []
+  const catJoin = categoryName
+    ? `JOIN stream_categories sc ON sc.stream_id = s.id JOIN categories cat ON cat.id = sc.category_id AND cat.name = ?`
+    : ''
+  const catParams: unknown[] = categoryName ? [categoryName] : []
+  return sqlite.prepare(`
+    SELECT ${G1_STREAM_SELECT}
+    FROM content_fts fts
+    JOIN streams s ON s.id = fts.id
+    ${catJoin}
+    WHERE content_fts MATCH ? ${typeConds} AND s.source_id IN (${sourceList})
+    ORDER BY rank
+    LIMIT ?
+  `).all(ftsQuery, ...catParams, ...typeParams, ...filterIds, limit) as unknown[]
+}
+
+function g2SearchSeries(
+  query: string,
+  categoryName: string | undefined,
+  filterIds: string[],
+  limit: number
+): unknown[] {
+  const sqlite = getSqlite()
+  const sourceList = filterIds.map(() => '?').join(',')
+  const ftsQuery = buildFtsQuery(query)
+  if (!ftsQuery) return []
+  const catJoin = categoryName
+    ? `JOIN series_source_categories ssc ON ssc.series_source_id = ss.id JOIN categories cat ON cat.id = ssc.category_id AND cat.name = ?`
+    : ''
+  const catParams: unknown[] = categoryName ? [categoryName] : []
+  return sqlite.prepare(`
+    SELECT ${G1_SERIES_SELECT}
+    FROM content_fts fts
+    JOIN series_sources ss ON ss.id = fts.id
+    ${catJoin}
+    WHERE content_fts MATCH ? AND fts.type = 'series' AND ss.source_id IN (${sourceList})
+    ORDER BY rank
+    LIMIT ?
+  `).all(ftsQuery, ...catParams, ...filterIds, limit) as unknown[]
+}
+
+/** Build FTS5 query: split words, implicit AND, prefix match on last word. */
+function buildFtsQuery(raw: string): string | null {
+  const words = raw.trim().split(/\s+/).filter(Boolean)
+  if (!words.length) return null
+  // Escape double-quotes in user input
+  const escaped = words.map(w => w.replace(/"/g, ''))
+  // All words as prefix matches for type-ahead feel
+  return escaped.map(w => `"${w}"*`).join(' ')
 }
 
 function runBrowseSearch(

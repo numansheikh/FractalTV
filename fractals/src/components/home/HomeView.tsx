@@ -194,6 +194,7 @@ const SYNC_PHASE_LABELS: Record<string, string> = {
 }
 
 function HomeInfoStrip({ sources, syncProgress }: { sources: Source[]; syncProgress: Record<string, SyncProgress | null> }) {
+  const indexProgress = useSourcesStore((s) => s.indexProgress)
   const activeSyncs = Object.entries(syncProgress)
     .filter(([, p]) => p && p.phase !== 'done' && p.phase !== 'error')
     .map(([id, p]) => {
@@ -201,6 +202,13 @@ function HomeInfoStrip({ sources, syncProgress }: { sources: Source[]; syncProgr
       const pct = p!.total > 0 ? Math.round((p!.current / p!.total) * 100) : 0
       const msg = p!.message || SYNC_PHASE_LABELS[p!.phase] || p!.phase
       return { name: src?.name ?? 'Source', msg, pct }
+    })
+  const activeIndexes = Object.entries(indexProgress)
+    .filter(([, p]) => p && p.phase !== 'done' && p.phase !== 'error')
+    .map(([id, p]) => {
+      const src = sources.find((s) => s.id === id)
+      const pct = p!.total > 0 ? Math.round((p!.current / p!.total) * 100) : 0
+      return { name: src?.name ?? 'Source', msg: p!.message || 'Indexing…', pct }
     })
 
   const stripStyle: React.CSSProperties = {
@@ -219,6 +227,19 @@ function HomeInfoStrip({ sources, syncProgress }: { sources: Source[]; syncProgr
         {s.pct > 0 && <span style={{ fontFamily: 'var(--font-mono)' }}>{s.pct}%</span>}
         {activeSyncs.length > 1 && (
           <span style={{ color: 'var(--text-2)' }}>+{activeSyncs.length - 1} more</span>
+        )}
+      </div>
+    )
+  }
+
+  if (activeIndexes.length > 0) {
+    const s = activeIndexes[0]
+    return (
+      <div style={{ ...stripStyle, color: 'var(--accent-series)', animation: 'pulse 2s ease-in-out infinite' }}>
+        <span>{s.name}: {s.msg}</span>
+        {s.pct > 0 && <span style={{ fontFamily: 'var(--font-mono)' }}>{s.pct}%</span>}
+        {activeIndexes.length > 1 && (
+          <span style={{ color: 'var(--text-2)' }}>+{activeIndexes.length - 1} more</span>
         )}
       </div>
     )
@@ -877,22 +898,23 @@ function HomeSearchResults({ query, onSelectContent }: { query: string; onSelect
   const STRIP_MAX = useAppStore((s) => s.homeStripSize)
   const SEARCH_ROWS = 2
 
+  const ftsEnabled = useAppStore((s) => s.ftsEnabled)
   const searchArgs = (type: 'live' | 'movie' | 'series') => ({
-    query, type, sourceIds: selectedSourceIds.length ? selectedSourceIds : undefined, limit: SEARCH_FETCH_LIMIT,
+    query, type, sourceIds: selectedSourceIds.length ? selectedSourceIds : undefined, limit: SEARCH_FETCH_LIMIT, ftsEnabled,
   })
 
   const { data: liveData, isFetching: liveFetching } = useQuery({
-    queryKey: ['search', query, 'live', selectedSourceIds],
+    queryKey: ['search', query, 'live', selectedSourceIds, ftsEnabled],
     queryFn: () => api.search.query(searchArgs('live')),
     staleTime: 10_000, enabled: !!query,
   })
   const { data: movieData, isFetching: movieFetching } = useQuery({
-    queryKey: ['search', query, 'movie', selectedSourceIds],
+    queryKey: ['search', query, 'movie', selectedSourceIds, ftsEnabled],
     queryFn: () => api.search.query(searchArgs('movie')),
     staleTime: 10_000, enabled: !!query,
   })
   const { data: seriesData, isFetching: seriesFetching } = useQuery({
-    queryKey: ['search', query, 'series', selectedSourceIds],
+    queryKey: ['search', query, 'series', selectedSourceIds, ftsEnabled],
     queryFn: () => api.search.query(searchArgs('series')),
     staleTime: 10_000, enabled: !!query,
   })
@@ -937,7 +959,7 @@ function HomeSearchResults({ query, onSelectContent }: { query: string; onSelect
       <DiscoverStrip
         title="Live Channels" accent="var(--accent-live)" type="live"
         items={liveResults as ContentItem[]} isLoading={liveFetching && liveResults.length === 0}
-        hasMore={liveResults.length > STRIP_MAX * SEARCH_ROWS}
+        hasMore={liveResults.length > STRIP_MAX * SEARCH_ROWS || (ftsEnabled && liveResults.length > 0)}
         onMore={() => { seedQuery('live', query); setView('live'); setCategoryFilter(null) }}
         onSelectContent={handleSelect}
         stripMax={STRIP_MAX} rows={SEARCH_ROWS}
@@ -945,7 +967,7 @@ function HomeSearchResults({ query, onSelectContent }: { query: string; onSelect
       <DiscoverStrip
         title="Movies" accent="var(--accent-film)" type="movie"
         items={movieResults as ContentItem[]} isLoading={movieFetching && movieResults.length === 0}
-        hasMore={movieResults.length > STRIP_MAX * SEARCH_ROWS}
+        hasMore={movieResults.length > STRIP_MAX * SEARCH_ROWS || (ftsEnabled && movieResults.length > 0)}
         onMore={() => { seedQuery('films', query); setView('films'); setCategoryFilter(null) }}
         onSelectContent={handleSelect}
         stripMax={STRIP_MAX} rows={SEARCH_ROWS}
@@ -953,7 +975,7 @@ function HomeSearchResults({ query, onSelectContent }: { query: string; onSelect
       <DiscoverStrip
         title="Series" accent="var(--accent-series)" type="series"
         items={seriesResults as ContentItem[]} isLoading={seriesFetching && seriesResults.length === 0}
-        hasMore={seriesResults.length > STRIP_MAX * SEARCH_ROWS}
+        hasMore={seriesResults.length > STRIP_MAX * SEARCH_ROWS || (ftsEnabled && seriesResults.length > 0)}
         onMore={() => { seedQuery('series', query); setView('series'); setCategoryFilter(null) }}
         onSelectContent={handleSelect}
         stripMax={STRIP_MAX} rows={SEARCH_ROWS}

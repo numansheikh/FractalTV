@@ -49,8 +49,10 @@ const PHASE_LABELS: Record<string, string> = {
 }
 
 export function SourceCard({ source, onSync, onRemove }: Props) {
-  const { sources, syncProgress } = useSourcesStore()
+  const { sources, syncProgress, indexProgress, setIndexProgress } = useSourcesStore()
+  const { setFtsEnabled } = useAppStore()
   const progress = syncProgress[source.id] ?? null
+  const idxProgress = indexProgress[source.id] ?? null
 
   // Resolve color: use stored colorIndex if set, else auto-assign by position
   const autoIndex = sources.findIndex(s => s.id === source.id)
@@ -93,6 +95,24 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
     }
   }
 
+
+  const isIndexing = idxProgress !== null && idxProgress.phase !== 'done' && idxProgress.phase !== 'error'
+  const idxPct = idxProgress && idxProgress.total > 0
+    ? Math.min(100, Math.round((idxProgress.current / idxProgress.total) * 100))
+    : 0
+
+  const handleBuildFts = async () => {
+    if (isIndexing || isSyncing) return
+    setIndexProgress(source.id, { phase: 'starting', current: 0, total: 0, message: 'Starting index…' })
+    try {
+      const result = await api.sources.buildFts(source.id)
+      if (result.success) {
+        setFtsEnabled(true)
+      }
+    } finally {
+      setIndexProgress(source.id, null)
+    }
+  }
 
   const isSyncing = progress !== null && progress.phase !== 'done' && progress.phase !== 'error'
   const syncPct = progress && progress.total > 0
@@ -211,36 +231,22 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
           {source.name}
         </span>
         {!editMode && (
-          <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
-            <ActionButton
-              icon={isSyncing
-                ? <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ animation: 'spin 1s linear infinite' }}><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
-                : <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" /><path d="M8 16H3v5" /></svg>
+          <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
+            <IconButton
+              title={source.disabled ? 'Enable' : 'Disable'}
+              onClick={handleToggleDisable}
+            >
+              {source.disabled
+                ? <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0" /><line x1="12" y1="2" x2="12" y2="12" /></svg>
+                : <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="4.93" y1="4.93" x2="19.07" y2="19.07" /></svg>
               }
-              onClick={() => onSync(source.id)} disabled={isSyncing}>
-              {isSyncing ? 'Syncing…' : 'Sync'}
-            </ActionButton>
-            <ActionButton
-              icon={<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>}
-              onClick={handleTest} disabled={testing}>
-              {testing ? 'Testing…' : 'Test'}
-            </ActionButton>
-            <ActionButton
-              icon={source.disabled
-                ? <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0" /><line x1="12" y1="2" x2="12" y2="12" /></svg>
-                : <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="4.93" y1="4.93" x2="19.07" y2="19.07" /></svg>
-              }
-              onClick={handleToggleDisable}>
-              {source.disabled ? 'Enable' : 'Disable'}
-            </ActionButton>
-            <ActionButton
-              icon={<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>}
-              onClick={() => setEditMode(true)}>Edit</ActionButton>
-            <ActionButton
-              icon={<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6" /><path d="M14 11v6" /><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /></svg>}
-              onClick={handleDelete}>
-              Delete
-            </ActionButton>
+            </IconButton>
+            <IconButton title="Edit" onClick={() => setEditMode(true)}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
+            </IconButton>
+            <IconButton title="Delete" color="var(--accent-danger)" onClick={handleDelete}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6" /><path d="M14 11v6" /><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /></svg>
+            </IconButton>
           </div>
         )}
       </div>
@@ -300,6 +306,40 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
             ) : (
               <div style={{
                 height: '100%', background: 'var(--accent-interactive)',
+                width: '35%', borderRadius: 99,
+                animation: 'shimmer 1.4s ease-in-out infinite',
+              }} />
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* FTS index progress */}
+      {isIndexing && idxProgress && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginTop: 2 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 10, color: 'var(--accent-series)', fontFamily: 'var(--font-ui)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {idxProgress.message || idxProgress.phase}
+            </span>
+            {idxPct > 0 && (
+              <span style={{ fontSize: 10, color: 'var(--text-2)', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>
+                {idxPct}%
+              </span>
+            )}
+          </div>
+          <div style={{
+            height: 3, borderRadius: 99, overflow: 'hidden',
+            background: 'var(--bg-3)', width: '100%',
+          }}>
+            {idxPct > 0 ? (
+              <div style={{
+                height: '100%', background: 'var(--accent-series)',
+                width: `${idxPct}%`, transition: 'width 0.3s',
+                borderRadius: 99,
+              }} />
+            ) : (
+              <div style={{
+                height: '100%', background: 'var(--accent-series)',
                 width: '35%', borderRadius: 99,
                 animation: 'shimmer 1.4s ease-in-out infinite',
               }} />
@@ -428,12 +468,66 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
         </div>
       )}
 
+      {/* Bottom action row: Test · Sync · Index */}
+      {!editMode && (
+        <div style={{ display: 'flex', gap: 6, marginTop: 4, borderTop: '1px solid var(--border-subtle)', paddingTop: 8 }}>
+          <ActionButton
+            icon={<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>}
+            onClick={handleTest} disabled={testing}>
+            {testing ? 'Testing…' : 'Test'}
+          </ActionButton>
+          <ActionButton
+            icon={isSyncing
+              ? <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ animation: 'spin 1s linear infinite' }}><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
+              : <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" /><path d="M8 16H3v5" /></svg>
+            }
+            onClick={() => onSync(source.id)} disabled={isSyncing}>
+            {isSyncing ? 'Syncing…' : 'Sync'}
+          </ActionButton>
+          <ActionButton
+            icon={isIndexing
+              ? <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ animation: 'spin 1s linear infinite' }}><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
+              : <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            }
+            onClick={handleBuildFts} disabled={isIndexing || isSyncing}>
+            {isIndexing ? 'Indexing…' : 'Index'}
+          </ActionButton>
+        </div>
+      )}
 
     </div>
   )
 }
 
 /* ── Inner helpers ──────────────────────────────────────────────── */
+
+/** Icon-only subtle button for top-right management actions. */
+function IconButton({
+  children, title, color, onClick,
+}: {
+  children: React.ReactNode; title: string; color?: string; onClick: () => void
+}) {
+  const idle = color ?? 'var(--text-3)'
+  const hover = color ?? 'var(--text-1)'
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      style={{
+        width: 24, height: 24, borderRadius: 5,
+        background: 'transparent', border: 'none',
+        color: idle, cursor: 'pointer',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        transition: 'background 0.1s, color 0.1s',
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-4)'; e.currentTarget.style.color = hover }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = idle }}
+    >
+      {children}
+    </button>
+  )
+}
+
 function ActionButton({
   children, icon, onClick, disabled,
 }: {
