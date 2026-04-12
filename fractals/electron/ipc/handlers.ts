@@ -513,6 +513,8 @@ export function registerHandlers() {
             message: `Synced ${msg.catCount} categories, ${msg.totalItems.toLocaleString()} items`,
           })
           resolve({ success: true })
+          // Auto-build FTS index after every successful sync (fire and forget).
+          buildFtsForSource(sourceId, win).catch((err) => console.error('[fts] post-sync build failed:', err))
           // Kick EPG sync in background after successful source sync.
           const src = sqlite.prepare('SELECT * FROM sources WHERE id = ?').get(sourceId) as SourceRow | undefined
           if (src?.server_url) runEpgSync(sqlite, win, sourceId, src)
@@ -558,78 +560,11 @@ export function registerHandlers() {
 
   // ── FTS indexing (g2) ────────────────────────────────────────────────────
   // Builds content_fts rows for a single source. Runs on main thread —
-  // INSERT...SELECT for 300K rows is ~1-2s in SQLite, no worker needed.
+  // INSERT...SELECT for 300K rows is ~1-2s in SQLite. Yields between batches
+  // so the UI stays responsive.
   ipcMain.handle('sources:build-fts', async (event, sourceId: string) => {
     const win = BrowserWindow.fromWebContents(event.sender)
-    const sqlite = getSqlite()
-
-    const source = sqlite.prepare('SELECT id FROM sources WHERE id = ?').get(sourceId) as { id: string } | undefined
-    if (!source) return { success: false, error: 'Source not found' }
-
-    const send = (phase: string, current: number, total: number, message: string) =>
-      win?.webContents.send('fts:progress', { sourceId, phase, current, total, message })
-
-    try {
-      // Wipe existing FTS rows for this source
-      sqlite.prepare('DELETE FROM content_fts WHERE source_id = ?').run(sourceId)
-
-      // Count streams + series for progress
-      const streamCount = (sqlite.prepare('SELECT COUNT(*) as n FROM streams WHERE source_id = ?').get(sourceId) as CountRow).n
-      const seriesCount = (sqlite.prepare('SELECT COUNT(*) as n FROM series_sources WHERE source_id = ?').get(sourceId) as CountRow).n
-      const total = streamCount + seriesCount
-
-      send('indexing-streams', 0, total, `Indexing ${streamCount.toLocaleString()} streams…`)
-
-      // Batch insert streams into FTS
-      const BATCH = 5000
-      let indexed = 0
-      const insertStreamFts = sqlite.prepare(`
-        INSERT INTO content_fts (id, source_id, type, title)
-        SELECT id, source_id, type, fold_ligatures(title) FROM streams
-        WHERE source_id = ? AND rowid > ? ORDER BY rowid LIMIT ?
-      `)
-      let lastRowid = 0
-      while (true) {
-        const maxRow = sqlite.prepare(
-          `SELECT MAX(rowid) as m FROM (SELECT rowid FROM streams WHERE source_id = ? AND rowid > ? ORDER BY rowid LIMIT ?)`
-        ).get(sourceId, lastRowid, BATCH) as { m: number | null }
-        if (!maxRow.m) break
-
-        insertStreamFts.run(sourceId, lastRowid, BATCH)
-        lastRowid = maxRow.m
-        indexed += Math.min(BATCH, streamCount - indexed)
-        send('indexing-streams', Math.min(indexed, streamCount), total, `Streams: ${Math.min(indexed, streamCount).toLocaleString()}/${streamCount.toLocaleString()}`)
-      }
-
-      send('indexing-series', streamCount, total, `Indexing ${seriesCount.toLocaleString()} series…`)
-
-      // Batch insert series_sources into FTS
-      const insertSeriesFts = sqlite.prepare(`
-        INSERT INTO content_fts (id, source_id, type, title)
-        SELECT id, source_id, 'series', fold_ligatures(title) FROM series_sources
-        WHERE source_id = ? AND rowid > ? ORDER BY rowid LIMIT ?
-      `)
-      lastRowid = 0
-      let seriesIndexed = 0
-      while (true) {
-        const maxRow = sqlite.prepare(
-          `SELECT MAX(rowid) as m FROM (SELECT rowid FROM series_sources WHERE source_id = ? AND rowid > ? ORDER BY rowid LIMIT ?)`
-        ).get(sourceId, lastRowid, BATCH) as { m: number | null }
-        if (!maxRow.m) break
-
-        insertSeriesFts.run(sourceId, lastRowid, BATCH)
-        lastRowid = maxRow.m
-        seriesIndexed += Math.min(BATCH, seriesCount - seriesIndexed)
-        send('indexing-series', streamCount + Math.min(seriesIndexed, seriesCount), total,
-          `Series: ${Math.min(seriesIndexed, seriesCount).toLocaleString()}/${seriesCount.toLocaleString()}`)
-      }
-
-      send('done', total, total, `Indexed ${total.toLocaleString()} items`)
-      return { success: true, total }
-    } catch (err) {
-      send('error', 0, 0, String(err))
-      return { success: false, error: String(err) }
-    }
+    return buildFtsForSource(sourceId, win)
   })
 
   // ── EPG ─────────────────────────────────────────────────────────────────
@@ -1411,6 +1346,88 @@ function g2SearchSeries(
     ORDER BY rank
     LIMIT ?
   `).all(ftsQuery, ...catParams, ...filterIds, limit) as unknown[]
+}
+
+const yieldToEventLoop = () => new Promise<void>((r) => setImmediate(r))
+
+/**
+ * Build FTS5 rows for a single source (streams + series_sources).
+ * Yields between 5000-row batches so the UI stays responsive.
+ * Emits progress via `fts:progress` IPC events.
+ */
+async function buildFtsForSource(
+  sourceId: string,
+  win: BrowserWindow | null
+): Promise<{ success: boolean; total?: number; error?: string }> {
+  const sqlite = getSqlite()
+
+  const source = sqlite.prepare('SELECT id FROM sources WHERE id = ?').get(sourceId) as { id: string } | undefined
+  if (!source) return { success: false, error: 'Source not found' }
+
+  const send = (phase: string, current: number, total: number, message: string) =>
+    win?.webContents.send('fts:progress', { sourceId, phase, current, total, message })
+
+  try {
+    // Wipe existing FTS rows for this source
+    sqlite.prepare('DELETE FROM content_fts WHERE source_id = ?').run(sourceId)
+
+    // Count streams + series for progress
+    const streamCount = (sqlite.prepare('SELECT COUNT(*) as n FROM streams WHERE source_id = ?').get(sourceId) as CountRow).n
+    const seriesCount = (sqlite.prepare('SELECT COUNT(*) as n FROM series_sources WHERE source_id = ?').get(sourceId) as CountRow).n
+    const total = streamCount + seriesCount
+
+    send('indexing-streams', 0, total, `Indexing ${streamCount.toLocaleString()} streams…`)
+
+    const BATCH = 5000
+    const insertStreamFts = sqlite.prepare(`
+      INSERT INTO content_fts (id, source_id, type, title)
+      SELECT id, source_id, type, fold_ligatures(title) FROM streams
+      WHERE source_id = ? AND rowid > ? ORDER BY rowid LIMIT ?
+    `)
+    let lastRowid = 0
+    let indexed = 0
+    while (true) {
+      const maxRow = sqlite.prepare(
+        `SELECT MAX(rowid) as m FROM (SELECT rowid FROM streams WHERE source_id = ? AND rowid > ? ORDER BY rowid LIMIT ?)`
+      ).get(sourceId, lastRowid, BATCH) as { m: number | null }
+      if (!maxRow.m) break
+
+      insertStreamFts.run(sourceId, lastRowid, BATCH)
+      lastRowid = maxRow.m
+      indexed += Math.min(BATCH, streamCount - indexed)
+      send('indexing-streams', Math.min(indexed, streamCount), total, `Streams: ${Math.min(indexed, streamCount).toLocaleString()}/${streamCount.toLocaleString()}`)
+      await yieldToEventLoop()
+    }
+
+    send('indexing-series', streamCount, total, `Indexing ${seriesCount.toLocaleString()} series…`)
+
+    const insertSeriesFts = sqlite.prepare(`
+      INSERT INTO content_fts (id, source_id, type, title)
+      SELECT id, source_id, 'series', fold_ligatures(title) FROM series_sources
+      WHERE source_id = ? AND rowid > ? ORDER BY rowid LIMIT ?
+    `)
+    lastRowid = 0
+    let seriesIndexed = 0
+    while (true) {
+      const maxRow = sqlite.prepare(
+        `SELECT MAX(rowid) as m FROM (SELECT rowid FROM series_sources WHERE source_id = ? AND rowid > ? ORDER BY rowid LIMIT ?)`
+      ).get(sourceId, lastRowid, BATCH) as { m: number | null }
+      if (!maxRow.m) break
+
+      insertSeriesFts.run(sourceId, lastRowid, BATCH)
+      lastRowid = maxRow.m
+      seriesIndexed += Math.min(BATCH, seriesCount - seriesIndexed)
+      send('indexing-series', streamCount + Math.min(seriesIndexed, seriesCount), total,
+        `Series: ${Math.min(seriesIndexed, seriesCount).toLocaleString()}/${seriesCount.toLocaleString()}`)
+      await yieldToEventLoop()
+    }
+
+    send('done', total, total, `Indexed ${total.toLocaleString()} items`)
+    return { success: true, total }
+  } catch (err) {
+    send('error', 0, 0, String(err))
+    return { success: false, error: String(err) }
+  }
 }
 
 /** Fold Latin ligatures to their component letters. */

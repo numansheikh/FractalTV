@@ -468,7 +468,7 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
         </div>
       )}
 
-      {/* Bottom action row: Test · Sync · Index */}
+      {/* Bottom action row: Test · Sync · Reindex FTS */}
       {!editMode && (
         <div style={{ display: 'flex', gap: 6, marginTop: 4, borderTop: '1px solid var(--border-subtle)', paddingTop: 8 }}>
           <ActionButton
@@ -490,7 +490,7 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
               : <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
             }
             onClick={handleBuildFts} disabled={isIndexing || isSyncing}>
-            {isIndexing ? 'Indexing…' : 'Index'}
+            {isIndexing ? 'Indexing…' : 'Reindex FTS'}
           </ActionButton>
         </div>
       )}

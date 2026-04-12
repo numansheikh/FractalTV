@@ -1,19 +1,22 @@
 # Fractals — TODO
 
-## Bucket 1 — Data & Search (active)
+## Bucket 1 — Data & Search
 
-### Bugs
-- [ ] **Search grid broken** — VirtualGrid renders badly in search mode. Root cause undiagnosed. Suspect: `isLive = items[0]?.type === 'live'` is fragile — if item order changes or types mix, grid dimensions are wrong. Attempted fix (pass `contentType` prop) worsened it; needs fresh investigation.
-- [ ] **Diacritic search** — "forg" misses "Förgöraren"; "förg" works via LIKE fallback. anyAscii not folding ö→o in compiled worker context. Investigate `any-ascii` require path in `indexing.worker.ts`. Confirm by searching "forgoraren" — if FTS stored accented form, fix normalization in worker.
-- [ ] **Mixed card sizes in search** — ChannelCards (landscape) and PosterCards (portrait) appear back-to-back in search results. Fix: scope search results per view to that view's content type; render separate sections if mixed.
-- [ ] **Episode stream hang** — player hangs with spinner when an episode URL 404s; needs timeout + error overlay.
+### Fixed (g1/g2)
+- [x] Diacritic search — fixed in g2 via FTS5 `unicode61 remove_diacritics 2`
+- [x] Ligature search (cœur, œuvre, etc.) — fixed in g2 via `fold_ligatures()` SQLite scalar + JS pre-fold
+- [x] Search grid broken — fixed in g1 (type-bleeding fix: scope searchItems by active view's contentType)
+- [x] Mixed card sizes in search — fixed in g1 (same type-bleeding fix + card size policy: live→ChannelCard, movie/series→PosterCard)
+- [x] FTS hygiene on source remove — delete.worker wipes content_fts rows in same transaction
+
+### Open bugs
+- [ ] **Episode stream hang** — player hangs with spinner when an episode URL 404s; needs timeout + error overlay
+- [ ] **Black screen** — occasional idle black screen requiring Cmd+R; undiagnosed, deferred
 
 ### QA / Sync tests (shelved — resume here)
 Two-phase sync implemented, basic tests passed. Resume from:
 - [ ] Let both sources (Opplex + 4K) sync fully; verify Phase 1 browse works before indexing completes
-- [ ] Verify phase messages in order: Downloading → Saving → Indexing channels/movies/series → Search ready
-- [ ] Confirm search is locked until indexing completes (not available during Phase 1)
-- [ ] Test cancel mid-sync — Phase 1 separately, Phase 2 separately
+- [ ] Test cancel mid-sync — Phase 1 separately, Phase 2 separately (including mid-FTS-build cancel)
 - [ ] Test factory reset during active sync
 - [ ] Test two sources syncing simultaneously
 - [ ] Verify VirtualGrid last-row padding (cards in last row shouldn't stretch wider than the rest)
@@ -23,7 +26,7 @@ Two-phase sync implemented, basic tests passed. Resume from:
 ## Bucket 3 — Source Management (partially done)
 
 - [ ] Source management UX improvements (details TBD from real usage)
-- [ ] Enrichment implementation assessment (IMDb + Wikidata end-to-end) — deferred
+- [ ] Enrichment implementation assessment — deferred to g3 (keyless: iptv-org) and later (keyed: TMDB)
 
 ---
 
@@ -39,7 +42,7 @@ Two-phase sync implemented, basic tests passed. Resume from:
 
 - [ ] `profile_id` missing in user_data writes
 - [ ] `tsconfig.node.json` broken
-- [ ] Hardcoded TMDB key
+- [ ] Hardcoded TMDB key (pre-g1 remnant, to be cleaned during g5)
 - [ ] Electron sandbox disabled
 - [ ] 130+ `as any` casts
 

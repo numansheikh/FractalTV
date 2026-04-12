@@ -161,21 +161,23 @@ settings
 
 ## Key design decisions
 
-### Search architecture (g1 baseline)
-LIKE search on provider titles with 250ms debounce and min 2 character threshold. Three parallel queries (live, movie, series) via IPC. Results displayed per-type with independent pagination.
+### Search architecture (g1 + g2)
+**g1 baseline.** LIKE search on provider titles with 250ms debounce and min 2 character threshold. Three parallel queries (live, movie, series) via IPC. Results displayed per-type with independent pagination.
+
+**g2 FTS5 layer.** Single `content_fts` virtual table (id/source_id/type UNINDEXED, title searchable) using `unicode61 remove_diacritics 2` tokenizer. `ftsEnabled` toggle (default false in store, but forced to true after every index build). Query preprocessing folds Latin ligatures (œ→oe, æ→ae, ß→ss, ﬁ→fi, ﬂ→fl, ĳ→ij) and appends `*` for prefix match. Index build folds same ligatures via registered `fold_ligatures()` SQLite scalar in INSERT...SELECT. Build yields to the event loop between 5000-row batches so UI stays responsive. FTS runs automatically at the end of every source sync. Grid views augment FTS with LIKE when <10 results (`ftsFallback: true`). Home/Discover stays FTS-only for speed.
 
 **Tiered search roadmap:**
-- g1: LIKE on provider titles (current)
-- g2: FTS5 on streams table
-- g3: FTS5 on canonical + bridge to streams
+- g1: LIKE on provider titles (DONE)
+- g2: FTS5 on streams + series_sources (DONE)
+- g3: keyless canonical layer (title normalization + iptv-org enrichment, no API keys)
 - g4: embeddings / semantic (sqlite-vec in place, worker not built)
-- g5: cross-language resolution
+- g5: cross-language resolution (TMDB and other keyed enrichments)
 
-### Multi-source deduplication (g2+)
-Not yet implemented. Same movie from two sources appears as two items. Will resolve via canonical identity layer keyed by TMDB ID.
+### Multi-source deduplication (g3+)
+Not yet implemented. Same movie from two sources appears as two items. Will resolve via canonical identity layer built on title normalization (g3) plus keyed enrichment later.
 
-### Enrichment (g2+)
-Hidden in g1 UI. Will return as TMDB enrichment writing to canonical tables.
+### Enrichment (g3+)
+Hidden in g1/g2 UI. g3 brings iptv-org (keyless, public data) for live channel logos/country/category. Keyed providers (TMDB) follow later.
 
 ### Catchup / Timeshift
 For live TV channels with catchup support:
@@ -341,19 +343,25 @@ Single layer. What M3U/Xtream APIs return, stored directly.
 - No deduplication — same content from two sources = two items
 - Title normalizer extracts `year_hint`, `language_hint`, `origin_hint`, `quality_hint` at sync time
 
-### g2+ — Canonical identity layer (planned)
+### g2 — FTS5 layer (complete)
+
+Single-table FTS5 index (`content_fts`) over streams + series_sources. Ligature folding at index and query time. Auto-built at end of every sync. Toggle exists in Sources panel for debug but flipped on after every successful index. No canonical, no enrichment yet.
+
+### g3+ — Canonical identity layer (planned, keyless first)
 
 Will add a second layer:
-- TMDB-sourced canonical identity (English title, year, genres, poster, etc.)
+- Keyless (g3): title normalization into canonical rows, plus iptv-org enrichment (logos, country, category, NSFW) for live channels via `tvg-id` match
+- Keyed (later): TMDB canonical identity (English title, year, genres, poster) for movies + series
 - Bridge: multiple provider streams → one canonical identity
 - Search target shifts from provider titles to canonical titles
-- Deduplication across sources via `tmdb_id`
+- Deduplication across sources
 
 ## Implementation status (as of 2026-04-12)
 
 **Phase 0–2.5 — Complete.** Core through V3 data model.
-**g1 — Complete (2026-04-12).** Pure provider-data app. Stripped canonical tables, FTS, enrichment. 12 tables. LIKE search with debounce. User data survives resync.
-**g2–g5 — Not started.** Will build back: g2 (FTS→streams), g3 (FTS→canonical), g4+.
+**g1 — Complete.** Pure provider-data app. 12 tables. LIKE search with debounce. User data survives resync. Type-bleeding fix (search scoped by contentType).
+**g2 — Complete.** FTS5 + manual/auto indexing + toggle + diacritic/ligature folding + grid LIKE fallback. Sync auto-runs indexing and flips `ftsEnabled` on.
+**g3–g5 — Not started.** g3 (keyless canonical + iptv-org), g4 (embeddings), g5 (keyed enrichment, cross-language).
 **Phase 3 — Not started.** Capacitor for Android/iOS/TV, Tizen.
 
 ### g1 features (current state)
@@ -423,7 +431,7 @@ Will add a second layer:
 
 - **Sync user data preservation** — Sync workers backup stream_user_data, series_user_data, channel_user_data into temp tables before deleting streams (CASCADE would wipe them), then restore rows whose IDs still exist after reinserting. Clean sync + favorites survive.
 
-- **LIKE search with debounce (g1)** — LIKE `%query%` on provider titles. 250ms debounce in search store (`debouncedQueries`), min 2 character threshold. g2+ will add FTS5.
+- **LIKE search with debounce (g1) + FTS5 (g2)** — g1: LIKE `%query%` on provider titles, 250ms debounce, min 2 char threshold. g2: adds FTS5 via `content_fts` virtual table with unicode61 + ligature folding, auto-built after every sync, with grid LIKE fallback when FTS returns <10 results.
 
 - **Source-scoped content IDs** — Format `{sourceId}:{type}:{streamId}` ensures correct credentials used for playback. Same stream_id on same server returns HTTP 405 with wrong account credentials.
 
@@ -439,11 +447,11 @@ Will add a second layer:
 
 ## Known limitations & open work
 
-- **No FTS / enrichment / canonical (g1)** — Search is LIKE only. No TMDB metadata. No deduplication across sources. All deferred to g2+.
+- **No enrichment / canonical yet (g1 + g2)** — FTS5 search and diacritic/ligature folding landed in g2. Still no TMDB metadata, no iptv-org matching, no deduplication across sources. All deferred to g3+.
 
 - **Episode stream hang** — Player shows infinite spinner when episode URL 404s. Needs timeout + error overlay.
 
-- **Diacritic search** — "forg" misses "Forgöraren". anyAscii folding issue, deferred to g2 (FTS will handle this).
+- **Diacritic / ligature search** — FIXED in g2 via FTS5 `unicode61 remove_diacritics 2` plus `fold_ligatures()` scalar.
 
 - **Black screen bug** — Occasional idle black screen requiring Cmd+R. Undiagnosed, needs DevTools console output. Deferred.
 

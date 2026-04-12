@@ -44,6 +44,7 @@ function AppShell() {
     setView, setCategoryFilter, clearSourceFilter, toggleSourceFilter,
     sort, setSort, surfChannel,
     playerMode, setPlayerMode,
+    setFtsEnabled,
   } = useAppStore()
 
   const [showAddModal, setShowAddModal] = useState(false)
@@ -144,17 +145,19 @@ function AppShell() {
     })
   }, [setSources, updateSource, setSyncProgress])
 
-  // FTS indexing progress events (g2)
+  // FTS indexing progress events (g2). After every successful index build,
+  // flip ftsEnabled on — sync→index→FTS-on is the default flow.
   useEffect(() => {
     return api.on('fts:progress', (progress: any) => {
       const p = progress as SyncProgress & { sourceId: string }
       if (p.phase === 'done' || p.phase === 'error') {
         setIndexProgress(p.sourceId, null)
+        if (p.phase === 'done') setFtsEnabled(true)
       } else {
         setIndexProgress(p.sourceId, { phase: p.phase, current: p.current, total: p.total, message: p.message })
       }
     })
-  }, [setIndexProgress])
+  }, [setIndexProgress, setFtsEnabled])
 
   const handleSync = async (sourceId: string) => {
     if (syncingIds.current.has(sourceId)) return

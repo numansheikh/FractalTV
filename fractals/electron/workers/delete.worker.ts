@@ -20,6 +20,8 @@ try {
     db.prepare(`DELETE FROM streams WHERE source_id = ?`).run(sourceId)
     db.prepare(`DELETE FROM categories WHERE source_id = ?`).run(sourceId)
     db.prepare(`DELETE FROM epg WHERE source_id = ?`).run(sourceId)
+    // content_fts is a virtual FTS5 table — no FK cascade, clean it manually
+    db.prepare(`DELETE FROM content_fts WHERE source_id = ?`).run(sourceId)
     db.prepare(`DELETE FROM sources WHERE id = ?`).run(sourceId)
   })()
 

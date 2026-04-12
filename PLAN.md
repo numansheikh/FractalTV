@@ -15,10 +15,10 @@ Architecture, tech stack, schema, conventions, design language: see `fractals/CL
 | 2 | Complete | V2 data model cutover (canonical + streams, v1 dropped) |
 | 2.5 | Complete | V3 data model + search (canonical split, association layer, MetadataProvider, advanced search, two-phase sync) |
 | g1 | **Complete** | Strip to pure provider-data app. 12 tables. LIKE search + debounce. User data survives resync. UI polish. |
-| g2 | Not started | FTS5 on streams table |
-| g3 | Not started | FTS5 on canonical + bridge to streams |
+| g2 | **Complete** | FTS5 on streams + series_sources. Manual + auto indexing. Diacritic + ligature folding. Grid LIKE fallback. |
+| g3 | Not started | Keyless canonical layer — title normalization + iptv-org enrichment (live channels) |
 | g4 | Not started | Embeddings / semantic search |
-| g5 | Not started | Cross-language resolution |
+| g5 | Not started | Keyed enrichment (TMDB) + cross-language resolution |
 | 3 | Not started | Capacitor (Android/iOS/TV), Tizen |
 
 ---
@@ -38,29 +38,48 @@ Branch: `search-rebuild-g1`
 - NavRail sync pulse indicator + home screen sync status strip
 - VirtualGrid dynamic sizing, breadcrumbs pinned top, category filter clearing on navigation
 - Settings cleanup: enrichment hidden, grid page size picker, external player hidden
+- Type-bleeding fix: search results scoped by active view's `contentType`
 
 ---
 
-## g2 — next up
+## g2 — locked (2026-04-12)
 
-Branch: `search-rebuild-g2` (to be created)
+Branch: `search-rebuild-g1-g2`
 
-**Goal:** Add FTS5 search on the streams table. Provider titles indexed, ranked search results.
+**What shipped:**
+- `content_fts` FTS5 virtual table (id/source_id/type UNINDEXED, title searchable)
+- Tokenizer: `unicode61 remove_diacritics 2` (handles diacritics natively)
+- `fold_ligatures()` SQLite scalar + JS query-side pre-fold (œ→oe, æ→ae, ß→ss, ﬁ→fi, ﬂ→fl, ĳ→ij)
+- Per-source index build, yields between 5000-row batches (main thread stays responsive)
+- Auto-index runs at end of every successful sync; `ftsEnabled` forced on after each index
+- Sources panel FTS toggle (debug, will be hidden later)
+- SourceCard redesign: icon-only Disable/Edit/Delete on top row, labeled Test/Sync/Reindex FTS on bottom row
+- NavRail pulse + home info strip reflect indexing activity
+- Grid views augment FTS results with LIKE when <10 results (`ftsFallback: true`); home/discover stays FTS-only for speed
+
+---
+
+## g3 — next up
+
+Branch: `search-rebuild-g1-g2-g3` (created)
+
+**Goal:** Keyless canonical identity layer (no API keys). Title-normalization-based grouping, plus iptv-org public-data enrichment for live channels.
 
 **Scope (tentative):**
-- FTS5 virtual table on streams (title, normalized title)
-- Search handler: FTS5 first, LIKE fallback for special characters
-- Hybrid ranking: FTS5 rank + recency
-- Diacritic folding via FTS5 tokenizer (fixes "forg" → "Forgöraren" bug)
-- Re-enable enrichment UI (TMDB metadata on detail panels)
+- Canonical rows keyed by normalized title + year for movies/series
+- Bridge table: provider streams → canonical
+- Deduplication across sources (same movie from two providers → one canonical row)
+- iptv-org JSON ingest (39K channels, country/category/logo/NSFW) matched via `tvg-id`
+- Search target shifts from provider titles to canonical (FTS5 on canonical + bridge back to streams for playback)
 
 ---
 
-## Known bugs (not blocking g1, carry forward)
+## Known bugs (carry forward)
 
 - [ ] **Episode stream hang** — player infinite spinner on 404. Needs timeout + error overlay.
-- [ ] **Diacritic search** — "forg" misses "Forgöraren". Will be fixed by FTS5 in g2.
 - [ ] **Black screen** — occasional idle black screen requiring Cmd+R. Undiagnosed, deferred.
+- [x] **Diacritic / ligature search** — FIXED in g2.
+- [x] **Search type bleeding** — FIXED in g1 (2026-04-12).
 
 ---
 
@@ -106,8 +125,8 @@ Three-tier split (same React codebase, feature flags):
 
 ## Snapshot (2026-04-12)
 
-- Phase state: g1 locked, g2 next
-- DB: 12 tables, no canonical layer
-- Branch: `search-rebuild-g1` (g1 complete), `search-rebuild-g2` (to be created)
-- Two real-world sources synced + tested
-- Search: LIKE + debounce baseline, FTS5 coming in g2
+- Phase state: g1 locked, g2 locked, g3 starting
+- DB: 12 tables + `content_fts` virtual table
+- Branches: `search-rebuild-g1` (g1 locked), `search-rebuild-g1-g2` (g2 locked), `search-rebuild-g1-g2-g3` (g3 WIP)
+- Two real-world sources synced + indexed + tested
+- Search: LIKE (g1) + FTS5 with diacritic/ligature folding (g2)

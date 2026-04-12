@@ -17,13 +17,21 @@ For everything below — architecture, running locally, keyboard shortcuts, conv
 
 ## Roadmap
 
-High-level work is tracked in **[`BACKLOG.md`](BACKLOG.md)**. Five active buckets:
+Detailed phase status in **[`PLAN.md`](PLAN.md)**. Tiered search roadmap (current focus):
 
-1. **Data & Search** *(next pick)* — canonical data model + search redesign + TMDB enrichment
-2. **Product shape** — three-tier split (M3U Player / Xtream Lite / Fractals Pro) and M3U format work
+- **g1** — provider-data app, LIKE search (complete)
+- **g2** — FTS5 + diacritic/ligature folding, auto-indexed on sync (complete)
+- **g3** *(next)* — keyless canonical layer: title normalization + iptv-org enrichment for live channels
+- **g4** — embeddings / semantic search
+- **g5** — keyed enrichment (TMDB) + cross-language resolution
+
+Five parallel buckets:
+
+1. **Data & Search** *(active — g3 next)*
+2. **Product shape** — three-tier split (M3U Player / Xtream Lite / Fractals Pro)
 3. **Multi-platform reach** — Android, iOS, Android TV, Samsung Tizen via Capacitor
-4. **Experience polish** — Live TV nav, series full-page view, player fixes
-5. **Tech health** — QA cycle 2 follow-ups (type safety, security, hardening)
+4. **Experience polish** — series full-page view, player fixes
+5. **Tech health** — type safety, security, hardening
 
 ## Disclaimer
 

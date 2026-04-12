@@ -4,24 +4,26 @@ A local-first IPTV client — like Plex, but for IPTV streams you already have a
 
 Add your Xtream Codes accounts once. Fractals merges all sources into a single unified library, enriches everything with metadata from TMDB, and lets you search across all content by title, actor, director, genre, or free text.
 
-**Status:** Active development on `master`. Phase 0 (core scaffold) + Phase 1 (UX refinement) + Phase 2 (V2 canonical/streams data model cutover) complete. Phase 3 (multi-platform) not yet started. See `../BACKLOG.md` for the full roadmap.
+**Status:** Active development. g1 (pure provider-data app, LIKE search) and g2 (FTS5 + diacritic/ligature folding, auto-indexed on sync) complete. g3 (keyless canonical layer + iptv-org enrichment) next. Phase 3 (multi-platform) not yet started. See `../PLAN.md` for the full roadmap.
 
 ---
 
 ## Features
 
 ### Content Management
-- **Multi-source merging** — add multiple Xtream accounts; browse everything in one place
-- **TMDB enrichment** — posters, ratings, plots, cast, genres fetched automatically (batch + on-demand)
-- **Manual TMDB matching** — search and pick the correct match when auto-enrichment fails
+- **Multi-source merging** — add multiple Xtream / M3U sources; browse everything in one place
 - **Source identity colors** — each source gets a distinct color for visual identification
+- **User data survives resync** — favorites, watchlist, ratings, watch positions preserved across syncs
+- *(TMDB / iptv-org enrichment — deferred to g3+)*
 
 ### Search & Browse
-- **FTS5 full-text search** — searches title, plot, cast, director across all content
-- **Special character support** — brackets, parentheses, dashes work as search characters
+- **g1 LIKE search** — fast substring match on provider titles, 250ms debounce
+- **g2 FTS5 full-text search** — ranked prefix matching via `unicode61 remove_diacritics 2`
+- **Diacritic + ligature folding** — "forg" finds "Förgöraren", "coeur" finds "cœur" (œ→oe, æ→ae, ß→ss, ﬁ→fi, ﬂ→fl, ĳ→ij)
+- **Auto-indexed after every sync** — no manual step needed
+- **Grid LIKE fallback** — if FTS returns <10 results, grid views augment with LIKE
 - **Category browsing** — filter by type (Live/Movies/Series), category, source
 - **Sort options** — by title, year, rating, or latest added
-- **Diacritics handling** — "Borgen" finds "Borgen" via transliteration
 
 ### Player
 - **Three player options** — built-in ArtPlayer (HLS.js), MPV, or VLC
@@ -46,9 +48,10 @@ Add your Xtream Codes accounts once. Fractals merges all sources into a single u
 ### Settings
 - **Appearance** — theme and font options
 - **Player preferences** — choose ArtPlayer, MPV, or VLC with custom paths
-- **TMDB API key** — configure your own key for enrichment
-- **Source management** — add, edit, disable, sync, delete sources
+- **Timezone override** — system default toggle + manual picker for EPG display
+- **Source management** — add, edit, disable, sync, reindex, delete sources
 - **Account info** — view source connection status and expiry
+- **FTS toggle** — debug control for switching between LIKE and FTS5 search paths
 
 ## Tech stack
 
@@ -102,12 +105,20 @@ CLAUDE.md          Full architecture, design language, conventions
 
 ## Roadmap
 
-Active work is organized into five buckets in [`../BACKLOG.md`](../BACKLOG.md):
+Detailed phase state in [`../PLAN.md`](../PLAN.md). Tiered search progression:
 
-1. **Data & Search** *(next pick)* — canonical data model + search redesign + TMDB enrichment. Detailed scoping in `~/.claude/plans/scalable-leaping-cake.md`.
-2. **Product shape** — three-tier split (M3U Player / Xtream Lite / Fractals Pro) + M3U parsing improvements. Business plan in `docs/business-plan.md`.
-3. **Multi-platform reach** — Android, iOS, Android TV, Samsung Tizen via Capacitor. Full plan in `docs/multi-platform-strategy.md`.
-4. **Experience polish** — Live TV nav breadcrumb, series full-page view, player fixes.
-5. **Tech health** — QA cycle 2 follow-ups (type safety, security, hardening). See `docs/qa-cycle-2.md`.
+- **g1** (done) — provider-data app, LIKE search
+- **g2** (done) — FTS5 + diacritic/ligature folding, auto-indexed
+- **g3** (next) — keyless canonical layer + iptv-org enrichment (live channels)
+- **g4** — embeddings / semantic search
+- **g5** — keyed enrichment (TMDB) + cross-language resolution
+
+Five parallel buckets (see `docs/` for scoping):
+
+1. **Data & Search** *(active — g3 next)*
+2. **Product shape** — three-tier split (M3U Player / Xtream Lite / Fractals Pro). See `docs/business-plan.md`.
+3. **Multi-platform reach** — Android, iOS, Android TV, Samsung Tizen via Capacitor. See `docs/multi-platform-strategy.md`.
+4. **Experience polish** — series full-page view, player fixes.
+5. **Tech health** — type safety, security, hardening.
 
 The legacy Angular reference implementation lives in `../legacy/`.
