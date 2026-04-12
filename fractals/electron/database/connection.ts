@@ -56,6 +56,18 @@ export function getDb() {
   _sqlite.pragma('foreign_keys = ON')
   _sqlite.pragma('cache_size = -64000') // 64MB cache
 
+  // Register ligature folding for FTS indexing (g2)
+  _sqlite.function('fold_ligatures', (s: unknown) => {
+    if (typeof s !== 'string') return s
+    return s
+      .replace(/œ/gi, 'oe')
+      .replace(/æ/gi, 'ae')
+      .replace(/ß/g, 'ss')
+      .replace(/\uFB01/g, 'fi')
+      .replace(/\uFB02/g, 'fl')
+      .replace(/ĳ/gi, 'ij')
+  })
+
   _db = drizzle(_sqlite, { schema })
 
   createTables(_sqlite)

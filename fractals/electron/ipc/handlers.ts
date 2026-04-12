@@ -585,7 +585,7 @@ export function registerHandlers() {
       let indexed = 0
       const insertStreamFts = sqlite.prepare(`
         INSERT INTO content_fts (id, source_id, type, title)
-        SELECT id, source_id, type, title FROM streams
+        SELECT id, source_id, type, fold_ligatures(title) FROM streams
         WHERE source_id = ? AND rowid > ? ORDER BY rowid LIMIT ?
       `)
       let lastRowid = 0
@@ -606,7 +606,7 @@ export function registerHandlers() {
       // Batch insert series_sources into FTS
       const insertSeriesFts = sqlite.prepare(`
         INSERT INTO content_fts (id, source_id, type, title)
-        SELECT id, source_id, 'series', title FROM series_sources
+        SELECT id, source_id, 'series', fold_ligatures(title) FROM series_sources
         WHERE source_id = ? AND rowid > ? ORDER BY rowid LIMIT ?
       `)
       lastRowid = 0
@@ -1413,9 +1413,21 @@ function g2SearchSeries(
   `).all(ftsQuery, ...catParams, ...filterIds, limit) as unknown[]
 }
 
+/** Fold Latin ligatures to their component letters. */
+function foldLigatures(s: string): string {
+  return s
+    .replace(/œ/gi, 'oe')
+    .replace(/æ/gi, 'ae')
+    .replace(/ß/g, 'ss')
+    .replace(/\uFB01/g, 'fi')
+    .replace(/\uFB02/g, 'fl')
+    .replace(/ĳ/gi, 'ij')
+}
+
 /** Build FTS5 query: split words, implicit AND, prefix match on last word. */
 function buildFtsQuery(raw: string): string | null {
-  const words = raw.trim().split(/\s+/).filter(Boolean)
+  const folded = foldLigatures(raw)
+  const words = folded.trim().split(/\s+/).filter(Boolean)
   if (!words.length) return null
   // Escape double-quotes in user input
   const escaped = words.map(w => w.replace(/"/g, ''))
