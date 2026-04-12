@@ -153,12 +153,15 @@ export function ContentArea({ sort, onSelectContent, onAddSource }: Props) {
 
   const searchItems = query
     ? ([
-        ...(liveSearchData?.items ?? []),
-        ...(movieSearchData?.items ?? []),
-        ...(seriesSearchData?.items ?? []),
+        ...(!contentType || contentType === 'live' ? (liveSearchData?.items ?? []) : []),
+        ...(!contentType || contentType === 'movie' ? (movieSearchData?.items ?? []) : []),
+        ...(!contentType || contentType === 'series' ? (seriesSearchData?.items ?? []) : []),
       ] as ContentItem[])
     : []
-  const searchTotal = (liveSearchData?.total ?? 0) + (movieSearchData?.total ?? 0) + (seriesSearchData?.total ?? 0)
+  const searchTotal =
+    (!contentType || contentType === 'live' ? (liveSearchData?.total ?? 0) : 0) +
+    (!contentType || contentType === 'movie' ? (movieSearchData?.total ?? 0) : 0) +
+    (!contentType || contentType === 'series' ? (seriesSearchData?.total ?? 0) : 0)
   // When scoped to a single type, use that type's total directly
   const singleSearchTotal = contentType === 'live' ? (liveSearchData?.total ?? 0)
     : contentType === 'movie' ? (movieSearchData?.total ?? 0)
