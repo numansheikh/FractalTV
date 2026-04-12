@@ -280,33 +280,10 @@ export function ActionButtons({ item, onPlay, episodeToPlay, overridePlayLabel }
           </button>
         )}
 
-        {/* External player button */}
-        <button
-          onClick={handleExternalPlayer}
-          title="Open in external player"
-          style={iconBtnStyle}
-          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-4)' }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--bg-3)' }}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-2)" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="15 3 21 3 21 9" />
-            <path d="M10 14L21 3" />
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-          </svg>
-        </button>
+        {/* External player — hidden until proper detection + fallback (g2+) */}
       </div>
 
-      {/* External player error */}
-      {extError && (
-        <p style={{
-          fontSize: 11,
-          color: 'var(--accent-danger)',
-          margin: 0,
-          fontFamily: 'var(--font-ui)',
-        }}>
-          {extError}
-        </p>
-      )}
+      {/* External player error — hidden until g2+ */}
     </div>
   )
 }

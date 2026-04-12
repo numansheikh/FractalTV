@@ -1,21 +1,5 @@
 # CLAUDE.md — Fractals
 
-## Prime directive (interaction rules)
-
-- Answer in the fewest words possible. One sentence if it fits.
-- Present findings as short numbered lists. One line per item.
-- Never start reading code, exploring, or taking any action without explicit go-ahead.
-- Never start implementing without explicit go-ahead. Present → discuss → agree → implement.
-- When told to enqueue something, note it and move on. Don't implement.
-- No recaps, no summaries of what just happened, no filler phrases.
-- Don't explain unless asked. "Explain 4" means explain item 4 only.
-- Don't decide priorities — present options, let the user choose.
-- After fixing something, report done and stop. Don't append next steps unless asked.
-
-**Shortcut — "update your context":** review + update stale memory files, update MEMORY.md index, update active plan, commit all uncommitted changes, push to remote.
-
----
-
 ## What is Fractals?
 
 A cross-platform IPTV client that treats content as the primary abstraction, not playlists or protocols. You add your IPTV sources (Xtream Codes accounts, M3U URLs) once, and the app merges everything into a single unified library — enriched with metadata from TMDB, searchable by actor, director, genre, language, similarity, or free text.
@@ -386,12 +370,11 @@ The data model has two distinct layers, loosely coupled via a bridge:
 - Background job: lazy batch enrichment after sync
 - Free key: 40 req/sec → full library enriched in minutes
 
-## Implementation status (as of 2026-04-11)
+## Implementation status (as of 2026-04-10)
 
 **Phase 0 — Complete.** Core scaffold, DB + Xtream sync, TMDB enrichment, FTS5 search, browse/search UI, video player, EPG, settings, user data.
 **Phase 1 — Complete.** UX refinement (pagination nav, escape behavior, library search).
-**Phase 2 — Complete.** V2 data model cutover: canonical + streams schema, all IPC handlers on v2, v1 tables dropped, TMDB enrichment writes to canonical, M3U sync worker rewritten, dead code removed. DB renamed `fractaltv.db`.
-**Phase 2.5 — Complete.** V3 data model + search: `canonical_vod/series/live` split, association layer, title normalizer (L14), pluggable `MetadataProvider` interface, IMDb suggest + Wikidata + iptv-org providers, enrichment worker with rate limiter, advanced search parser (`@` prefix, token vocabularies, dual-interpretation), per-tab search isolation, server-side search pagination, CommandBar revamp (unified input + ADV @ chip), category filter per-view, LiveSplitView search breadcrumb, source sync cancel + run-in-background.
+**Phase 2 — Complete.** V2 data model cutover: canonical + streams schema, all IPC handlers on v2, v1 tables dropped, TMDB enrichment writes to canonical, M3U sync worker rewritten, dead code removed (xtream.service.ts v1 sync methods, schema.ts v1 tables). DB renamed `fractaltv.db`. All known bugs fixed.
 **Phase 3 — Not started.** Capacitor for Android/iOS/TV, Tizen.
 
 ### v0.2.0 — completed features
@@ -472,16 +455,6 @@ The data model has two distinct layers, loosely coupled via a bridge:
 - **Fix 2: Escape behavior** — Verified working: capture phase + stopImmediatePropagation on all overlays (Player, ContentDetail, etc.) prevents Escape from leaking. App.tsx fallback chain: clear search → clear category → clear source → home. Hierarchical, state-preserving.
 - **Fix 3: Library search** — Client-side live search input in Library view filters all tabs (Continue Watching, Favorites, Watchlist, History) by title instantly. Shows dynamic match counts per tab (e.g. "Favorites 3/24"). Search persists across tab switches.
 
-**Two-phase sync (QA cycle 3, 2026-04-11)**
-- Phase 1 (`sync.worker.ts`) — HTTP fetch + DB write; browse is usable immediately after. Vocabulary: "Downloading X" (HTTP) → "Saving X" (DB write).
-- Phase 2 (`indexing.worker.ts`) — canonical + FTS5 indexing; search becomes available after. Vocabulary: "Indexing channels/movies/series" → "Search ready".
-- `activeSyncWorkers` + `activeIndexingWorkers` maps in `handlers.ts`. Map-deletion-first pattern: delete from map before terminate so the message forwarder drops any in-flight messages — prevents 'cancelled' event from being overwritten.
-- `sendToWin` helper guards all `webContents.send` calls with `!win.isDestroyed()`.
-- Cancel handler: deletes from map first → sends 'cancelled' → terminates async.
-- Factory reset: async, kills all workers with `Promise.all`, sends 'cancelled' events for each, then wipes DB.
-- `SyncProgress.phase` extended: `'indexing-live' | 'indexing-movies' | 'indexing-series' | 'indexing-done' | 'cancelled'`.
-- SQLite CHECK constraint on `sources.status`: valid values are `'active' | 'error' | 'syncing'` — `'idle'` is not valid.
-
 ## Key architecture decisions (implemented)
 
 - **Worker threads for heavy operations** — Sync and delete run in `electron/workers/` via `worker_threads`, each opening its own better-sqlite3 connection (WAL mode allows concurrent access). Prevents main process blocking on 200k+ row operations.
@@ -504,23 +477,15 @@ The data model has two distinct layers, loosely coupled via a bridge:
 
 ## Known limitations & open work
 
-Active bug list and QA backlog: **`/Users/numan/Projects/FractalTV/TODO.md`** — read this at the start of every session.
-
 High-level backlog lives in `../BACKLOG.md` (five buckets: Data & Search, Product shape, Multi-platform, Experience polish, Tech health). Quality/hardening debt is catalogued in `docs/qa-cycle-2.md`. Highlights:
 
-- **Search grid broken** — VirtualGrid renders badly in search mode. Root cause undiagnosed. `isLive = items[0]?.type === 'live'` is fragile; needs investigation.
+- **International character search (partial)** — European diacritics handled via `any-ascii`. Arabic, Hebrew, Cyrillic, CJK not yet transliterated. Cross-language resolution is part of the Data & Search bucket.
 
-- **Diacritic search** — "forg" misses "Förgöraren"; anyAscii not folding ö→o in compiled worker context (`indexing.worker.ts`).
+- **Semantic / embedding search not yet wired** — Schema and `sqlite-vec` extension in place; worker not built. Deferred — will be reconsidered as part of the Data & Search rework.
 
-- **Episode stream hang** — player shows spinner indefinitely when episode URL 404s; needs timeout + error overlay.
+- **EPG timeshift timeline not yet implemented** — XMLTV parser, EPG strip, and Full Guide panel are done. Timeshift bottom bar in the fullscreen player is pending (Experience polish bucket).
 
-- **International character search (partial)** — European diacritics partially handled via `any-ascii`. Arabic, Hebrew, Cyrillic, CJK not transliterated. Cross-language resolution deferred to V3 Data & Search.
-
-- **Semantic / embedding search not yet wired** — Schema and `sqlite-vec` extension in place; worker not built. Deferred.
-
-- **EPG timeshift timeline not yet implemented** — XMLTV parser, EPG strip, and Full Guide panel are done. Timeshift bottom bar in the fullscreen player is pending.
-
-- **Episodes not indexed in FTS5** — `series:get-info` upserts episodes into `content` but not `content_fts`. Low priority.
+- **Episodes not indexed in FTS5** — `series:get-info` upserts episodes into `content` but not `content_fts`. Low priority (users search series, not episodes).
 
 - **Continue Watching not browsable in live/films/series views** — Works on Home and Library only.
 

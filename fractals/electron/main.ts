@@ -40,7 +40,7 @@ function createWindow() {
 }
 
 // Single instance lock
-const gotTheLock = app.requestSingleInstanceLock({ key: isDev ? 'fractals-dev' : 'fractals' })
+const gotTheLock = app.requestSingleInstanceLock({ key: isDev ? 'fractaltv-dev' : 'fractaltv' })
 if (!gotTheLock) {
   app.quit()
 } else {

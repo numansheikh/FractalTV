@@ -71,13 +71,6 @@ export function BrowseView({ onAddSource, onSyncSource, onRemoveSource, onSelect
 
   const isSearching = query.trim().length > 0
   const srcFilter = selectedSourceIds.length > 0 ? selectedSourceIds : undefined
-
-  // Lock search scope to the current view — Films only searches movies, Live only channels, etc.
-  const viewScopedType: 'live' | 'movie' | 'series' | 'all' =
-    activeView === 'films'  ? 'movie'  :
-    activeView === 'live'   ? 'live'   :
-    activeView === 'series' ? 'series' : 'all'
-
   const browseType = type === 'all' ? undefined : (type as 'live' | 'movie' | 'series')
   const sort = SORT_OPTIONS[sortIdx]
 
@@ -121,19 +114,19 @@ export function BrowseView({ onAddSource, onSyncSource, onRemoveSource, onSelect
   const { data: liveSearchResults   = [], isFetching: liveFetching   } = useQuery({
     queryKey: ['search', query, 'live',   activeCategory, selectedSourceIds, liveLimit],
     queryFn: () => api.search.query({ query, type: 'live',   categoryName: activeCategory ?? undefined, sourceIds: srcFilter, limit: liveLimit }),
-    enabled: isSearching && (viewScopedType === 'all' || viewScopedType === 'live'),
+    enabled: isSearching && (type === 'all' || type === 'live'),
     placeholderData: (prev) => prev,
   })
   const { data: movieSearchResults  = [], isFetching: movieFetching  } = useQuery({
     queryKey: ['search', query, 'movie',  activeCategory, selectedSourceIds, movieLimit],
     queryFn: () => api.search.query({ query, type: 'movie',  categoryName: activeCategory ?? undefined, sourceIds: srcFilter, limit: movieLimit }),
-    enabled: isSearching && (viewScopedType === 'all' || viewScopedType === 'movie'),
+    enabled: isSearching && (type === 'all' || type === 'movie'),
     placeholderData: (prev) => prev,
   })
   const { data: seriesSearchResults = [], isFetching: seriesFetching } = useQuery({
     queryKey: ['search', query, 'series', activeCategory, selectedSourceIds, seriesLimit],
     queryFn: () => api.search.query({ query, type: 'series', categoryName: activeCategory ?? undefined, sourceIds: srcFilter, limit: seriesLimit }),
-    enabled: isSearching && (viewScopedType === 'all' || viewScopedType === 'series'),
+    enabled: isSearching && (type === 'all' || type === 'series'),
     placeholderData: (prev) => prev,
   })
 

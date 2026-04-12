@@ -332,19 +332,10 @@ function InterfaceTab() {
       </section>
 
       <section>
-        <SectionLabel>Browse &amp; Search</SectionLabel>
+        <SectionLabel>Browse</SectionLabel>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <p style={{ fontSize: 10, color: 'var(--text-2)', lineHeight: 1.5, marginBottom: 4, fontStyle: 'italic', padding: '0 4px' }}>
-            Items per page controls browse pagination. Search limits control how many results appear per type.
-          </p>
-          <SegmentedPicker label="Items per page" value={pageSize} options={[25, 50, 100, 200, 500]}
+          <SegmentedPicker label="Grid page size" value={pageSize} options={[25, 50, 75, 100, 200]}
             onChange={(v) => setPageSize(v)} />
-          <SegmentedPicker label="Search: live" value={searchLive} options={[10, 20, 50, 100, 200]}
-            onChange={(v) => saveSearchLimit('fractals-search-live-limit', v, setSearchLive)} />
-          <SegmentedPicker label="Search: movies" value={searchMovies} options={[10, 20, 50, 100, 200]}
-            onChange={(v) => saveSearchLimit('fractals-search-movie-limit', v, setSearchMovies)} />
-          <SegmentedPicker label="Search: series" value={searchSeries} options={[10, 20, 50, 100, 200]}
-            onChange={(v) => saveSearchLimit('fractals-search-series-limit', v, setSearchSeries)} />
         </div>
       </section>
     </div>
@@ -558,7 +549,7 @@ function DataTab({ enrichStatus, enrichProgress, enrichMsg, pct, isPending, onSt
         // Reset persisted UI preferences to defaults
         useAppStore.setState({
           sort: 'updated:desc',
-          liveViewMode: 'grid',
+          viewMode: 'grid',
           pageSize: 60,
           homeMode: 'discover',
           hasSeenChannelsModePrompt: false,
@@ -656,52 +647,7 @@ function DataTab({ enrichStatus, enrichProgress, enrichMsg, pct, isPending, onSt
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
-      {/* ── Enrichment ── */}
-      <section>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-          <SectionLabel style={{ marginBottom: 0 }}>Metadata enrichment</SectionLabel>
-          {enrichStatus && (
-            <span style={{ fontSize: 10, color: 'var(--text-2)', fontFamily: 'var(--font-mono)' }}>
-              <span style={{ color: 'var(--accent-success)' }}>{enrichStatus.enriched}</span>
-              /{enrichStatus.total}
-            </span>
-          )}
-        </div>
-        <p style={{ fontSize: 11, color: 'var(--text-1)', lineHeight: 1.6, marginBottom: 12 }}>
-          Fetches clean titles, posters, and multilingual labels from free,
-          keyless sources — IMDb suggest + Wikidata for movies &amp; series,
-          iptv-org for live channels. No API key required. Runs automatically
-          in the background after every sync.
-        </p>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button
-              onClick={onStart}
-              disabled={isPending || !!enrichProgress}
-              style={{
-                padding: '8px 16px', borderRadius: 8, fontSize: 11, fontWeight: 600,
-                background: 'var(--accent-success)', color: '#fff', border: 'none',
-                cursor: 'pointer', whiteSpace: 'nowrap',
-                opacity: (isPending || !!enrichProgress) ? 0.5 : 1,
-                transition: 'opacity 0.15s', fontFamily: 'var(--font-ui)',
-              }}
-            >
-              {enrichProgress ? `${pct}%` : 'Run now'}
-            </button>
-          </div>
-          {enrichProgress && (
-            <div style={{ borderRadius: 99, overflow: 'hidden', height: 3, background: 'var(--bg-3)' }}>
-              <div style={{
-                height: '100%', background: 'var(--accent-success)',
-                width: `${pct}%`, transition: 'width 0.3s',
-              }} />
-            </div>
-          )}
-          {enrichMsg && (
-            <p style={{ fontSize: 11, color: 'var(--text-1)' }}>{enrichMsg}</p>
-          )}
-        </div>
-      </section>
+      {/* ── Enrichment — hidden until TMDB integration (g2+) ── */}
 
       {/* ── Backup/Import ── */}
       <section>

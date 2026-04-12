@@ -61,12 +61,12 @@ function navBtnStyle(disabled: boolean): React.CSSProperties {
 }
 
 export function ContentArea({ sort, onSelectContent, onAddSource }: Props) {
-  const { activeView, typeFilter, categoryFilters, selectedSourceIds, liveViewMode: viewMode, pageSize, setChannelSurfContext } = useAppStore()
+  const { activeView, typeFilter, categoryFilters, selectedSourceIds, viewMode, pageSize, setChannelSurfContext } = useAppStore()
   const categoryFilter = categoryFilters[activeView] ?? null
   const { queries } = useSearchStore()
   const query = queries[activeView] ?? ''
   const { loadBulk } = useUserStore()
-  const { sources, syncProgress } = useSourcesStore()
+  const { sources } = useSourcesStore()
   const [ready, setReady] = useState(false)
   const [page, setPage] = useState(1)
 
@@ -130,36 +130,33 @@ export function ContentArea({ sort, onSelectContent, onAddSource }: Props) {
   }
   const searchOffset = (page - 1) * pageSize
   const serverSearchEnabled = !!query && !isFavoritesFilter
-  // queryKey includes `contentType` so each view gets its own cache namespace —
-  // prevents stale cross-type data from bleeding into `searchItems` when switching views.
   const { data: liveSearchData, isFetching: liveSearchFetching } = useQuery({
-    queryKey: ['search', query, 'live',   contentType, categoryFilter, selectedSourceIds, page, pageSize],
+    queryKey: ['search', query, 'live',   categoryFilter, selectedSourceIds, page, pageSize],
     queryFn: () => api.search.query({ ...searchBase, type: 'live',   limit: pageSize, offset: searchOffset }),
     enabled: serverSearchEnabled && (!contentType || contentType === 'live'),
     staleTime: 10_000,
   })
   const { data: movieSearchData, isFetching: movieSearchFetching } = useQuery({
-    queryKey: ['search', query, 'movie',  contentType, categoryFilter, selectedSourceIds, page, pageSize],
+    queryKey: ['search', query, 'movie',  categoryFilter, selectedSourceIds, page, pageSize],
     queryFn: () => api.search.query({ ...searchBase, type: 'movie',  limit: pageSize, offset: searchOffset }),
     enabled: serverSearchEnabled && (!contentType || contentType === 'movie'),
     staleTime: 10_000,
   })
   const { data: seriesSearchData, isFetching: seriesSearchFetching } = useQuery({
-    queryKey: ['search', query, 'series', contentType, categoryFilter, selectedSourceIds, page, pageSize],
+    queryKey: ['search', query, 'series', categoryFilter, selectedSourceIds, page, pageSize],
     queryFn: () => api.search.query({ ...searchBase, type: 'series', limit: pageSize, offset: searchOffset }),
     enabled: serverSearchEnabled && (!contentType || contentType === 'series'),
     staleTime: 10_000,
   })
   const isSearchFetching = serverSearchEnabled && (liveSearchFetching || movieSearchFetching || seriesSearchFetching)
 
-  // Scope searchItems to the current view's contentType — defensive layer on top
-  // of the queryKey fix. Keeps items single-type even if a future change lets stale
-  // data from other types leak through.
-  const searchItems: ContentItem[] = !query ? [] :
-    contentType === 'live'   ? ((liveSearchData?.items   ?? []) as ContentItem[]) :
-    contentType === 'movie'  ? ((movieSearchData?.items  ?? []) as ContentItem[]) :
-    contentType === 'series' ? ((seriesSearchData?.items ?? []) as ContentItem[]) :
-    []
+  const searchItems = query
+    ? ([
+        ...(liveSearchData?.items ?? []),
+        ...(movieSearchData?.items ?? []),
+        ...(seriesSearchData?.items ?? []),
+      ] as ContentItem[])
+    : []
   const searchTotal = (liveSearchData?.total ?? 0) + (movieSearchData?.total ?? 0) + (seriesSearchData?.total ?? 0)
   // When scoped to a single type, use that type's total directly
   const singleSearchTotal = contentType === 'live' ? (liveSearchData?.total ?? 0)
@@ -218,7 +215,7 @@ export function ContentArea({ sort, onSelectContent, onAddSource }: Props) {
 
   // Home view — always render HomeView; it handles search inline so the bottom bar never unmounts
   if (activeView === 'home') {
-    return <HomeView onSelectContent={onSelectContent} onAddSource={onAddSource} />
+    return <HomeView onSelectContent={onSelectContent} />
   }
 
   // Browse views (live / films / series)
@@ -260,24 +257,6 @@ export function ContentArea({ sort, onSelectContent, onAddSource }: Props) {
               )
             }
             if (!hasSources) {
-              const activeSync = Object.entries(syncProgress).find(([, p]) => p !== null)
-              const inFetchPhase = activeSync && (activeSync[1]?.total ?? 0) === 0
-              if (inFetchPhase) {
-                const [, progress] = activeSync!
-                const pct = progress && progress.total > 0 ? Math.round((progress.current / progress.total) * 100) : null
-                return (
-                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, padding: 48, textAlign: 'center' }}>
-                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--accent-interactive)" strokeWidth="1.5" strokeLinecap="round"
-                      style={{ animation: 'spin 1s linear infinite' }}>
-                      <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
-                    </svg>
-                    <p style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-0)', margin: 0 }}>Setting up your library</p>
-                    <p style={{ fontSize: 13, color: 'var(--text-1)', margin: 0, maxWidth: 320 }}>
-                      {progress?.message ?? 'Syncing…'}{pct !== null ? ` — ${pct}%` : ''}
-                    </p>
-                  </div>
-                )
-              }
               return (
                 <EmptyState
                   icon={<PlayIcon />}

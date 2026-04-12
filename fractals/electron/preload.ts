@@ -22,7 +22,6 @@ export const api = {
     setColor: (sourceId: string, colorIndex: number) => ipcRenderer.invoke('sources:set-color', sourceId, colorIndex),
     sync: (sourceId: string) => ipcRenderer.invoke('sources:sync', sourceId),
     cancelSync: (sourceId: string) => ipcRenderer.invoke('sources:sync:cancel', sourceId),
-    reindex: (sourceId: string) => ipcRenderer.invoke('sources:reindex', sourceId),
     accountInfo: (sourceId: string) => ipcRenderer.invoke('sources:account-info', sourceId),
     startupCheck: () => ipcRenderer.invoke('sources:startup-check'),
     totalCount: () => ipcRenderer.invoke('sources:total-count'),

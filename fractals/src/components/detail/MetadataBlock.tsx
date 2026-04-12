@@ -111,18 +111,7 @@ export function MetadataBlock({ item, isEnriched }: Props) {
         </div>
       )}
 
-      {/* No metadata note */}
-      {!isEnriched && (
-        <p style={{
-          fontSize: 11,
-          color: 'var(--text-3)',
-          margin: 0,
-          fontStyle: 'italic',
-          fontFamily: 'var(--font-ui)',
-        }}>
-          No metadata — fetching…
-        </p>
-      )}
+      {/* No metadata note — hidden until g2+ TMDB integration */}
     </div>
   )
 }

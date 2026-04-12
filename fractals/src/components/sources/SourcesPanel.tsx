@@ -9,7 +9,7 @@ interface Props {
   onClose: () => void
   onSync: (id: string) => void
   onRemove: (id: string) => void
-  onAdded: () => void
+  onAdded: (sourceId: string) => void
   suppressScrim?: boolean
 }
 
@@ -17,9 +17,9 @@ export function SourcesPanel({ onClose, onSync, onRemove, onAdded, suppressScrim
   const { sources } = useSourcesStore()
   const [showAddModal, setShowAddModal] = useState(false)
 
-  const handleAdded = () => {
+  const handleAdded = (sourceId: string) => {
     setShowAddModal(false)
-    onAdded()
+    onAdded(sourceId)
   }
 
   return (

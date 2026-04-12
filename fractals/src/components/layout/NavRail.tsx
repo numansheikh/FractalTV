@@ -1,6 +1,5 @@
 import { ActiveView } from '@/lib/types'
 import { useAppStore } from '@/stores/app.store'
-import { useSourcesStore } from '@/stores/sources.store'
 import { useTheme } from '@/hooks/useTheme'
 
 const NAV_ITEMS: { id: ActiveView; label: string; shortcut: string }[] = [
@@ -27,13 +26,6 @@ interface Props {
 export function NavRail({ onOpenSources, onOpenSettings }: Props) {
   const { activeView, setView } = useAppStore()
   const { theme, setTheme } = useTheme()
-  const { syncProgress } = useSourcesStore()
-  const activeSyncs = Object.values(syncProgress).filter(p => p !== null)
-  const anySyncing = activeSyncs.length > 0
-  // Build tooltip: show current phase message(s)
-  const syncTooltip = activeSyncs
-    .map(p => p?.message ?? 'Syncing…')
-    .join(' · ')
 
   return (
     <div style={{
@@ -79,32 +71,8 @@ export function NavRail({ onOpenSources, onOpenSettings }: Props) {
         <span style={{ color: 'var(--text-2)' }}>{theme === 'dark' ? <SunIcon /> : <MoonIcon />}</span>
       </RailButton>
 
-      <RailButton
-        label={anySyncing ? `Sources — ${syncTooltip}` : 'Sources'}
-        shortcut=""
-        isActive={false}
-        activeColor="var(--accent-interactive)"
-        onClick={onOpenSources}
-      >
-        <span style={{ position: 'relative', color: 'var(--text-2)', display: 'flex' }}>
-          <LayersIcon />
-          {anySyncing && (
-            <>
-              <span style={{
-                position: 'absolute', top: -3, right: -3,
-                width: 8, height: 8, borderRadius: '50%',
-                background: 'var(--accent-interactive)',
-                animation: 'nav-ping 1.4s ease-out infinite',
-              }} />
-              <span style={{
-                position: 'absolute', top: -3, right: -3,
-                width: 8, height: 8, borderRadius: '50%',
-                background: 'var(--accent-interactive)',
-                border: '1.5px solid var(--bg-1)',
-              }} />
-            </>
-          )}
-        </span>
+      <RailButton label="Sources" shortcut="" isActive={false} activeColor="var(--accent-interactive)" onClick={onOpenSources}>
+        <span style={{ color: 'var(--text-2)' }}><LayersIcon /></span>
       </RailButton>
 
       <RailButton label="Settings" shortcut="⌘," isActive={false} activeColor="var(--accent-interactive)" onClick={onOpenSettings}>

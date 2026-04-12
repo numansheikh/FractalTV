@@ -57,7 +57,7 @@ export function BrowseSidebar() {
 
   const totalCount = cats.reduce((s: number, c: any) => s + (c.item_count ?? 0), 0)
 
-  // Scroll active category into view when categoryFilter is set externally (e.g. from category chip)
+  // Scroll active category into view when filter changes, view switches, or categories load
   const activeItemRef = useRef<HTMLButtonElement>(null)
   useEffect(() => {
     if (categoryFilter && categoryFilter !== '__favorites__') {
@@ -65,7 +65,7 @@ export function BrowseSidebar() {
         activeItemRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' })
       }))
     }
-  }, [categoryFilter])
+  }, [categoryFilter, activeView, categories])
 
   if (!type) return null
 
@@ -251,7 +251,7 @@ export function BrowseSidebar() {
               active={categoryFilter === cat.name}
               accent={accent}
               sourceColor={srcColor}
-              onClick={() => setCategoryFilter(cat.name)}
+              onClick={() => { if (query) setQuery(''); setCategoryFilter(cat.name) }}
               buttonRef={categoryFilter === cat.name ? activeItemRef : undefined}
             />
           )

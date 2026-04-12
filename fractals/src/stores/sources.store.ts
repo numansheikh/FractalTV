@@ -23,7 +23,7 @@ export interface Source {
 }
 
 export interface SyncProgress {
-  phase: 'categories' | 'live' | 'movies' | 'series' | 'done' | 'indexing-live' | 'indexing-movies' | 'indexing-series' | 'indexing-done' | 'enriching' | 'enriching-done' | 'cancelled' | 'error'
+  phase: string  // xtream: categories|live|movies|series  m3u: fetching|parsing|content  both: done|error|warning|cancelled
   current: number
   total: number
   message: string

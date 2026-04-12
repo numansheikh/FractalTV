@@ -38,9 +38,6 @@ export const api = {
     cancelSync: (sourceId: string) =>
       isElectron ? (window.api as any).sources.cancelSync(sourceId) : Promise.resolve({ ok: true }),
 
-    reindex: (sourceId: string) =>
-      isElectron ? (window.api as any).sources.reindex(sourceId) : Promise.resolve({ success: false }),
-
     accountInfo: (sourceId: string) =>
       isElectron ? window.api.sources.accountInfo(sourceId) : Promise.resolve(null),
 

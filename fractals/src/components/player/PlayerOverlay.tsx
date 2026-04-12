@@ -81,7 +81,7 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
   const [categoryName, setCategoryName] = useState<string | null>(null)
   useEffect(() => {
     setCategoryName(null)
-    if (!content || content.type === 'live') return
+    if (!content) return
     if (content.category_name) { setCategoryName(content.category_name.split(',')[0]); return }
     api.content.get(content.id).then((item: any) => {
       if (item?.category_name) setCategoryName(item.category_name.split(',')[0])
@@ -579,7 +579,7 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
       if (localContent?.type === 'live' && onSurfChannel) {
         const isMacUp = e.metaKey && e.key === 'ArrowUp'
         const isMacDown = e.metaKey && e.key === 'ArrowDown'
-        const dir = (e.key === 'PageUp' || isMacUp) ? -1 : (e.key === 'PageDown' || isMacDown) ? 1 : null
+        const dir = (e.key === 'PageUp' || isMacUp || e.key === '[') ? -1 : (e.key === 'PageDown' || isMacDown || e.key === ']') ? 1 : null
         if (dir !== null) {
           e.preventDefault()
           const next = onSurfChannel(dir)
@@ -838,8 +838,8 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
         />
       )}
 
-      {/* ── VOD category / series chip (fullscreen only) ── */}
-      {mode === 'fullscreen' && localContent && localContent.type !== 'live' && onChipClick && (() => {
+      {/* ── Category / series chip (fullscreen only) ── */}
+      {mode === 'fullscreen' && localContent && onChipClick && (() => {
         const isEpisode = !!(localContent as any)._parent
         const seInfo = isEpisode ? localContent.title.split(' · ')[0] : null
         const label = isEpisode ? `${(localContent as any)._parent.title} · ${seInfo}` : categoryName

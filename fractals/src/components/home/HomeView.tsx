@@ -185,10 +185,9 @@ function getGreeting() {
 
 interface Props {
   onSelectContent: (item: ContentItem) => void
-  onAddSource?: () => void
 }
 
-export function HomeView({ onSelectContent, onAddSource }: Props) {
+export function HomeView({ onSelectContent }: Props) {
   const {
     setView, selectedSourceIds,
     homeMode, setHomeMode,
@@ -196,7 +195,7 @@ export function HomeView({ onSelectContent, onAddSource }: Props) {
   } = useAppStore()
   const { queries, setQuery, seedQuery } = useSearchStore()
   const query = queries['home'] ?? ''
-  const { sources, syncProgress } = useSourcesStore()
+  const { sources } = useSourcesStore()
   const { theme } = useTheme()
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -243,37 +242,6 @@ export function HomeView({ onSelectContent, onAddSource }: Props) {
 
   // First-launch: no sources at all
   if (sources.length === 0) {
-    const activeSync = Object.entries(syncProgress).find(([, p]) => p !== null)
-    // Only block on fetch phase (total === 0). Once writing starts (total > 0),
-    // fall through to normal home view — content is progressively appearing.
-    const inFetchPhase = activeSync && (activeSync[1]?.total ?? 0) === 0
-    if (inFetchPhase) {
-      const [, progress] = activeSync!
-      const pct = progress && progress.total > 0 ? Math.round((progress.current / progress.total) * 100) : null
-      return (
-        <div style={{
-          flex: 1, display: 'flex', flexDirection: 'column',
-          alignItems: 'center', justifyContent: 'center', gap: 16,
-          padding: 32, textAlign: 'center',
-        }}>
-          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--accent-interactive)" strokeWidth="1.5" strokeLinecap="round"
-            style={{ animation: 'spin 1s linear infinite' }}>
-            <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
-          </svg>
-          <div>
-            <p style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-0)', marginBottom: 6, fontFamily: 'var(--font-ui)' }}>
-              Setting up your library
-            </p>
-            <p style={{ fontSize: 13, color: 'var(--text-1)', fontFamily: 'var(--font-ui)', lineHeight: 1.5, maxWidth: 320 }}>
-              {progress?.message ?? 'Syncing…'}{pct !== null ? ` — ${pct}%` : ''}
-            </p>
-          </div>
-          <p style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--font-ui)', maxWidth: 260, lineHeight: 1.5 }}>
-            This runs in the background. You'll see your content appear here when it's done.
-          </p>
-        </div>
-      )
-    }
     return (
       <div style={{
         flex: 1, display: 'flex', flexDirection: 'column',
@@ -293,7 +261,7 @@ export function HomeView({ onSelectContent, onAddSource }: Props) {
           </p>
         </div>
         <button
-          onClick={() => onAddSource ? onAddSource() : setShowSources(true)}
+          onClick={() => setShowSources(true)}
           style={{
             padding: '10px 24px', borderRadius: 8, fontSize: 13, fontWeight: 600,
             background: 'var(--accent-interactive)', border: 'none', color: '#fff',
@@ -375,19 +343,6 @@ export function HomeView({ onSelectContent, onAddSource }: Props) {
               <span>{sources.length} {sources.length === 1 ? 'source' : 'sources'}</span>
             </>
           )}
-          {(() => {
-            const active = Object.values(syncProgress).find(p => p !== null)
-            if (!active) return null
-            const pct = active.total > 0 ? Math.round((active.current / active.total) * 100) : null
-            return (
-              <>
-                <span style={{ color: 'var(--border-default)', fontSize: 10 }}>·</span>
-                <span style={{ color: 'var(--accent-interactive)' }}>
-                  {active.message}{pct !== null ? ` ${pct}%` : ''}
-                </span>
-              </>
-            )
-          })()}
         </div>
       </div>
 
@@ -444,7 +399,6 @@ function DiscoverMode({ favChannels, selectedSourceIds, onSelectContent, onNavig
   onNavigate: (target: 'channels' | 'library' | 'films' | 'series') => void
 }) {
   const STRIP_MAX = useAppStore((s) => s.homeStripSize)
-  const { syncProgress } = useSourcesStore()
   const STRIP_FETCH = STRIP_MAX + 1
 
   const filterBySrc = (items: ContentItem[]) =>
@@ -485,27 +439,15 @@ function DiscoverMode({ favChannels, selectedSourceIds, onSelectContent, onNavig
   const allEmpty = !allLoading && favChannels.length === 0 && continueItems.length === 0 && watchlist.length === 0 && movies.length === 0 && series.length === 0
 
   if (allEmpty) {
-    const activeSyncs = Object.values(syncProgress).filter(p => p !== null)
-    const isSyncing = activeSyncs.length > 0
-    const syncMsg = activeSyncs[0]?.message ?? 'Syncing…'
     return (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: '64px 24px', textAlign: 'center' }}>
-        {isSyncing ? (
-          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--accent-interactive)" strokeWidth="1.5" strokeLinecap="round"
-            style={{ animation: 'spin 1s linear infinite' }}>
-            <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
-          </svg>
-        ) : (
-          <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" strokeWidth="1.25" strokeLinecap="round">
-            <rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
-          </svg>
-        )}
+        <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" strokeWidth="1.25" strokeLinecap="round">
+          <rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
+        </svg>
         <div>
-          <p style={{ fontSize: 14, fontWeight: 600, color: isSyncing ? 'var(--text-0)' : 'var(--text-1)', margin: '0 0 6px', fontFamily: 'var(--font-ui)' }}>
-            {isSyncing ? 'Building your library' : 'Nothing here yet'}
-          </p>
-          <p style={{ fontSize: 12, color: 'var(--text-2)', margin: 0, lineHeight: 1.5, maxWidth: 300, fontFamily: 'var(--font-ui)' }}>
-            {isSyncing ? syncMsg : 'Sync a source, browse channels, and start watching to populate your home screen.'}
+          <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-1)', margin: '0 0 6px', fontFamily: 'var(--font-ui)' }}>Nothing here yet</p>
+          <p style={{ fontSize: 12, color: 'var(--text-2)', margin: 0, lineHeight: 1.5, maxWidth: 280, fontFamily: 'var(--font-ui)' }}>
+            Sync a source, browse channels, and start watching to populate your home screen.
           </p>
         </div>
       </div>
@@ -596,28 +538,21 @@ function DiscoverStrip({ title, accent, type, items, hasMore, isLoading, onMore,
         )}
       </div>
 
-      {/* Cards — equal-width grid. Cell dimensions mirror VirtualGrid (Live grid:
-          h=116/maxW=220, Poster grid: h=242/maxW=180) so Home cards match the
-          full-view cards exactly — no visual jump on Home → Live navigation. */}
+      {/* Cards — equal-width grid */}
       <div style={{
         display: 'grid',
         gridTemplateColumns: `repeat(${stripMax}, 1fr)`,
-        gridAutoRows: type === 'live' ? '116px' : '242px',
         gap: 8,
       }}>
         {isLoading
-          ? Array.from({ length: skeletonCount }).map((_, i) => (
-              <div key={i} style={{ maxWidth: type === 'live' ? 220 : 180, height: '100%', minWidth: 0 }}>
-                {type === 'live' ? <ChannelSkeleton /> : <PosterSkeleton />}
-              </div>
-            ))
-          : visible.map((item) => (
-              <div key={item.id} style={{ maxWidth: type === 'live' ? 220 : 180, height: '100%', minWidth: 0, overflow: 'hidden' }}>
-                {type === 'live'
-                  ? <RichChannelCard item={item} onClick={onSelectContent} />
-                  : <RichPosterCard item={item} onClick={onSelectContent} />}
-              </div>
-            ))
+          ? Array.from({ length: skeletonCount }).map((_, i) =>
+              type === 'live' ? <ChannelSkeleton key={i} /> : <PosterSkeleton key={i} />
+            )
+          : visible.map((item) =>
+              type === 'live'
+                ? <RichChannelCard key={item.id} item={item} onClick={onSelectContent} />
+                : <RichPosterCard key={item.id} item={item} onClick={onSelectContent} />
+            )
         }
       </div>
     </div>
@@ -896,7 +831,7 @@ function ChannelSkeleton() {
 const SEARCH_FETCH_LIMIT = 200
 
 function HomeSearchResults({ query, onSelectContent }: { query: string; onSelectContent: (item: ContentItem) => void }) {
-  const { selectedSourceIds, setChannelSurfContext, setView } = useAppStore()
+  const { selectedSourceIds, setChannelSurfContext, setView, setCategoryFilter } = useAppStore()
   const { seedQuery } = useSearchStore()
   const STRIP_MAX = useAppStore((s) => s.homeStripSize)
   const SEARCH_ROWS = 2
@@ -962,7 +897,7 @@ function HomeSearchResults({ query, onSelectContent }: { query: string; onSelect
         title="Live Channels" accent="var(--accent-live)" type="live"
         items={liveResults as ContentItem[]} isLoading={liveFetching && liveResults.length === 0}
         hasMore={liveResults.length > STRIP_MAX * SEARCH_ROWS}
-        onMore={() => { seedQuery('live', query); setView('live') }}
+        onMore={() => { seedQuery('live', query); setView('live'); setCategoryFilter(null) }}
         onSelectContent={handleSelect}
         stripMax={STRIP_MAX} rows={SEARCH_ROWS}
       />
@@ -970,7 +905,7 @@ function HomeSearchResults({ query, onSelectContent }: { query: string; onSelect
         title="Movies" accent="var(--accent-film)" type="movie"
         items={movieResults as ContentItem[]} isLoading={movieFetching && movieResults.length === 0}
         hasMore={movieResults.length > STRIP_MAX * SEARCH_ROWS}
-        onMore={() => { seedQuery('films', query); setView('films') }}
+        onMore={() => { seedQuery('films', query); setView('films'); setCategoryFilter(null) }}
         onSelectContent={handleSelect}
         stripMax={STRIP_MAX} rows={SEARCH_ROWS}
       />
@@ -978,7 +913,7 @@ function HomeSearchResults({ query, onSelectContent }: { query: string; onSelect
         title="Series" accent="var(--accent-series)" type="series"
         items={seriesResults as ContentItem[]} isLoading={seriesFetching && seriesResults.length === 0}
         hasMore={seriesResults.length > STRIP_MAX * SEARCH_ROWS}
-        onMore={() => { seedQuery('series', query); setView('series') }}
+        onMore={() => { seedQuery('series', query); setView('series'); setCategoryFilter(null) }}
         onSelectContent={handleSelect}
         stripMax={STRIP_MAX} rows={SEARCH_ROWS}
       />

@@ -55,7 +55,6 @@ export function getDb() {
   _sqlite.pragma('synchronous = normal')
   _sqlite.pragma('foreign_keys = ON')
   _sqlite.pragma('cache_size = -64000') // 64MB cache
-  _sqlite.pragma('busy_timeout = 10000') // safety net for the sync.worker download phase (still a separate connection)
 
   _db = drizzle(_sqlite, { schema })
 
@@ -133,128 +132,9 @@ function createTables(db: Database.Database) {
       value TEXT NOT NULL
     );
 
-    -- ─── Canonical identity (V3 — per-type tables) ────────────────────
-    -- INTEGER PKs (L11). content_hash is a unique lookup index, not PK.
-    -- Oracle columns are nullable; populated by the enrichment worker (Phase C).
-
-    CREATE TABLE IF NOT EXISTS canonical_vod (
-      id                    INTEGER PRIMARY KEY AUTOINCREMENT,
-      normalized_title      TEXT NOT NULL,
-      year                  INTEGER,
-      content_hash          TEXT NOT NULL UNIQUE,
-      imdb_id               TEXT,
-      tmdb_id               INTEGER,
-      wikidata_qid          TEXT,
-      multilingual_labels   TEXT,                          -- JSON
-      poster_url            TEXT,
-      thumbnail_url         TEXT,
-      poster_w              INTEGER,
-      poster_h              INTEGER,
-      oracle_status         TEXT NOT NULL DEFAULT 'pending' CHECK(oracle_status IN ('pending','resolved','no_match','failed')),
-      oracle_version        INTEGER NOT NULL DEFAULT 0,
-      oracle_attempted_at   INTEGER,
-      created_at            INTEGER NOT NULL DEFAULT (unixepoch())
-    );
-
-    CREATE TABLE IF NOT EXISTS canonical_series (
-      id                    INTEGER PRIMARY KEY AUTOINCREMENT,
-      normalized_title      TEXT NOT NULL,
-      year                  INTEGER,                       -- series start year
-      content_hash          TEXT NOT NULL UNIQUE,
-      imdb_id               TEXT,
-      tmdb_id               INTEGER,
-      wikidata_qid          TEXT,
-      multilingual_labels   TEXT,
-      poster_url            TEXT,
-      thumbnail_url         TEXT,
-      poster_w              INTEGER,
-      poster_h              INTEGER,
-      oracle_status         TEXT NOT NULL DEFAULT 'pending' CHECK(oracle_status IN ('pending','resolved','no_match','failed')),
-      oracle_version        INTEGER NOT NULL DEFAULT 0,
-      oracle_attempted_at   INTEGER,
-      created_at            INTEGER NOT NULL DEFAULT (unixepoch())
-    );
-
-    -- Episodes as first-class entities (Q3). Per-episode enrichment is
-    -- deferred to a Phase C sub-phase — imdb_id/plot/air_date stay NULL until then.
-    CREATE TABLE IF NOT EXISTS episodes (
-      id                    INTEGER PRIMARY KEY AUTOINCREMENT,
-      canonical_series_id   INTEGER NOT NULL REFERENCES canonical_series(id) ON DELETE CASCADE,
-      season                INTEGER NOT NULL,
-      episode               INTEGER NOT NULL,
-      title                 TEXT,
-      air_date              TEXT,
-      imdb_id               TEXT,
-      plot                  TEXT,
-      oracle_status         TEXT NOT NULL DEFAULT 'pending',
-      created_at            INTEGER NOT NULL DEFAULT (unixepoch()),
-      UNIQUE(canonical_series_id, season, episode)
-    );
-
-    CREATE TABLE IF NOT EXISTS canonical_live (
-      id                    INTEGER PRIMARY KEY AUTOINCREMENT,
-      canonical_name        TEXT NOT NULL,
-      iptv_org_id           TEXT,                          -- e.g. 'BBCOne.uk'
-      country               TEXT,                          -- ISO code
-      languages             TEXT,                          -- JSON array of ISO codes
-      categories            TEXT,                          -- JSON array of iptv-org taxonomy
-      network               TEXT,
-      owners                TEXT,                          -- JSON array
-      logo_url              TEXT,
-      is_nsfw               INTEGER NOT NULL DEFAULT 0,
-      broadcast_area        TEXT,
-      content_hash          TEXT NOT NULL UNIQUE,          -- sha1(iptv_org_id) or sha1(name+country+network)
-      oracle_status         TEXT NOT NULL DEFAULT 'pending' CHECK(oracle_status IN ('pending','resolved','no_match','failed')),
-      oracle_version        INTEGER NOT NULL DEFAULT 0,
-      oracle_attempted_at   INTEGER,
-      created_at            INTEGER NOT NULL DEFAULT (unixepoch())
-    );
-
-    -- ─── FTS5 per-type (L4 basic mode fast path) ──────────────────────
-
-    CREATE VIRTUAL TABLE IF NOT EXISTS canonical_vod_fts USING fts5(
-      canonical_id UNINDEXED,
-      normalized_title,
-      multilingual_labels,
-      tokenize = 'unicode61 remove_diacritics 2'
-    );
-
-    CREATE VIRTUAL TABLE IF NOT EXISTS canonical_series_fts USING fts5(
-      canonical_id UNINDEXED,
-      normalized_title,
-      multilingual_labels,
-      tokenize = 'unicode61 remove_diacritics 2'
-    );
-
-    CREATE VIRTUAL TABLE IF NOT EXISTS canonical_live_fts USING fts5(
-      canonical_id UNINDEXED,
-      canonical_name,
-      categories,
-      tokenize = 'unicode61 remove_diacritics 2'
-    );
-
-    -- ─── Lite-tier raw FTS (mirrors streams.title / series_sources.title) ──
-    -- Used by the Lite tier search path: no normalization, no dedup, no
-    -- canonical join. Maintained by the AFTER triggers below so the rowid
-    -- always equals the source table's implicit rowid → simple JOIN at
-    -- query time. Standard+ tiers ignore these tables and route through
-    -- canonical_*_fts instead.
-
-    CREATE VIRTUAL TABLE IF NOT EXISTS streams_fts USING fts5(
-      title,
-      tokenize = 'unicode61 remove_diacritics 2'
-    );
-
-    CREATE VIRTUAL TABLE IF NOT EXISTS series_sources_fts USING fts5(
-      title,
-      tokenize = 'unicode61 remove_diacritics 2'
-    );
-
-    -- ─── Streams (raw provider inventory + L14 hints + polymorphic FK) ─
-    -- Single-table design (associations merged into streams — no JOIN on the
-    -- canonical→display path). Polymorphic FK: exactly one of canonical_vod_id,
-    -- episode_id, canonical_live_id must be set (or all null = unmatched).
-    -- The CHECK constraint ties the polymorphism to the type discriminator.
+    -- ─── Streams (raw provider inventory + normalizer hints) ────────────
+    -- g1 tier: no canonical tables, no polymorphic FKs. Streams are the
+    -- primary content entity. Episodes link to series_sources via parent_series_id.
 
     CREATE TABLE IF NOT EXISTS streams (
       id                    TEXT PRIMARY KEY,              -- '{sourceId}:{type}:{stream_id}'
@@ -263,7 +143,7 @@ function createTables(db: Database.Database) {
       stream_id             TEXT NOT NULL,                 -- provider's raw id
 
       -- Provider-raw fields
-      title                 TEXT NOT NULL,                 -- raw provider title, untouched (L14)
+      title                 TEXT NOT NULL,
       thumbnail_url         TEXT,
       stream_url            TEXT,
       container_extension   TEXT,
@@ -272,44 +152,30 @@ function createTables(db: Database.Database) {
       epg_channel_id        TEXT,
       catchup_supported     INTEGER NOT NULL DEFAULT 0,
       catchup_days          INTEGER NOT NULL DEFAULT 0,
-      provider_metadata     TEXT,                          -- JSON bag for extras the provider returned
+      provider_metadata     TEXT,                          -- JSON bag for extras
 
-      -- L14 normalizer outputs (derived at sync time)
+      -- Normalizer outputs (derived at sync time)
       language_hint         TEXT,
       origin_hint           TEXT,
       quality_hint          TEXT,
       year_hint             INTEGER,
 
-      -- Polymorphic canonical link — exactly one set once matched
-      canonical_vod_id      INTEGER REFERENCES canonical_vod(id) ON DELETE SET NULL,
-      episode_id            INTEGER REFERENCES episodes(id) ON DELETE SET NULL,
-      canonical_live_id     INTEGER REFERENCES canonical_live(id) ON DELETE SET NULL,
+      -- Episode → parent series link (NULL for non-episodes)
+      parent_series_id      TEXT REFERENCES series_sources(id) ON DELETE SET NULL,
 
-      added_at              INTEGER NOT NULL DEFAULT (unixepoch()),
-
-      CHECK (
-        (type = 'movie'   AND episode_id IS NULL AND canonical_live_id IS NULL) OR
-        (type = 'episode' AND canonical_vod_id IS NULL AND canonical_live_id IS NULL) OR
-        (type = 'live'    AND canonical_vod_id IS NULL AND episode_id IS NULL)
-      )
+      added_at              INTEGER NOT NULL DEFAULT (unixepoch())
     );
 
-    -- Junction: a stream can belong to multiple categories (source-owned taxonomy)
     CREATE TABLE IF NOT EXISTS stream_categories (
       stream_id    TEXT NOT NULL REFERENCES streams(id) ON DELETE CASCADE,
       category_id  TEXT NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
       PRIMARY KEY (stream_id, category_id)
     );
 
-    -- Series parents — not playable streams, so they can't live in the
-    -- streams table (CHECK constraint bans type='series'). They sit in a
-    -- sibling table keyed the same way ({sourceId}:series:{series_id}) and
-    -- FK into canonical_series for identity. Episodes remain in streams
-    -- with type='episode' + episode_id FK.
+    -- Series parents — not playable streams.
     CREATE TABLE IF NOT EXISTS series_sources (
       id                  TEXT PRIMARY KEY,              -- '{sourceId}:series:{series_id}'
       source_id           TEXT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
-      canonical_series_id INTEGER NOT NULL REFERENCES canonical_series(id) ON DELETE CASCADE,
       series_external_id  TEXT NOT NULL,
       title               TEXT NOT NULL,
       thumbnail_url       TEXT,
@@ -327,37 +193,16 @@ function createTables(db: Database.Database) {
       PRIMARY KEY (series_source_id, category_id)
     );
 
-    -- ─── User data — four tables, each with exactly its own columns ───
-    -- Q4: movies & series favorite/watchlist/rating at canonical level,
-    --     watch progress per stream, live channel favorite per stream.
-
-    CREATE TABLE IF NOT EXISTS canonical_vod_user_data (
-      profile_id        TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
-      canonical_vod_id  INTEGER NOT NULL REFERENCES canonical_vod(id) ON DELETE CASCADE,
-      is_favorite       INTEGER NOT NULL DEFAULT 0,
-      is_watchlisted    INTEGER NOT NULL DEFAULT 0,
-      rating            INTEGER,
-      fav_sort_order    INTEGER,
-      created_at        INTEGER NOT NULL DEFAULT (unixepoch()),
-      updated_at        INTEGER NOT NULL DEFAULT (unixepoch()),
-      PRIMARY KEY (profile_id, canonical_vod_id)
-    );
-
-    CREATE TABLE IF NOT EXISTS canonical_series_user_data (
-      profile_id           TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
-      canonical_series_id  INTEGER NOT NULL REFERENCES canonical_series(id) ON DELETE CASCADE,
-      is_favorite          INTEGER NOT NULL DEFAULT 0,
-      is_watchlisted       INTEGER NOT NULL DEFAULT 0,
-      rating               INTEGER,
-      fav_sort_order       INTEGER,
-      created_at           INTEGER NOT NULL DEFAULT (unixepoch()),
-      updated_at           INTEGER NOT NULL DEFAULT (unixepoch()),
-      PRIMARY KEY (profile_id, canonical_series_id)
-    );
+    -- ─── User data ───────────────────────────────────────────────────
+    -- g1: all user data keyed by stream/series_source ID (no canonical layer).
 
     CREATE TABLE IF NOT EXISTS stream_user_data (
       profile_id        TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
       stream_id         TEXT NOT NULL REFERENCES streams(id) ON DELETE CASCADE,
+      is_favorite       INTEGER NOT NULL DEFAULT 0,
+      is_watchlisted    INTEGER NOT NULL DEFAULT 0,
+      rating            INTEGER,
+      fav_sort_order    INTEGER,
       watch_position    INTEGER NOT NULL DEFAULT 0,
       watch_duration    INTEGER,
       last_watched_at   INTEGER,
@@ -365,6 +210,18 @@ function createTables(db: Database.Database) {
       created_at        INTEGER NOT NULL DEFAULT (unixepoch()),
       updated_at        INTEGER NOT NULL DEFAULT (unixepoch()),
       PRIMARY KEY (profile_id, stream_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS series_user_data (
+      profile_id        TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+      series_source_id  TEXT NOT NULL REFERENCES series_sources(id) ON DELETE CASCADE,
+      is_favorite       INTEGER NOT NULL DEFAULT 0,
+      is_watchlisted    INTEGER NOT NULL DEFAULT 0,
+      rating            INTEGER,
+      fav_sort_order    INTEGER,
+      created_at        INTEGER NOT NULL DEFAULT (unixepoch()),
+      updated_at        INTEGER NOT NULL DEFAULT (unixepoch()),
+      PRIMARY KEY (profile_id, series_source_id)
     );
 
     CREATE TABLE IF NOT EXISTS channel_user_data (
@@ -379,73 +236,30 @@ function createTables(db: Database.Database) {
 
     -- ─── Indexes ──────────────────────────────────────────────────────
 
-    -- Canonical identity lookups (content_hash is already UNIQUE; these cover oracle + cross-ref)
-    CREATE INDEX IF NOT EXISTS idx_canonical_vod_imdb      ON canonical_vod(imdb_id);
-    CREATE INDEX IF NOT EXISTS idx_canonical_vod_tmdb      ON canonical_vod(tmdb_id);
-    CREATE INDEX IF NOT EXISTS idx_canonical_vod_oracle    ON canonical_vod(oracle_status);
-
-    CREATE INDEX IF NOT EXISTS idx_canonical_series_imdb   ON canonical_series(imdb_id);
-    CREATE INDEX IF NOT EXISTS idx_canonical_series_tmdb   ON canonical_series(tmdb_id);
-    CREATE INDEX IF NOT EXISTS idx_canonical_series_oracle ON canonical_series(oracle_status);
-
-    CREATE INDEX IF NOT EXISTS idx_episodes_series         ON episodes(canonical_series_id);
-
-    CREATE INDEX IF NOT EXISTS idx_canonical_live_iptv     ON canonical_live(iptv_org_id);
-    CREATE INDEX IF NOT EXISTS idx_canonical_live_oracle   ON canonical_live(oracle_status);
-
-    -- Streams access patterns: browse grids filter by source+type+category
+    -- Streams access patterns
     CREATE INDEX IF NOT EXISTS idx_streams_source          ON streams(source_id);
     CREATE INDEX IF NOT EXISTS idx_streams_type            ON streams(type);
     CREATE INDEX IF NOT EXISTS idx_streams_source_type     ON streams(source_id, type);
     CREATE INDEX IF NOT EXISTS idx_streams_category        ON streams(category_id, source_id);
     CREATE INDEX IF NOT EXISTS idx_streams_epg             ON streams(epg_channel_id);
-    CREATE INDEX IF NOT EXISTS idx_streams_vod_link        ON streams(canonical_vod_id);
-    CREATE INDEX IF NOT EXISTS idx_streams_episode_link    ON streams(episode_id);
-    CREATE INDEX IF NOT EXISTS idx_streams_live_link       ON streams(canonical_live_id);
+    CREATE INDEX IF NOT EXISTS idx_streams_parent_series   ON streams(parent_series_id);
 
-    CREATE INDEX IF NOT EXISTS idx_series_sources_source    ON series_sources(source_id);
-    CREATE INDEX IF NOT EXISTS idx_series_sources_canonical ON series_sources(canonical_series_id);
-    CREATE INDEX IF NOT EXISTS idx_series_sources_category  ON series_sources(category_id, source_id);
+    CREATE INDEX IF NOT EXISTS idx_series_sources_source   ON series_sources(source_id);
+    CREATE INDEX IF NOT EXISTS idx_series_sources_category ON series_sources(category_id, source_id);
 
-    -- Categories + EPG (unchanged from V2)
+    -- Categories + EPG
     CREATE INDEX IF NOT EXISTS idx_sc_category             ON stream_categories(category_id);
     CREATE INDEX IF NOT EXISTS idx_categories_name         ON categories(name, source_id, external_id);
     CREATE INDEX IF NOT EXISTS idx_epg_channel             ON epg(channel_external_id);
     CREATE INDEX IF NOT EXISTS idx_epg_time                ON epg(start_time, end_time);
 
     -- User data access patterns
-    CREATE INDEX IF NOT EXISTS idx_vod_ud_favorites        ON canonical_vod_user_data(profile_id, is_favorite);
-    CREATE INDEX IF NOT EXISTS idx_vod_ud_watchlist        ON canonical_vod_user_data(profile_id, is_watchlisted);
-    CREATE INDEX IF NOT EXISTS idx_series_ud_favorites     ON canonical_series_user_data(profile_id, is_favorite);
-    CREATE INDEX IF NOT EXISTS idx_series_ud_watchlist     ON canonical_series_user_data(profile_id, is_watchlisted);
+    CREATE INDEX IF NOT EXISTS idx_stream_ud_favorites     ON stream_user_data(profile_id, is_favorite);
+    CREATE INDEX IF NOT EXISTS idx_stream_ud_watchlist     ON stream_user_data(profile_id, is_watchlisted);
     CREATE INDEX IF NOT EXISTS idx_stream_ud_recent        ON stream_user_data(profile_id, last_watched_at);
+    CREATE INDEX IF NOT EXISTS idx_series_ud_favorites     ON series_user_data(profile_id, is_favorite);
+    CREATE INDEX IF NOT EXISTS idx_series_ud_watchlist     ON series_user_data(profile_id, is_watchlisted);
     CREATE INDEX IF NOT EXISTS idx_channel_ud_favorites    ON channel_user_data(profile_id, is_favorite);
-
-    -- ─── Lite-tier FTS triggers ───────────────────────────────────────
-    -- These keep streams_fts / series_sources_fts in lockstep with the
-    -- base tables. The trigger fires inside whatever transaction the
-    -- sync.worker is using, so populate happens automatically without
-    -- changing sync.worker.ts. Cheap (~5–10s extra on 100k rows).
-
-    CREATE TRIGGER IF NOT EXISTS streams_ai AFTER INSERT ON streams BEGIN
-      INSERT INTO streams_fts(rowid, title) VALUES (new.rowid, new.title);
-    END;
-    CREATE TRIGGER IF NOT EXISTS streams_ad AFTER DELETE ON streams BEGIN
-      DELETE FROM streams_fts WHERE rowid = old.rowid;
-    END;
-    CREATE TRIGGER IF NOT EXISTS streams_au AFTER UPDATE OF title ON streams BEGIN
-      UPDATE streams_fts SET title = new.title WHERE rowid = old.rowid;
-    END;
-
-    CREATE TRIGGER IF NOT EXISTS series_sources_ai AFTER INSERT ON series_sources BEGIN
-      INSERT INTO series_sources_fts(rowid, title) VALUES (new.rowid, new.title);
-    END;
-    CREATE TRIGGER IF NOT EXISTS series_sources_ad AFTER DELETE ON series_sources BEGIN
-      DELETE FROM series_sources_fts WHERE rowid = old.rowid;
-    END;
-    CREATE TRIGGER IF NOT EXISTS series_sources_au AFTER UPDATE OF title ON series_sources BEGIN
-      UPDATE series_sources_fts SET title = new.title WHERE rowid = old.rowid;
-    END;
   `)
 
   // Reset any sources stuck in 'syncing' from a previous crashed/killed run
@@ -453,16 +267,6 @@ function createTables(db: Database.Database) {
 
   // Insert default profile if not exists
   db.prepare(`INSERT OR IGNORE INTO profiles (id, name) VALUES ('default', 'Default')`).run()
-
-  // Default indexing tier — Standard on Electron desktop. FRACTALS_TIER env
-  // var overrides on every boot (for dev:lite / dev:standard / dev:rich scripts).
-  // Without the env var, INSERT OR IGNORE preserves whatever the user last chose.
-  const tierOverride = process.env.FRACTALS_TIER?.toLowerCase()
-  if (tierOverride && ['lite', 'standard', 'rich', 'ultimate'].includes(tierOverride)) {
-    db.prepare(`INSERT OR REPLACE INTO settings (key, value) VALUES ('indexing_tier', ?)`).run(tierOverride)
-  } else {
-    db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES ('indexing_tier', 'standard')`).run()
-  }
 }
 
 /** Read a setting value. Returns null if not set. */
@@ -478,12 +282,7 @@ export function setSetting(key: string, value: string): void {
   _sqlite!.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(key, value)
 }
 
-/**
- * Legacy V2 FTS rebuild helper. V3 uses per-type FTS tables populated at sync
- * time by the sync worker (Phase D) — no background rebuild needed. Kept as a
- * no-op stub so the existing handlers.ts import still resolves until Phase D
- * lands and cleans it up.
- */
+/** No-op stub — FTS rebuild deferred to g2 tier. */
 export async function rebuildFtsIfNeeded(): Promise<void> {
   return
 }

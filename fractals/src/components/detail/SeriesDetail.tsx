@@ -398,6 +398,47 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
             )}
           </div>
 
+          {/* Breadcrumbs — pinned above scroll */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
+            flexWrap: 'wrap',
+            padding: '8px 16px',
+            borderBottom: '1px solid var(--border-subtle)',
+            flexShrink: 0,
+          }}>
+            {primarySource && sourceColor && (
+              <>
+                <BreadcrumbLink
+                  color={sourceColor.accent}
+                  onClick={() => onNavigate({ sourceId: primarySourceId })}
+                >
+                  {primarySource.name}
+                </BreadcrumbLink>
+                <BreadcrumbSep />
+              </>
+            )}
+            <BreadcrumbLink
+              color="var(--accent-series)"
+              onClick={() => onNavigate({ type: 'series' })}
+            >
+              Series
+            </BreadcrumbLink>
+            {categoryName && (
+              <>
+                <BreadcrumbSep />
+                <BreadcrumbLink
+                  color="var(--accent-series)"
+                  onClick={() => onNavigate({ type: 'series', category: categoryName })}
+                  bold
+                >
+                  {categoryName}
+                </BreadcrumbLink>
+              </>
+            )}
+          </div>
+
           {/* Scrollable body */}
           <div style={{
             flex: 1,
@@ -507,45 +548,9 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
               </div>
             )}
 
-            <EnrichmentFallback item={item} onEnriched={handleRefetch} />
+            {/* EnrichmentFallback hidden until g2+ TMDB integration */}
 
-            {/* Breadcrumbs */}
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 4,
-              flexWrap: 'wrap',
-              paddingTop: 4,
-            }}>
-              {primarySource && sourceColor && (
-                <>
-                  <BreadcrumbLink
-                    color={sourceColor.accent}
-                    onClick={() => onNavigate({ sourceId: primarySourceId })}
-                  >
-                    {primarySource.name}
-                  </BreadcrumbLink>
-                  <BreadcrumbSep />
-                </>
-              )}
-              <BreadcrumbLink
-                color="var(--accent-series)"
-                onClick={() => onNavigate({ type: 'series' })}
-              >
-                Series
-              </BreadcrumbLink>
-              {categoryName && (
-                <>
-                  <BreadcrumbSep />
-                  <BreadcrumbLink
-                    color="var(--text-2)"
-                    onClick={() => onNavigate({ type: 'series', category: categoryName })}
-                  >
-                    {categoryName}
-                  </BreadcrumbLink>
-                </>
-              )}
-            </div>
+            {/* Breadcrumbs moved to top */}
           </div>
         </div>
       </div>
@@ -553,12 +558,13 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
   )
 }
 
-function BreadcrumbLink({ children, color, onClick }: { children: React.ReactNode; color: string; onClick: () => void }) {
+function BreadcrumbLink({ children, color, onClick, bold }: { children: React.ReactNode; color: string; onClick: () => void; bold?: boolean }) {
   return (
     <span
       onClick={onClick}
       style={{
-        fontSize: 10,
+        fontSize: bold ? 11 : 10,
+        fontWeight: bold ? 600 : 400,
         color,
         cursor: 'pointer',
         fontFamily: 'var(--font-ui)',

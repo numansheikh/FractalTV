@@ -238,9 +238,7 @@ export function VirtualGrid({ items, onSelect, viewMode = 'grid', isLoading, con
   }, [])
 
   const isList = viewMode === 'list'
-  // Prefer the explicit contentType prop; fall back to first-item heuristic only if
-  // the caller didn't pass one. Prevents mid-fetch layout flash and mixed-type misrender.
-  const isLive = contentType === 'live' || (contentType == null && items[0]?.type === 'live')
+  const isLive = items[0]?.type === 'live'
   const gap = isList ? 2 : 8
   const colGap = isList ? 8 : gap
   const padding = 16
@@ -248,10 +246,8 @@ export function VirtualGrid({ items, onSelect, viewMode = 'grid', isLoading, con
   // Per-type dimensions (grid mode)
   const minCardWidth = isLive ? 140 : 120
   const maxCardWidth = isLive ? 220 : 180
-  const gridRowHeight = isLive ? 116 : 242
   const listRowHeight = 32
 
-  const rowHeight = isList ? listRowHeight : gridRowHeight
   const availableWidth = containerWidth - padding * 2
 
   const columns = isList
@@ -260,15 +256,16 @@ export function VirtualGrid({ items, onSelect, viewMode = 'grid', isLoading, con
       ? Math.max(2, Math.floor((availableWidth + gap) / (minCardWidth + gap)))
       : 2
 
-  const rows: (ContentItem | null)[][] = []
+  // Compute actual card width to derive row height from aspect ratio + metadata
+  const actualCardWidth = isList ? 0 : Math.min(maxCardWidth, Math.floor((availableWidth - (columns - 1) * gap) / columns))
+  const gridRowHeight = isLive
+    ? Math.ceil(actualCardWidth * 9 / 16) + 34  // 16:9 + name strip
+    : Math.ceil(actualCardWidth * 3 / 2) + 52   // 2:3 + metadata strip
+  const rowHeight = isList ? listRowHeight : gridRowHeight
+
+  const rows: ContentItem[][] = []
   for (let i = 0; i < items.length; i += columns) {
     rows.push(items.slice(i, i + columns))
-  }
-  // Pad last row so all rows have equal column count — prevents last-row cards from
-  // stretching wider, which breaks the 2:3 aspect ratio and clips the metadata strip.
-  if (!isList && rows.length > 0) {
-    const last = rows[rows.length - 1]
-    while (last.length < columns) last.push(null)
   }
 
   const virtualizer = useVirtualizer({
@@ -362,27 +359,26 @@ export function VirtualGrid({ items, onSelect, viewMode = 'grid', isLoading, con
                   : 'transparent',
               }}
             >
-              {row.map((item, idx) => (
+              {row.map((item) => (
                 <div
-                  key={item ? item.id : `pad-${virtualRow.index}-${idx}`}
+                  key={item.id}
                   style={isList ? {
                     flex: 1,
                     minWidth: 0,
                     height: rowHeight,
                   } : {
-                    flex: 1,
-                    minWidth: minCardWidth,
-                    maxWidth: maxCardWidth,
+                    flex: '0 0 auto',
+                    width: actualCardWidth,
                     height: rowHeight,
                     overflow: 'hidden',
                   }}
                 >
-                  {item && (isList
+                  {isList
                     ? <ChannelListRow item={item} onClick={onSelect} />
                     : item.type === 'live'
                       ? <ChannelCard item={item} onClick={onSelect} />
                       : <PosterCard item={item} onClick={onSelect} />
-                  )}
+                  }
                 </div>
               ))}
             </div>

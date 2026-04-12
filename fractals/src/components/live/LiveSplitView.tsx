@@ -302,7 +302,7 @@ export function LiveSplitView({ channel, onFullscreen, onSwitchChannel, onClose 
             <div style={{
               flexShrink: 0, height: 28,
               background: 'var(--bg-1)', borderBottom: '1px solid var(--border-subtle)',
-              display: 'flex', alignItems: 'center', padding: '0 14px', gap: 6,
+              display: 'flex', alignItems: 'center', justifyContent: 'flex-end', padding: '0 14px', gap: 6,
             }}>
               <span style={{ fontSize: 10, color: 'var(--text-3)' }}>in</span>
               <button

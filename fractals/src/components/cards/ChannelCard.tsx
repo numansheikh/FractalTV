@@ -45,7 +45,6 @@ export function ChannelCard({ item, onClick }: Props) {
       title={showSourceBar && sourceName ? `${item.title} — Source: ${sourceName}` : item.title}
       style={{
         minWidth: 0,
-        height: '100%',
         cursor: 'pointer',
         borderRadius: 6,
         overflow: 'hidden',
@@ -62,10 +61,9 @@ export function ChannelCard({ item, onClick }: Props) {
         position: 'relative',
       }}
     >
-      {/* Logo area — fills remaining height so the name row is always visible */}
+      {/* Logo area — 16:9 */}
       <div style={{
-        flex: 1,
-        minHeight: 0,
+        aspectRatio: '16/9',
         position: 'relative',
         overflow: 'hidden',
         background: 'var(--bg-3)',

@@ -7,7 +7,7 @@ export function FilterBar({ itemCount }: { itemCount?: number }) {
   // '__favorites__' is the default state — not a user-applied filter, never shown as a chip
   const activeCategory = categoryFilter && categoryFilter !== '__favorites__' ? categoryFilter : null
   const hasFilters = typeFilter !== 'all' || !!activeCategory || selectedSourceIds.length > 0
-  if (!hasFilters) return null
+  if (!hasFilters && itemCount === undefined) return null
 
   const TYPE_COLOR: Record<string, string> = {
     live: 'var(--accent-live)',

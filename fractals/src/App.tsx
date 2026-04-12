@@ -57,7 +57,6 @@ function AppShell() {
       const loaded = list as Source[]
       setSources(loaded)
       if (loaded.length === 0) {
-        // First launch or factory reset — open add source modal directly
         setShowAddModal(true)
       } else {
         for (const src of loaded) {
@@ -127,22 +126,10 @@ function AppShell() {
     const lastPhase: Record<string, string> = {}
     return api.on('sync:progress', (progress: any) => {
       const p = progress as SyncProgress & { sourceId: string }
-      if (p.phase === 'done') {
-        // Phase 1 complete — browse is ready. Keep dot alive; indexing will continue updating it.
-        invalidateContentQueries()
-        api.sources.list().then((list) => setSources(list as Source[]))
-        setSyncProgress(p.sourceId, { phase: p.phase, current: p.current, total: p.total, message: 'Preparing search…' })
-      } else if (p.phase === 'indexing-done') {
-        // Indexing complete — search is ready, but enrichment follows. Don't
-        // clear the progress dot yet; keep it showing "Search ready" until the
-        // enrichment worker sends its first progress message.
-        invalidateContentQueries()
-        api.sources.list().then((list) => setSources(list as Source[]))
-        setSyncProgress(p.sourceId, { phase: p.phase, current: 0, total: 0, message: 'Search ready' })
-      } else if (p.phase === 'enriching-done' || p.phase === 'cancelled') {
+      if (p.phase === 'done' || p.phase === 'cancelled') {
         setSyncProgress(p.sourceId, null)
         api.sources.list().then((list) => setSources(list as Source[]))
-        if (p.phase === 'enriching-done') invalidateContentQueries()
+        if (p.phase === 'done') invalidateContentQueries()
       } else if (p.phase === 'error') {
         setSyncProgress(p.sourceId, null)
         updateSource(p.sourceId, { status: 'error', lastError: p.message })
@@ -166,8 +153,11 @@ function AppShell() {
       await api.sources.sync(sourceId)
     } finally {
       syncingIds.current.delete(sourceId)
-      // Progress is cleared by the 'indexing-done' event; don't clear here.
     }
+    setSyncProgress(sourceId, null)
+    const list = await api.sources.list()
+    setSources(list as Source[])
+    invalidateContentQueries()
   }
 
   const handleRemove = async (sourceId: string) => {
@@ -208,9 +198,10 @@ function AppShell() {
       // Episode — open series detail panel
       setSelectedContent({ ...item, id: parent.id, title: parent.title, type: 'series' } as ContentItem)
     } else {
-      // Film — navigate to category
+      // Navigate to category in the appropriate view
       const cat = (item as any).category_name
-      setView('films')
+      const viewMap = { live: 'live', movie: 'films', series: 'series' } as const
+      setView(viewMap[item.type as keyof typeof viewMap] ?? 'films')
       if (cat) setCategoryFilter(cat.split(',')[0])
     }
   }
@@ -252,7 +243,7 @@ function AppShell() {
         <ContentArea
           sort={sort}
           onSelectContent={handleSelectContent}
-          onAddSource={() => { const { sources } = useSourcesStore.getState(); if (sources.length === 0) setShowAddModal(true); else setShowSources(true) }}
+          onAddSource={() => setShowSources(true)}
         />
       </div>
 
@@ -322,14 +313,14 @@ function AppShell() {
             onClose={() => setShowSources(false)}
             onSync={handleSync}
             onRemove={handleRemove}
-            onAdded={handleSourceAdded}
+            onAdded={async (sourceId: string) => { await handleSourceAdded(); handleSync(sourceId) }}
             suppressScrim
           />
         )}
         {/* First-launch / direct add source modal */}
         {showAddModal && (
           <AddSourceModal
-            onAdded={() => { setShowAddModal(false); handleSourceAdded() }}
+            onAdded={async (sourceId: string) => { setShowAddModal(false); await handleSourceAdded(); handleSync(sourceId) }}
             onCancel={() => setShowAddModal(false)}
           />
         )}

@@ -1,17 +1,12 @@
 /**
- * M3U sync worker — V3 cutover (Phase D1.5).
+ * M3U sync worker — g1 tier.
  *
- * Fetches an M3U playlist, parses it, and writes the V3 shape:
- *   - `streams` rows with L14 normalizer outputs
- *   - `canonical_vod` / `canonical_live` identity rows via content_hash
- *   - Per-type FTS mirrors populated inline
- *   - Series-like URLs are reclassified as 'movie' because M3U gives us
- *     individual episode URLs, not a series shell (streams CHECK constraint
- *     bans type='series' — series parents live in `series_sources`, which
- *     requires a Xtream-style hierarchical catalog the M3U format can't
- *     express). Users can still browse them under Films.
+ * Fetches an M3U playlist, parses it, and writes:
+ *   - `streams` rows with normalizer outputs
+ *   - `categories` rows
  *
- * Wipe semantics: re-sync deletes all streams for this source first.
+ * No canonical tables, no FTS, no enrichment. Pure provider data.
+ * Series-like URLs are classified as 'movie' (M3U has no series hierarchy).
  */
 
 import { parentPort, workerData } from 'worker_threads'
@@ -50,18 +45,7 @@ function sendDone(totalItems: number, catCount: number) {
   parentPort?.postMessage({ type: 'done', totalItems, catCount })
 }
 
-function sha1(input: string): string {
-  return createHash('sha1').update(input).digest('hex')
-}
-function vodContentHash(normalizedTitle: string, year: number | null): string {
-  return sha1(`movie|${normalizedTitle}|${year ?? ''}`)
-}
-function liveContentHash(tvgId: string | null, normalizedName: string): string {
-  if (tvgId && tvgId.trim()) return sha1(`live|tvg|${tvgId.trim().toLowerCase()}`)
-  return sha1(`live|name|${normalizedName}`)
-}
-
-/** M3U URL guess: /series/ and episode-ish files stay as 'movie' in V3. */
+/** M3U URL guess: /series/ and episode-ish files stay as 'movie' in g1. */
 function guessType(url: string): 'live' | 'movie' {
   if (url.match(/\/series\//i)) return 'movie'
   if (url.match(/\/movie\//i) || url.match(/\.(mp4|mkv|avi|mov)(\?|$)/i)) return 'movie'
@@ -113,7 +97,7 @@ function parseM3u(text: string): M3uEntry[] {
   return entries
 }
 
-/** Stable short hash for M3U URLs (no numeric stream IDs in M3U format). */
+/** Stable short hash for M3U URLs. */
 function hashUrl(url: string): string {
   return createHash('md5').update(url).digest('hex').slice(0, 12)
 }
@@ -123,7 +107,6 @@ async function run() {
   db.pragma('journal_mode = WAL')
   db.pragma('synchronous = normal')
   db.pragma('foreign_keys = ON')
-  db.pragma('busy_timeout = 30000')
 
   try {
     db.prepare('UPDATE sources SET status = ? WHERE id = ?').run('syncing', sourceId)
@@ -180,81 +163,21 @@ async function run() {
     db.prepare(`DELETE FROM stream_categories WHERE stream_id IN (SELECT id FROM streams WHERE source_id = ?)`).run(sourceId)
     db.prepare(`DELETE FROM streams WHERE source_id = ?`).run(sourceId)
 
-    // ── Prepared statements (canonical + streams + FTS) ─────────────────
-    const insertVodCanonical = db.prepare(`
-      INSERT INTO canonical_vod (normalized_title, year, content_hash)
-      VALUES (?, ?, ?)
-      ON CONFLICT(content_hash) DO UPDATE SET normalized_title = excluded.normalized_title
-      RETURNING id
-    `)
-    const selectVodByHash = db.prepare(`SELECT id FROM canonical_vod WHERE content_hash = ?`)
-    const insertLiveCanonical = db.prepare(`
-      INSERT INTO canonical_live (canonical_name, content_hash)
-      VALUES (?, ?)
-      ON CONFLICT(content_hash) DO UPDATE SET canonical_name = excluded.canonical_name
-      RETURNING id
-    `)
-    const selectLiveByHash = db.prepare(`SELECT id FROM canonical_live WHERE content_hash = ?`)
-    const insertVodFts = db.prepare(`
-      INSERT INTO canonical_vod_fts (canonical_id, normalized_title, multilingual_labels)
-      VALUES (?, ?, '')
-    `)
-    const selectVodFtsByCanonical = db.prepare(`SELECT 1 FROM canonical_vod_fts WHERE canonical_id = ?`)
-    const insertLiveFts = db.prepare(`
-      INSERT INTO canonical_live_fts (canonical_id, canonical_name, categories)
-      VALUES (?, ?, '')
-    `)
-    const selectLiveFtsByCanonical = db.prepare(`SELECT 1 FROM canonical_live_fts WHERE canonical_id = ?`)
-
+    // ── Prepared statements ─────────────────────────────────────────────
     const insertStreamLive = db.prepare(`
       INSERT INTO streams (
         id, source_id, type, stream_id, title, thumbnail_url, stream_url, category_id,
         tvg_id, epg_channel_id,
-        language_hint, origin_hint, quality_hint, year_hint,
-        canonical_live_id
-      ) VALUES (?, ?, 'live', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        language_hint, origin_hint, quality_hint, year_hint
+      ) VALUES (?, ?, 'live', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
     const insertStreamMovie = db.prepare(`
       INSERT INTO streams (
         id, source_id, type, stream_id, title, thumbnail_url, stream_url, category_id,
-        language_hint, origin_hint, quality_hint, year_hint,
-        canonical_vod_id
-      ) VALUES (?, ?, 'movie', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        language_hint, origin_hint, quality_hint, year_hint
+      ) VALUES (?, ?, 'movie', ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
     const insertSC = db.prepare(`INSERT OR IGNORE INTO stream_categories (stream_id, category_id) SELECT ?, ? WHERE EXISTS (SELECT 1 FROM categories WHERE id = ?)`)
-
-    function upsertVodCanonical(normalizedTitle: string, year: number | null): number {
-      const hash = vodContentHash(normalizedTitle, year)
-      try {
-        const row = insertVodCanonical.get(normalizedTitle, year, hash) as { id: number } | undefined
-        if (row?.id) {
-          if (!selectVodFtsByCanonical.get(row.id)) insertVodFts.run(row.id, normalizedTitle)
-          return row.id
-        }
-      } catch {}
-      const existing = selectVodByHash.get(hash) as { id: number } | undefined
-      if (existing?.id) {
-        if (!selectVodFtsByCanonical.get(existing.id)) insertVodFts.run(existing.id, normalizedTitle)
-        return existing.id
-      }
-      throw new Error(`Failed to upsert canonical_vod for hash ${hash}`)
-    }
-    function upsertLiveCanonical(canonicalName: string, tvgId: string | null): number {
-      const hash = liveContentHash(tvgId, canonicalName)
-      try {
-        const row = insertLiveCanonical.get(canonicalName, hash) as { id: number } | undefined
-        if (row?.id) {
-          if (!selectLiveFtsByCanonical.get(row.id)) insertLiveFts.run(row.id, canonicalName)
-          return row.id
-        }
-      } catch {}
-      const existing = selectLiveByHash.get(hash) as { id: number } | undefined
-      if (existing?.id) {
-        if (!selectLiveFtsByCanonical.get(existing.id)) insertLiveFts.run(existing.id, canonicalName)
-        return existing.id
-      }
-      throw new Error(`Failed to upsert canonical_live for hash ${hash}`)
-    }
 
     // ── Content ──────────────────────────────────────────────────────────
     send('content', 0, entries.length, `Saving ${entries.length.toLocaleString()} items…`)
@@ -268,11 +191,9 @@ async function run() {
 
         const rawTitle = entry.title || 'Unknown'
         const normalized = normalizeTitle(rawTitle)
-        const cleanTitle = normalized.normalizedTitle || rawTitle.toLowerCase()
 
         if (entry.type === 'live') {
           const tvgId = entry.tvgId || null
-          const canonicalLiveId = upsertLiveCanonical(cleanTitle, tvgId)
           insertStreamLive.run(
             streamId, sourceId, urlHash, rawTitle,
             entry.tvgLogo || null, entry.url, null,
@@ -280,19 +201,16 @@ async function run() {
             normalized.languageHint || null,
             normalized.originHint || null,
             normalized.qualityHint || null,
-            normalized.year || null,
-            canonicalLiveId
+            normalized.year || null
           )
         } else {
-          const canonicalVodId = upsertVodCanonical(cleanTitle, normalized.year ?? null)
           insertStreamMovie.run(
             streamId, sourceId, urlHash, rawTitle,
             entry.tvgLogo || null, entry.url, null,
             normalized.languageHint || null,
             normalized.originHint || null,
             normalized.qualityHint || null,
-            normalized.year || null,
-            canonicalVodId
+            normalized.year || null
           )
         }
         insertSC.run(streamId, catId, catId)
@@ -304,12 +222,6 @@ async function run() {
       const done = Math.min(i + BATCH, entries.length)
       send('content', done, entries.length, `Items: ${done.toLocaleString()}/${entries.length.toLocaleString()}`)
     }
-
-    // ── Sweep orphan canonicals ──────────────────────────────────────────
-    db.exec(`
-      DELETE FROM canonical_vod WHERE id NOT IN (SELECT canonical_vod_id FROM streams WHERE canonical_vod_id IS NOT NULL);
-      DELETE FROM canonical_live WHERE id NOT IN (SELECT canonical_live_id FROM streams WHERE canonical_live_id IS NOT NULL);
-    `)
 
     // ── Finalize ─────────────────────────────────────────────────────────
     db.prepare('UPDATE categories SET content_synced = 1 WHERE source_id = ?').run(sourceId)

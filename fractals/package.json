@@ -1,14 +1,11 @@
 {
-  "name": "fractals",
+  "name": "fractaltv",
   "version": "0.2.0",
   "description": "Utility-first IPTV client with multi-source merging and semantic search",
   "private": true,
   "main": "dist-electron/main/main.js",
   "scripts": {
     "dev": "electron-vite dev",
-    "dev:lite": "FRACTALS_TIER=lite FRACTALS_DB=lite electron-vite dev",
-    "dev:standard": "FRACTALS_TIER=standard FRACTALS_DB=standard electron-vite dev",
-    "dev:rich": "FRACTALS_TIER=rich FRACTALS_DB=rich electron-vite dev",
     "dev:web": "electron-vite dev --mode web",
     "build": "electron-vite build",
     "build:electron": "pnpm build && electron-builder",
@@ -51,8 +48,8 @@
     "vitest": "^4.1.4"
   },
   "build": {
-    "appId": "tv.fractals.app",
-    "productName": "Fractals",
+    "appId": "tv.fractal.app",
+    "productName": "FractalTV",
     "directories": {
       "output": "dist-release"
     },
