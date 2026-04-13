@@ -236,9 +236,11 @@ const G3_LIVE_SELECT = `
   MAX(s.catchup_days)   AS catchup_days,
   MIN(s.epg_channel_id) AS epg_channel_id,
   MIN(s.tvg_id)         AS tvg_id,
-  EXISTS(SELECT 1 FROM epg e JOIN streams es ON es.epg_channel_id = e.channel_external_id
-         WHERE es.canonical_channel_id = cc.id LIMIT 1) AS has_epg_data
+  0 AS has_epg_data
 `
+// has_epg_data intentionally fixed to 0 in browse payload — the cross-table
+// EXISTS was O(canonical × epg × streams) and tanked browse. Detail view can
+// fetch EPG availability on demand.
 
 // ─── Handler registration ─────────────────────────────────────────────────
 
@@ -1269,27 +1271,9 @@ export function registerHandlers() {
   ipcMain.handle('iptv-org:refresh', async (event) => {
     console.log(`[ipc] iptv-org:refresh invoked (global)`)
     const win = BrowserWindow.fromWebContents(event.sender)
-    const send = (phase: string, current: number, total: number, message: string) =>
-      win?.webContents.send('iptv-org:progress', { phase, current, total, message })
-
-    const pull = await refreshIptvOrgChannels(win)
-    if (!pull.success) return pull
-
-    // Re-run canonical enrichment across every enabled source so freshly
-    // pulled iptv-org rows flow into canonical_channels. FTS is rebuilt
-    // once at the end from the updated canonical table.
-    const sqlite = getSqlite()
-    const sources = (sqlite.prepare(`SELECT id FROM sources WHERE disabled = 0`).all() as { id: string }[]).map(r => r.id)
-    for (let i = 0; i < sources.length; i++) {
-      const sid = sources[i]
-      send('enriching', i, sources.length, `Rebuilding canonical for source ${i + 1}/${sources.length}…`)
-      await buildCanonicalLayer(sid, win)
-    }
-    send('enriching', sources.length, sources.length, 'Rebuilding canonical search index…')
-    await buildCanonicalFts(win)
-
-    send('done', pull.total ?? 0, pull.total ?? 0, `Pulled ${(pull.total ?? 0).toLocaleString()} channels and re-enriched ${sources.length} source${sources.length === 1 ? '' : 's'}`)
-    return pull
+    // Manual pipeline (2026-04-14): pull only. User re-runs Build Canonical [6]
+    // and Canonical FTS [7] separately afterward — no auto-chain here.
+    return refreshIptvOrgChannels(win)
   })
 
   // ── Enrichment — V3 keyless pipeline stubs ───────────────────────────
@@ -2470,9 +2454,15 @@ function runBrowseSearch(
   }
 
   // Live channels — group by canonical, one card per real-world channel.
+  // Two-phase query: (1) pick the paged canonical IDs via a cheap EXISTS, then
+  // (2) join + aggregate streams for just those rows. Previous shape ran the
+  // full join + GROUP BY + GROUP_CONCAT across every matching canonical on
+  // every browse call — dominated browse time on large sources.
   if (type === 'live') {
-    const catJoin = categoryName
-      ? `JOIN stream_categories sc ON sc.stream_id = s.id JOIN categories cat ON cat.id = sc.category_id AND cat.name = ?`
+    const catExists = categoryName
+      ? `AND EXISTS (SELECT 1 FROM stream_categories sc
+                     JOIN categories cat ON cat.id = sc.category_id AND cat.name = ?
+                     WHERE sc.stream_id = s.id)`
       : ''
     const catParams: unknown[] = categoryName ? [categoryName] : []
     const canonicalSortCol: Record<string, string> = {
@@ -2481,26 +2471,42 @@ function runBrowseSearch(
       rating:  'cc.title',
       updated: 'cc.title',
     }
+    const sortCol = canonicalSortCol[sortBy] ?? 'cc.title'
+
     const total = (sqlite.prepare(`
-      SELECT COUNT(*) as cnt FROM (
-        SELECT cc.id
-        FROM canonical_channels cc
-        JOIN streams s ON s.canonical_channel_id = cc.id AND s.type = 'live'
+      SELECT COUNT(*) AS cnt
+      FROM canonical_channels cc
+      WHERE EXISTS (
+        SELECT 1 FROM streams s
         JOIN sources src ON src.id = s.source_id AND src.disabled = 0 AND src.id IN (${sourceList})
-        ${catJoin}
-        GROUP BY cc.id
+        WHERE s.canonical_channel_id = cc.id AND s.type = 'live' ${catExists}
       )
     `).get(...filterIds, ...catParams) as { cnt: number }).cnt
+
+    const pagedIds = (sqlite.prepare(`
+      SELECT cc.id
+      FROM canonical_channels cc
+      WHERE EXISTS (
+        SELECT 1 FROM streams s
+        JOIN sources src ON src.id = s.source_id AND src.disabled = 0 AND src.id IN (${sourceList})
+        WHERE s.canonical_channel_id = cc.id AND s.type = 'live' ${catExists}
+      )
+      ORDER BY ${sortCol} ${dir}
+      LIMIT ? OFFSET ?
+    `).all(...filterIds, ...catParams, limit, offset) as { id: string }[]).map(r => r.id)
+
+    if (!pagedIds.length) return { items: [], total }
+
+    const idList = pagedIds.map(() => '?').join(',')
     const items = sqlite.prepare(`
       SELECT ${G3_LIVE_SELECT}
       FROM canonical_channels cc
       JOIN streams s ON s.canonical_channel_id = cc.id AND s.type = 'live'
-      JOIN sources src ON src.id = s.source_id AND src.disabled = 0 AND src.id IN (${sourceList})
-      ${catJoin}
+      JOIN sources src ON src.id = s.source_id AND src.disabled = 0
+      WHERE cc.id IN (${idList})
       GROUP BY cc.id
-      ORDER BY ${canonicalSortCol[sortBy] ?? 'cc.title'} ${dir}
-      LIMIT ? OFFSET ?
-    `).all(...filterIds, ...catParams, limit, offset) as unknown[]
+      ORDER BY ${sortCol} ${dir}
+    `).all(...pagedIds) as unknown[]
     return { items, total }
   }
 

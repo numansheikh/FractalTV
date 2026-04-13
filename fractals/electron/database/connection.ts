@@ -309,6 +309,8 @@ function createTables(db: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_streams_source          ON streams(source_id);
     CREATE INDEX IF NOT EXISTS idx_streams_type            ON streams(type);
     CREATE INDEX IF NOT EXISTS idx_streams_source_type     ON streams(source_id, type);
+    CREATE INDEX IF NOT EXISTS idx_streams_browse          ON streams(source_id, type, added_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_streams_title           ON streams(title);
     CREATE INDEX IF NOT EXISTS idx_streams_category        ON streams(category_id, source_id);
     CREATE INDEX IF NOT EXISTS idx_streams_epg             ON streams(epg_channel_id);
     CREATE INDEX IF NOT EXISTS idx_streams_parent_series   ON streams(parent_series_id);
