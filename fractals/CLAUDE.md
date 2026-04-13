@@ -356,12 +356,13 @@ Will add a second layer:
 - Search target shifts from provider titles to canonical titles
 - Deduplication across sources
 
-## Implementation status (as of 2026-04-12)
+## Implementation status (as of 2026-04-13)
 
 **Phase 0–2.5 — Complete.** Core through V3 data model.
-**g1 — Complete.** Pure provider-data app. 12 tables. LIKE search with debounce. User data survives resync. Type-bleeding fix (search scoped by contentType).
-**g2 — Complete.** FTS5 + manual/auto indexing + toggle + diacritic/ligature folding + grid LIKE fallback. Sync auto-runs indexing and flips `ftsEnabled` on.
-**g3–g5 — Not started.** g3 (keyless canonical + iptv-org), g4 (embeddings), g5 (keyed enrichment, cross-language).
+**g1 — Complete.** Pure provider-data app. LIKE search with debounce. User data survives resync.
+**g2 — Complete.** FTS5 on streams/series_sources + manual/auto indexing + ligature folding + grid LIKE fallback.
+**g3 — In progress.** Canonical identity layer shipped: `canonical_channels` (with `alt_names`, `logo_url`), `canonical_fts`, streams linked via `canonical_channel_id`, two-pass match (tvg_id → normalized title → synthetic), iptv-org channels + logos pull, manual refresh re-runs enrichment across all sources.
+**g4–g5 — Not started.** g4 (embeddings), g5 (keyed enrichment, cross-language).
 **Phase 3 — Not started.** Capacitor for Android/iOS/TV, Tizen.
 
 ### g1 features (current state)

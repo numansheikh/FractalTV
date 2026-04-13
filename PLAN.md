@@ -157,11 +157,16 @@ Three-tier split (same React codebase, feature flags):
 
 ---
 
-## Snapshot (2026-04-13)
+## Snapshot (2026-04-13 end of day)
 
-- Phase state: g1 locked, g2 locked, g3 in progress
-- DB: 12 tables + `content_fts` virtual table + `iptv_channels` (39K rows pulled)
-- Branches: `search-rebuild-g1` (g1), `search-rebuild-g1-g2` (g2), `search-rebuild-g1-g2-g3` (g3 WIP)
-- Two real-world sources synced + indexed + tested
-- Search: LIKE (g1) + FTS5 with diacritic/ligature folding (g2)
-- iptv-org pull infrastructure complete: `iptv-org:refresh` IPC, progress events, validation, Settings UI
+- Phase state: g1 locked, g2 locked, g3 in progress (on `search-rebuild-g1-g2-g3`)
+- DB (g3): adds `canonical_channels` (with `alt_names`, `logo_url`), `canonical_fts`, `iptv_channels` (with `logo`), `channel_user_data` re-keyed to canonical_channel_id
+- Search: LIKE (g1), FTS5 on streams (g2), canonical FTS with alt_names + ligature folding (g3)
+- Browse/search perf: EXISTS-based `content:browse-live-grouped`, two-pass id→hydrate in g1/g3 live search, categories counted by actual stream type
+- iptv-org refresh (Settings): pulls channels.json + logos.json, then re-runs `buildCanonicalLayer` across all sources + `buildCanonicalFts`. Schema-validated before overwrite, retry-once on fetch.
+- Parked (see `memory/project_iptv_ingestion_plan.md`): splash on first launch, TTL gate on add-source + manual-sync, Hybrid C routing
+
+**Next session clean-slate walkthrough:**
+- Delete `~/Library/Application Support/fractaltv/data/` (DB) + `.../Local Storage/` (Zustand)
+- Optional: kill legacy `/Applications/Fractals.app` (not our code; unrelated old install using `electron-backend/` userData dir)
+- Start dev, add a source, sync, watch canonical build + iptv-org refresh flow end-to-end as a new user
