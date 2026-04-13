@@ -281,11 +281,11 @@ export function CommandBar({ sort, onSortChange }: Props) {
       {/* Group / grid / list view toggle — live TV only */}
       {showViewToggle && (
         <div style={{ display: 'flex', borderRadius: 6, overflow: 'hidden', border: '1px solid var(--border-default)', flexShrink: 0 }}>
-          {(['group', 'grid', 'list'] as const).map((mode, i) => (
+          {(['grid', 'list'] as const).map((mode, i) => (
             <button
               key={mode}
               onClick={() => setViewMode(mode)}
-              title={mode === 'group' ? 'Group view' : mode === 'grid' ? 'Grid view' : 'List view'}
+              title={mode === 'grid' ? 'Grid view' : 'List view'}
               style={{
                 width: 28, height: 28,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -297,15 +297,7 @@ export function CommandBar({ sort, onSortChange }: Props) {
                 transition: 'background 0.1s, color 0.1s',
               }}
             >
-              {mode === 'group' ? (
-                // Rows with left label block (group view icon)
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="3" y="4" width="4" height="16" rx="1"/>
-                  <line x1="10" y1="7" x2="21" y2="7"/>
-                  <line x1="10" y1="12" x2="21" y2="12"/>
-                  <line x1="10" y1="17" x2="21" y2="17"/>
-                </svg>
-              ) : mode === 'grid' ? (
+              {mode === 'grid' ? (
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
                   <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
                   <rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>

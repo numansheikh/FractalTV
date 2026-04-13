@@ -97,7 +97,7 @@ export const useAppStore = create<AppState>()(
       typeFilter: 'all',
       categoryFilters: {},
       selectedSourceIds: [],
-      viewMode: 'group',
+      viewMode: 'grid',
       pageSize: 60,
       sort: 'updated:desc',
       homeMode: 'discover',

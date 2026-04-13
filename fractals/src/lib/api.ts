@@ -47,6 +47,12 @@ export const api = {
     buildCanonical: (sourceId: string): Promise<{ success: boolean; total?: number; matched?: number; error?: string }> =>
       isElectron ? (window.api as any).sources.buildCanonical(sourceId) : Promise.resolve({ success: false, error: 'Not in Electron' }),
 
+    buildCanonicalFts: (): Promise<{ success: boolean; total?: number; error?: string }> =>
+      isElectron ? (window.api as any).sources.buildCanonicalFts() : Promise.resolve({ success: false, error: 'Not in Electron' }),
+
+    tvgStats: (sourceId: string): Promise<{ total: number; withTvgId: number }> =>
+      isElectron ? (window.api as any).sources.tvgStats(sourceId) : Promise.resolve({ total: 0, withTvgId: 0 }),
+
     accountInfo: (sourceId: string) =>
       isElectron ? window.api.sources.accountInfo(sourceId) : Promise.resolve(null),
 

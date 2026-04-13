@@ -110,7 +110,7 @@ export function ContentArea({ sort, onSelectContent, onAddSource }: Props) {
       return true
     })
 
-  const isGroupMode = activeView === 'live' && viewMode === 'group'
+  const isGroupMode = false
 
   // Group view query — canonical groups for live channels. Runs first so browse
   // query can decide whether to fetch (skip if groups were returned).
@@ -361,7 +361,7 @@ export function ContentArea({ sort, onSelectContent, onAddSource }: Props) {
                       : <FallbackGrid items={[]} onSelect={handleSelect} />
                     )
                   : (ready && VirtualGrid
-                      ? <VirtualGrid items={items} onSelect={handleSelect} viewMode={activeView === 'live' ? viewMode : 'grid'} isLoading={isLoading} contentType={contentType} />
+                      ? <VirtualGrid items={items} onSelect={handleSelect} viewMode={activeView === 'live' && viewMode === 'list' ? 'list' : 'grid'} isLoading={isLoading} contentType={contentType} />
                       : <FallbackGrid items={items} onSelect={handleSelect} />
                     )
                 }

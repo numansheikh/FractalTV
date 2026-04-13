@@ -564,14 +564,8 @@ export function registerHandlers() {
             message: `Synced ${msg.catCount} categories, ${msg.totalItems.toLocaleString()} items`,
           })
           resolve({ success: true })
-          // Auto-build FTS index after every successful sync, then canonical layer + canonical FTS.
-          buildFtsForSource(sourceId, win)
-            .then(() => buildCanonicalLayer(sourceId, win))
-            .then(() => buildCanonicalFts(win))
-            .catch((err) => console.error('[canonical] post-sync build failed:', err))
-          // Kick EPG sync in background after successful source sync.
-          const src = sqlite.prepare('SELECT * FROM sources WHERE id = ?').get(sourceId) as SourceRow | undefined
-          if (src?.server_url) runEpgSync(sqlite, win, sourceId, src)
+          // Manual pipeline (2026-04-14): FTS / canonical / EPG are now user-triggered
+          // from separate source-card buttons. No auto-chain here.
         } else if (msg.type === 'warning') {
           win?.webContents.send('sync:progress', {
             sourceId, phase: 'warning', current: 0, total: 0, message: msg.message,
@@ -629,9 +623,23 @@ export function registerHandlers() {
   // ── Canonical layer (g3) ─────────────────────────────────────────────────
   ipcMain.handle('sources:build-canonical', async (event, sourceId: string) => {
     const win = BrowserWindow.fromWebContents(event.sender)
-    const result = await buildCanonicalLayer(sourceId, win)
-    if (result.success) await buildCanonicalFts(win)
-    return result
+    // Manual pipeline: canonical FTS is a separate button.
+    return buildCanonicalLayer(sourceId, win)
+  })
+
+  ipcMain.handle('sources:build-canonical-fts', async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    return buildCanonicalFts(win)
+  })
+
+  ipcMain.handle('sources:tvg-stats', (_event, sourceId: string) => {
+    const sqlite = getSqlite()
+    const row = sqlite.prepare(`
+      SELECT COUNT(*) as total,
+             SUM(CASE WHEN tvg_id IS NOT NULL AND tvg_id != '' THEN 1 ELSE 0 END) as with_tvg_id
+      FROM streams WHERE source_id = ? AND type = 'live'
+    `).get(sourceId) as { total: number; with_tvg_id: number } | undefined
+    return { total: row?.total ?? 0, withTvgId: row?.with_tvg_id ?? 0 }
   })
 
   ipcMain.handle('channels:get-canonical', async (_event, canonicalId: string) => {
@@ -2457,8 +2465,8 @@ function runBrowseSearch(
 
   // Live channels — group by canonical, one card per real-world channel.
   if (type === 'live') {
-    const catFilter = categoryName
-      ? `AND EXISTS (SELECT 1 FROM json_each(cc.categories) WHERE value = ?)`
+    const catJoin = categoryName
+      ? `JOIN stream_categories sc ON sc.stream_id = s.id JOIN categories cat ON cat.id = sc.category_id AND cat.name = ?`
       : ''
     const catParams: unknown[] = categoryName ? [categoryName] : []
     const canonicalSortCol: Record<string, string> = {
@@ -2468,18 +2476,21 @@ function runBrowseSearch(
       updated: 'cc.title',
     }
     const total = (sqlite.prepare(`
-      SELECT COUNT(DISTINCT cc.id) as cnt
-      FROM canonical_channels cc
-      JOIN streams s ON s.canonical_channel_id = cc.id AND s.type = 'live'
-      JOIN sources src ON src.id = s.source_id AND src.disabled = 0 AND src.id IN (${sourceList})
-      ${catFilter}
+      SELECT COUNT(*) as cnt FROM (
+        SELECT cc.id
+        FROM canonical_channels cc
+        JOIN streams s ON s.canonical_channel_id = cc.id AND s.type = 'live'
+        JOIN sources src ON src.id = s.source_id AND src.disabled = 0 AND src.id IN (${sourceList})
+        ${catJoin}
+        GROUP BY cc.id
+      )
     `).get(...filterIds, ...catParams) as { cnt: number }).cnt
     const items = sqlite.prepare(`
       SELECT ${G3_LIVE_SELECT}
       FROM canonical_channels cc
       JOIN streams s ON s.canonical_channel_id = cc.id AND s.type = 'live'
       JOIN sources src ON src.id = s.source_id AND src.disabled = 0 AND src.id IN (${sourceList})
-      ${catFilter}
+      ${catJoin}
       GROUP BY cc.id
       ORDER BY ${canonicalSortCol[sortBy] ?? 'cc.title'} ${dir}
       LIMIT ? OFFSET ?

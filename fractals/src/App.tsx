@@ -340,14 +340,14 @@ function AppShell() {
             onClose={() => setShowSources(false)}
             onSync={handleSync}
             onRemove={handleRemove}
-            onAdded={async (sourceId: string) => { await handleSourceAdded(); handleSync(sourceId) }}
+            onAdded={async (_sourceId: string) => { await handleSourceAdded() }}
             suppressScrim
           />
         )}
         {/* First-launch / direct add source modal */}
         {showAddModal && (
           <AddSourceModal
-            onAdded={async (sourceId: string) => { setShowAddModal(false); await handleSourceAdded(); handleSync(sourceId) }}
+            onAdded={async (_sourceId: string) => { setShowAddModal(false); await handleSourceAdded() }}
             onCancel={() => setShowAddModal(false)}
           />
         )}

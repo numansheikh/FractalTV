@@ -171,7 +171,7 @@ settings
 **Tiered search roadmap:**
 - g1: LIKE on provider titles (DONE)
 - g2: FTS5 on streams + series_sources (DONE)
-- g3: keyless canonical layer (title normalization + iptv-org enrichment, no API keys)
+- g3: keyless canonical layer (no API keys). Phase 1 = channels + iptv-org enrichment. Phase 2 = VoD (movies/series) keyless canonical via title normalization.
 - g4: embeddings / semantic (sqlite-vec in place, worker not built)
 - g5: cross-language resolution (TMDB and other keyed enrichments)
 

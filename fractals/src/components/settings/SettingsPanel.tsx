@@ -623,7 +623,7 @@ function DataTab({ enrichStatus, enrichProgress, enrichMsg, pct, isPending, onSt
         // Reset persisted UI preferences to defaults
         useAppStore.setState({
           sort: 'updated:desc',
-          viewMode: 'group',
+          viewMode: 'grid',
           pageSize: 60,
           homeMode: 'discover',
           hasSeenChannelsModePrompt: false,

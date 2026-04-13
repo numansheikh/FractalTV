@@ -114,7 +114,7 @@ export function AddSourceModal({ onAdded, onCancel }: Props) {
   const handleAdd = async () => {
     if (!canAdd) return
     setStep('syncing')
-    setSyncMessage('Connecting…')
+    setSyncMessage('Saving source…')
     setError('')
 
     let sourceId: string | undefined

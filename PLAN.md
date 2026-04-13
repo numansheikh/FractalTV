@@ -18,7 +18,7 @@ Architecture, tech stack, schema, conventions, design language: see `fractals/CL
 | 2.5 | Complete | V3 data model + search (canonical split, association layer, MetadataProvider, advanced search, two-phase sync) |
 | g1 | **Complete** | Strip to pure provider-data app. 12 tables. LIKE search + debounce. User data survives resync. UI polish. |
 | g2 | **Complete** | FTS5 on streams + series_sources. Manual + auto indexing. Diacritic + ligature folding. Grid LIKE fallback. |
-| g3 | Not started | Keyless canonical layer — title normalization + iptv-org enrichment (live channels) |
+| g3 | In progress | Keyless canonical layer. **Phase 1:** channels + iptv-org enrichment. **Phase 2:** VoD (movies/series) keyless canonical via title normalization. |
 | g4 | Not started | Embeddings / semantic search |
 | g5 | Not started | Keyed enrichment (TMDB) + cross-language resolution |
 | 3 | Not started | Capacitor (Android/iOS/TV), Tizen |
@@ -65,7 +65,11 @@ Branch: `search-rebuild-g1-g2`
 
 Branch: `search-rebuild-g1-g2-g3`
 
-**Goal:** Keyless canonical identity layer (no API keys). iptv-org enrichment for live channels. FTS moves to canonical. Channel detail panel.
+**Goal:** Keyless canonical identity layer (no API keys). Built in two phases:
+- **Phase 1 — Channels:** iptv-org enrichment for live channels, FTS moves to canonical, channel detail panel.
+- **Phase 2 — VoD:** keyless canonical for movies/series via title normalization; unified canonical FTS covering all three content types.
+
+Phase 1 design decisions below are locked. Phase 2 design pending.
 
 **Design decisions (locked 2026-04-13):**
 
@@ -99,7 +103,14 @@ Branch: `search-rebuild-g1-g2-g3`
 
 ### Next dev session queue
 - [ ] **Add Source dialog: Test > Add prominence** — Test button should be the primary/prominent action in the Add Source dialog, Add secondary. User should be nudged to test credentials before committing. Currently inverted.
-- [ ] **Sources panel pipeline buttons** — add three separate action buttons per source: Reindex (FTS), Build Canonical, and the existing Sync. Each runs independently so you can re-run just canonical without a full resync. FTS toggle to move from prominent to a debug option in Settings → Data.
+- [ ] **Manual per-source pipeline (locked 2026-04-14)** — replace auto-chain with 7 explicit buttons. See `memory/project_g3_manual_pipeline.md`.
+  - In dialog: (1) Test, (2) Add (no auto-sync, dialog closes)
+  - On Source Card, sequential, downstream gated: (3) Sync, (4) Fetch EPG, (5) Index FTS, (6) Build Canonical, (7) Canonical FTS
+  - Source Card shortcut to global "Fetch iptv-org data"
+  - Source Card stat line: `X / Y live streams have tvg_id`
+  - Optional "Run all remaining" to restore the chain as explicit opt-in
+- [ ] **Pass 2 redesign** — replace exact-title match with longest word-boundary substring match (min 4 chars) + country-tiebreaker. On test data only 10% of live streams have tvg_id, so Pass 2 density matters.
+- [ ] **Unhide Group View** — hidden as of 2026-04-14 because 99%+ of canonicals are synthetic (carrying provider-prefixed noise). Restore toolbar toggle once Pass 2 redesign lands and match rate improves (ballpark: >50% non-synthetic).
 
 ### iptv-org ingestion — parked (TTL/splash bundle)
 
