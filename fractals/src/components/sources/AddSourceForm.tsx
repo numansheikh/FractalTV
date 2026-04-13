@@ -535,17 +535,21 @@ export function AddSourceModal({ onAdded, onCancel }: Props) {
                 >
                   Cancel
                 </button>
+                {/* Test is the primary (filled) button until test succeeds; then Add takes over. */}
                 <button
                   type="button"
                   onClick={handleTest}
                   disabled={!canTest || step === 'testing'}
                   style={{
-                    flex: 1, padding: '8px 0', borderRadius: 7, fontSize: 11, fontWeight: 500,
-                    background: 'var(--bg-3)', border: '1px solid var(--border-default)',
-                    color: 'var(--text-0)', cursor: 'pointer',
-                    fontFamily: 'var(--font-ui)',
+                    flex: 1, padding: '8px 0', borderRadius: 7, fontSize: 11, fontWeight: 600,
+                    background: canAdd ? 'var(--bg-3)' : 'var(--accent-interactive)',
+                    border: canAdd ? '1px solid var(--border-default)' : 'none',
+                    color: canAdd ? 'var(--text-0)' : '#fff', cursor: 'pointer',
+                    fontFamily: 'var(--font-ui)', transition: 'opacity 0.1s, background 0.15s',
                     opacity: (!canTest || step === 'testing') ? 0.4 : 1,
                   }}
+                  onMouseEnter={(e) => { if (canTest && !canAdd && step !== 'testing') e.currentTarget.style.opacity = '0.88' }}
+                  onMouseLeave={(e) => { e.currentTarget.style.opacity = (!canTest || step === 'testing') ? '0.4' : '1' }}
                 >
                   {step === 'testing' ? 'Testing…' : 'Test'}
                 </button>
@@ -555,13 +559,16 @@ export function AddSourceModal({ onAdded, onCancel }: Props) {
                   disabled={!canAdd}
                   style={{
                     flex: 1, padding: '8px 0', borderRadius: 7, fontSize: 11, fontWeight: 600,
-                    background: 'var(--accent-interactive)', border: 'none',
-                    color: '#fff', cursor: 'pointer', transition: 'opacity 0.1s',
+                    background: canAdd ? 'var(--accent-interactive)' : 'var(--bg-3)',
+                    border: canAdd ? 'none' : '1px solid var(--border-default)',
+                    color: canAdd ? '#fff' : 'var(--text-2)',
+                    cursor: canAdd ? 'pointer' : 'default',
+                    transition: 'opacity 0.1s, background 0.15s',
                     fontFamily: 'var(--font-ui)',
-                    opacity: !canAdd ? 0.4 : 1,
+                    opacity: !canAdd ? 0.5 : 1,
                   }}
                   onMouseEnter={(e) => { if (canAdd) e.currentTarget.style.opacity = '0.88' }}
-                  onMouseLeave={(e) => { e.currentTarget.style.opacity = !canAdd ? '0.4' : '1' }}
+                  onMouseLeave={(e) => { e.currentTarget.style.opacity = !canAdd ? '0.5' : '1' }}
                 >
                   Add
                 </button>
