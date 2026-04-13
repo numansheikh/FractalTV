@@ -86,10 +86,12 @@ export function getSqlite() {
  * the full design rationale (L1–L14 locked decisions).
  */
 function createTables(db: Database.Database) {
-  // One-shot migration: early iptv_channels schema had dead columns
-  // (subdivision, city, languages, logo) that don't exist in the real
-  // iptv-org channels.json. Drop it so CREATE TABLE IF NOT EXISTS below
-  // rebuilds the current shape. User re-pulls via Settings → Refresh.
+  // ─── Pre-create migrations (destructive: force CREATE block to rebuild) ───
+
+  // Early iptv_channels schema had dead columns (subdivision, city, languages,
+  // logo) that don't exist in the real iptv-org channels.json. Drop it so
+  // CREATE TABLE IF NOT EXISTS below rebuilds the current shape. User re-pulls
+  // via Settings → Refresh.
   const hasLegacyIptvChannels = db.prepare(
     `SELECT 1 FROM pragma_table_info('iptv_channels') WHERE name = 'logo'`
   ).get()
@@ -98,18 +100,7 @@ function createTables(db: Database.Database) {
     db.exec('DROP TABLE iptv_channels')
   }
 
-  // One-shot migration: g3 adds canonical_channel_id + user_flagged to streams.
-  // ADD COLUMN is safe on existing rows (NULL / 0 defaults).
-  const streamsHasCanonical = db.prepare(
-    `SELECT 1 FROM pragma_table_info('streams') WHERE name = 'canonical_channel_id'`
-  ).get()
-  if (!streamsHasCanonical) {
-    console.log('[DB] Migrating streams: adding canonical_channel_id + user_flagged')
-    db.exec(`ALTER TABLE streams ADD COLUMN canonical_channel_id TEXT REFERENCES canonical_channels(id) ON DELETE SET NULL`)
-    db.exec(`ALTER TABLE streams ADD COLUMN user_flagged INTEGER NOT NULL DEFAULT 0`)
-  }
-
-  // One-shot migration: g3 re-keys channel_user_data from stream_id → canonical_channel_id.
+  // g3: channel_user_data re-keys from stream_id → canonical_channel_id.
   // Data is expendable (pre-release, user re-favorites after migration).
   const chanUdHasStreamId = db.prepare(
     `SELECT 1 FROM pragma_table_info('channel_user_data') WHERE name = 'stream_id'`
@@ -117,23 +108,6 @@ function createTables(db: Database.Database) {
   if (chanUdHasStreamId) {
     console.log('[DB] Migrating channel_user_data: re-keying to canonical_channel_id (data dropped)')
     db.exec(`DROP TABLE channel_user_data`)
-  }
-
-  // One-shot migration: canonical_channels gains alt_names (JSON array of
-  // aliases copied from iptv-org). Used by canonical_fts so searches like
-  // "CP" can find "Canal Plus". Pre-existing rows get NULL and will be
-  // repopulated next canonical build.
-  const canonicalHasAltNames = db.prepare(
-    `SELECT 1 FROM pragma_table_info('canonical_channels') WHERE name = 'alt_names'`
-  ).get()
-  if (!canonicalHasAltNames) {
-    const canonicalTableExists = db.prepare(
-      `SELECT 1 FROM sqlite_master WHERE type='table' AND name='canonical_channels'`
-    ).get()
-    if (canonicalTableExists) {
-      console.log('[DB] Migrating canonical_channels: adding alt_names')
-      db.exec(`ALTER TABLE canonical_channels ADD COLUMN alt_names TEXT`)
-    }
   }
 
   db.exec(`
@@ -398,8 +372,33 @@ function createTables(db: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_iptv_channels_name ON iptv_channels(name);
   `)
 
-  // One-shot migration: iptv_channels gains `logo` column for the URL picked
-  // from iptv-org's sibling logos.json feed (channels.json carries no logos).
+  // ─── Additive migrations (run against existing tables from CREATE above) ───
+
+  // g3: streams gains canonical_channel_id + user_flagged. Fresh DBs already
+  // have these columns from the CREATE block; pragma check no-ops. Fires only
+  // on pre-g3 DBs where the CREATE block was a no-op on existing streams.
+  const streamsHasCanonical = db.prepare(
+    `SELECT 1 FROM pragma_table_info('streams') WHERE name = 'canonical_channel_id'`
+  ).get()
+  if (!streamsHasCanonical) {
+    console.log('[DB] Migrating streams: adding canonical_channel_id + user_flagged')
+    db.exec(`ALTER TABLE streams ADD COLUMN canonical_channel_id TEXT REFERENCES canonical_channels(id) ON DELETE SET NULL`)
+    db.exec(`ALTER TABLE streams ADD COLUMN user_flagged INTEGER NOT NULL DEFAULT 0`)
+  }
+
+  // g3: canonical_channels gains alt_names (JSON array of iptv-org aliases).
+  // Used by canonical_fts so searches like "CP" can find "Canal Plus".
+  // Pre-existing rows get NULL and are repopulated on next canonical build.
+  const canonicalHasAltNames = db.prepare(
+    `SELECT 1 FROM pragma_table_info('canonical_channels') WHERE name = 'alt_names'`
+  ).get()
+  if (!canonicalHasAltNames) {
+    console.log('[DB] Migrating canonical_channels: adding alt_names')
+    db.exec(`ALTER TABLE canonical_channels ADD COLUMN alt_names TEXT`)
+  }
+
+  // iptv_channels gains `logo` column for the URL picked from iptv-org's
+  // sibling logos.json feed (channels.json carries no logos).
   const iptvHasLogo = db.prepare(
     `SELECT 1 FROM pragma_table_info('iptv_channels') WHERE name = 'logo'`
   ).get()

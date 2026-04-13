@@ -166,6 +166,8 @@ settings
 
 **g2 FTS5 layer.** Single `content_fts` virtual table (id/source_id/type UNINDEXED, title searchable) using `unicode61 remove_diacritics 2` tokenizer. `ftsEnabled` toggle (default false in store, but forced to true after every index build). Query preprocessing folds Latin ligatures (œ→oe, æ→ae, ß→ss, ﬁ→fi, ﬂ→fl, ĳ→ij) and appends `*` for prefix match. Index build folds same ligatures via registered `fold_ligatures()` SQLite scalar in INSERT...SELECT. Build yields to the event loop between 5000-row batches so UI stays responsive. FTS runs automatically at the end of every source sync. Grid views augment FTS with LIKE when <10 results (`ftsFallback: true`). Home/Discover stays FTS-only for speed.
 
+**Generations model.** `g` = generation. Each generation is **cumulative** — it inherits everything from prior generations. g2 includes all of g1; g3 includes all of g2; etc.
+
 **Tiered search roadmap:**
 - g1: LIKE on provider titles (DONE)
 - g2: FTS5 on streams + series_sources (DONE)

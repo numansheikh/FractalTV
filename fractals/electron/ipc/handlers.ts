@@ -1406,8 +1406,15 @@ export function registerHandlers() {
     if (!filterIds.length) return { groups: [], total: 0 }
 
     const sourceList = filterIds.map(() => '?').join(',')
-    const catFilter = categoryName
-      ? `AND EXISTS (SELECT 1 FROM json_each(cc.categories) WHERE value = ?)`
+    // Category filter runs against provider categories (`categories.name` via
+    // `stream_categories`), not iptv-org canonical tags. The sidebar count
+    // lives in that namespace so both queries must agree.
+    const catJoin = categoryName
+      ? `AND EXISTS (
+          SELECT 1 FROM stream_categories sc
+          JOIN categories cat ON cat.id = sc.category_id
+          WHERE sc.stream_id = s.id AND cat.name = ?
+        )`
       : ''
     const catParams: unknown[] = categoryName ? [categoryName] : []
     const canonicalSortCol: Record<string, string> = {
@@ -1426,13 +1433,13 @@ export function registerHandlers() {
       WHERE s.canonical_channel_id = cc.id
         AND s.type = 'live'
         AND s.source_id IN (${sourceList})
+        ${catJoin}
     )`
 
     const total = (sqlite.prepare(`
       SELECT COUNT(*) as cnt
       FROM canonical_channels cc
       WHERE ${existsClause}
-      ${catFilter}
     `).get(...filterIds, ...catParams) as { cnt: number }).cnt
 
     if (total === 0) return { groups: [], total: 0 }
@@ -1452,7 +1459,6 @@ export function registerHandlers() {
         cc.logo_url AS poster_url
       FROM canonical_channels cc
       WHERE ${existsClause}
-      ${catFilter}
       ORDER BY ${canonicalSortCol[sortBy] ?? 'cc.title'} ${dir}
       LIMIT ? OFFSET ?
     `).all(...filterIds, ...catParams, limit, offset) as any[]
@@ -1610,6 +1616,10 @@ function hydrateCanonicalLive(
   const sqlite = getSqlite()
   const idList = ids.map(() => '?').join(',')
   const sourceList = filterIds.map(() => '?').join(',')
+  // 'rank-order' is a sentinel: caller wants to preserve the order of `ids`
+  // itself (e.g. FTS rank). Skip SQL-side ORDER BY and sort in JS below.
+  const preserveCallerOrder = orderBy === 'rank-order'
+  const sqlOrderBy = preserveCallerOrder ? 'cc.id' : orderBy
   const rows = sqlite.prepare(`
     SELECT ${G3_LIVE_SELECT}
     FROM canonical_channels cc
@@ -1617,10 +1627,10 @@ function hydrateCanonicalLive(
     JOIN sources src ON src.id = s.source_id AND src.disabled = 0 AND src.id IN (${sourceList})
     WHERE cc.id IN (${idList})
     GROUP BY cc.id
-    ORDER BY ${orderBy}
+    ORDER BY ${sqlOrderBy}
   `).all(...filterIds, ...ids) as any[]
 
-  if (orderBy !== 'cc.title ASC') {
+  if (preserveCallerOrder || orderBy !== 'cc.title ASC') {
     const pos: Record<string, number> = {}
     ids.forEach((id, i) => { pos[id] = i })
     rows.sort((a, b) => (pos[a.id] ?? 0) - (pos[b.id] ?? 0))
@@ -1716,26 +1726,58 @@ function g3SearchLive(
 ): unknown[] {
   const sqlite = getSqlite()
   const sourceList = filterIds.map(() => '?').join(',')
-  const ftsQuery = buildFtsQuery(query)
-  if (!ftsQuery) return []
-  const catFilter = categoryName
-    ? `AND EXISTS (SELECT 1 FROM json_each(cc.categories) WHERE value = ?)`
+
+  // Category filter runs against provider categories via stream_categories,
+  // matching the namespace used by the sidebar count. `cc.categories` holds
+  // iptv-org tags which are a different namespace and can't be used here.
+  const catJoin = categoryName
+    ? `AND EXISTS (
+        SELECT 1 FROM stream_categories sc
+        JOIN categories cat ON cat.id = sc.category_id
+        WHERE sc.stream_id = s.id AND cat.name = ?
+      )`
     : ''
   const catParams: unknown[] = categoryName ? [categoryName] : []
 
-  const idRows = sqlite.prepare(`
-    SELECT fts.id
-    FROM canonical_fts fts
-    JOIN canonical_channels cc ON cc.id = fts.id
-    WHERE canonical_fts MATCH ?
-      AND EXISTS (
-        SELECT 1 FROM streams s
-        WHERE s.canonical_channel_id = cc.id AND s.type = 'live' AND s.source_id IN (${sourceList})
-      )
-      ${catFilter}
-    ORDER BY rank
-    LIMIT ?
-  `).all(ftsQuery, ...filterIds, ...catParams, limit) as { id: string }[]
+  const streamFilter = `EXISTS (
+    SELECT 1 FROM streams s
+    WHERE s.canonical_channel_id = cc.id
+      AND s.type = 'live'
+      AND s.source_id IN (${sourceList})
+      ${catJoin}
+  )`
+
+  const ftsQuery = buildFtsQuery(query)
+  let idRows: { id: string }[] = []
+  if (ftsQuery) {
+    idRows = sqlite.prepare(`
+      SELECT fts.id
+      FROM canonical_fts fts
+      JOIN canonical_channels cc ON cc.id = fts.id
+      WHERE canonical_fts MATCH ?
+        AND ${streamFilter}
+      ORDER BY rank
+      LIMIT ?
+    `).all(ftsQuery, ...filterIds, ...catParams, limit) as { id: string }[]
+  }
+
+  // LIKE fallback when canonical_fts is empty, stale, or the query didn't
+  // produce FTS terms. Matches canonical titles directly so synthetic rows
+  // (no alt_names) are still reachable.
+  if (!idRows.length) {
+    const trimmed = query.trim().replace(/[%_\\]/g, (m) => '\\' + m)
+    if (trimmed) {
+      const likeQ = `%${trimmed}%`
+      idRows = sqlite.prepare(`
+        SELECT cc.id
+        FROM canonical_channels cc
+        WHERE cc.title LIKE ? ESCAPE '\\'
+          AND ${streamFilter}
+        ORDER BY cc.title ASC
+        LIMIT ?
+      `).all(likeQ, ...filterIds, ...catParams, limit) as { id: string }[]
+    }
+  }
 
   if (!idRows.length) return []
   const ids = idRows.map(r => r.id)

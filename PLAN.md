@@ -8,6 +8,8 @@ Architecture, tech stack, schema, conventions, design language: see `fractals/CL
 
 ## Phases
 
+> **Naming convention:** `g` = generation. Each generation is **cumulative** — it inherits everything from the prior generation and adds its own layer on top. g2 includes all of g1; g3 includes all of g2; etc. When describing where a feature lives, attribute it to the generation it *entered* the stack.
+
 | Phase | Status | Scope |
 |---|---|---|
 | 0 | Complete | Core scaffold, DB, Xtream sync, FTS5 search, player, EPG, user data |
@@ -96,12 +98,14 @@ Branch: `search-rebuild-g1-g2-g3`
 - TV-oriented redesign pass (post-g3)
 
 ### Next dev session queue
+- [ ] **Add Source dialog: Test > Add prominence** — Test button should be the primary/prominent action in the Add Source dialog, Add secondary. User should be nudged to test credentials before committing. Currently inverted.
 - [ ] **Sources panel pipeline buttons** — add three separate action buttons per source: Reindex (FTS), Build Canonical, and the existing Sync. Each runs independently so you can re-run just canonical without a full resync. FTS toggle to move from prominent to a debug option in Settings → Data.
 
 ### iptv-org ingestion — parked (TTL/splash bundle)
 
 Design locked 2026-04-13 (see memory `project_iptv_ingestion_plan.md`). Not blocking; refresh-button enrichment rerun is enough for now. Pick these up together:
 - [ ] First-launch splash screen blocking UI while initial iptv-org pull runs (empty DB)
+  - **Alt idea (2026-04-13):** skip the splash — kick the iptv-org fetch in the background the moment the Add Source dialog mounts, so by the time the user finishes entering credentials the channel DB is populated. Open: race resolution if user submits fast (block sync vs proceed unenriched + re-enrich later), failure surfacing, trigger point (app mount vs dialog open).
 - [ ] TTL-expired gate on add-source flow (Hybrid C: empty → block, populated → parallel)
 - [ ] TTL-expired gate on manual sync flow (same Hybrid C behavior)
 
