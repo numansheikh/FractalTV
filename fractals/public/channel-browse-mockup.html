@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Live Browse — Channel Groups</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0 }
+  body {
+    background: #f0eff7;
+    color: #1a1828;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 13px;
+  }
+
+  /* ── Tabs to switch between views ── */
+  .tabs {
+    display: flex; gap: 0;
+    background: #e8e7f2; border-bottom: 2px solid #d0cfe8;
+    padding: 0 16px;
+  }
+  .tab {
+    padding: 10px 18px; font-size: 12px; font-weight: 600;
+    color: #7c78a0; cursor: pointer; border-bottom: 2px solid transparent;
+    margin-bottom: -2px; transition: color 0.1s, border-color 0.1s;
+  }
+  .tab:hover { color: #4a4870 }
+  .tab.active { color: #7c4dff; border-bottom-color: #7c4dff; }
+
+  .view { display: none; }
+  .view.active { display: flex; height: calc(100vh - 40px); }
+
+  /* ── Shell ── */
+  .sidebar {
+    width: 168px; flex-shrink: 0;
+    background: #e8e7f2; border-right: 1px solid #d0cfe8;
+    display: flex; flex-direction: column; overflow-y: auto;
+  }
+  .sidebar-header {
+    padding: 14px 12px 10px; font-size: 10px; font-weight: 700;
+    letter-spacing: 0.07em; text-transform: uppercase; color: #7c78a0;
+  }
+  .sidebar-item {
+    padding: 6px 12px; font-size: 12px; color: #4a4870;
+    cursor: pointer; display: flex; justify-content: space-between;
+    align-items: center; transition: background 0.1s;
+  }
+  .sidebar-item:hover { background: #dddcee }
+  .sidebar-item.active { background: #7c4dff18; color: #7c4dff; font-weight: 600; }
+  .sidebar-count { font-size: 10px; color: #a0a0c0; }
+  .sidebar-item.active .sidebar-count { color: #a080ff }
+
+  .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+  .commandbar {
+    height: 44px; background: #eceaf8; border-bottom: 1px solid #d0cfe8;
+    display: flex; align-items: center; padding: 0 16px; gap: 10px; flex-shrink: 0;
+  }
+  .search-box {
+    flex: 1; height: 28px; background: #fff; border: 1px solid #d0cfe8;
+    border-radius: 6px; display: flex; align-items: center;
+    padding: 0 10px; gap: 6px; color: #9894bc; font-size: 12px;
+  }
+  .content { flex: 1; overflow-y: auto; padding: 16px 16px 40px; }
+
+  /* ── Groups ── */
+  .groups { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; }
+
+  .group {
+    background: #fff; border: 1px solid #d8d7ee; border-radius: 10px;
+    overflow: hidden; display: inline-flex; flex-direction: row;
+    align-items: flex-start; max-width: 100%;
+  }
+
+  /* Info panel */
+  .info-panel {
+    width: 140px; flex-shrink: 0; padding: 12px 12px 10px;
+    border-right: 1px solid #ebebf5; cursor: pointer;
+    transition: background 0.12s; display: flex;
+    flex-direction: column; gap: 4px;
+  }
+  .info-panel:hover { background: #f5f4ff }
+  .info-panel:hover .info-title { color: #7c4dff }
+  .info-title { font-size: 12px; font-weight: 700; color: #1a1828; line-height: 1.2; transition: color 0.12s; }
+  .info-meta { display: flex; flex-wrap: wrap; gap: 3px; align-items: center; }
+  .info-flag { font-size: 12px; line-height: 1 }
+  .info-badge { font-size: 9px; font-weight: 600; padding: 1px 4px; border-radius: 3px; background: #ebebf5; color: #7c78a0; line-height: 1.5; }
+  .info-network { font-size: 9px; color: #9894bc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .info-desc { font-size: 9px; color: #b0aed0; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .info-hint { font-size: 9px; color: #c8c5e8; margin-top: 2px; }
+
+
+  /* Streams area */
+  .streams { display: flex; flex-direction: row; align-items: flex-start; padding: 10px; gap: 8px; }
+
+  /* Stream card — no category pill inside */
+  .stream-card {
+    width: 110px; flex-shrink: 0; display: flex; flex-direction: column;
+    border-radius: 7px; overflow: visible; border: 1px solid #e0dfee;
+    cursor: pointer; position: relative; background: #fafafa;
+    transition: border-color 0.12s, box-shadow 0.12s;
+  }
+  .stream-card:hover { border-color: #b0a8f0; box-shadow: 0 2px 8px rgba(124,77,255,0.12); }
+
+  .stream-inner { border-radius: 7px; overflow: hidden; }
+
+  .stream-logo {
+    aspect-ratio: 16/9; background: #f0eff7;
+    display: flex; align-items: center; justify-content: center;
+    position: relative; overflow: hidden;
+  }
+  .stream-initials { font-size: 12px; font-weight: 800; opacity: 0.3; }
+  .stream-body { padding: 4px 7px 5px 10px; background: #fafafa; }
+  .stream-title { font-size: 10px; font-weight: 600; color: #2a2838; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* Category pill — below the card, clickable (used in All Channels view) */
+  .stream-cat-wrap { padding: 4px 2px 0 4px; }
+  .stream-cat {
+    display: inline-block; font-size: 9px; font-weight: 600;
+    padding: 3px 8px; border-radius: 10px;
+    background: #ebebf5; color: #9894bc; line-height: 1.5;
+    cursor: pointer; border: 1px solid transparent;
+    transition: background 0.1s, color 0.1s, border-color 0.1s;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+  }
+  .stream-cat:hover { background: #ebe8ff; color: #7c4dff; border-color: #c8bfff }
+
+  /* Similar pill — replaces category pill in filtered/category views */
+  .similar-wrap { padding: 4px 2px 0 4px; }
+  .similar-pill {
+    display: inline-flex; align-items: center; gap: 3px;
+    font-size: 9px; font-weight: 700; font-style: italic;
+    padding: 3px 8px; border-radius: 10px;
+    color: #7c4dff; line-height: 1.5;
+    cursor: pointer;
+    border: 1px solid #c4b5fd;
+    background: #f0edff;
+    transition: background 0.12s, color 0.12s, border-color 0.12s, box-shadow 0.12s;
+    white-space: nowrap;
+  }
+  .similar-pill:hover {
+    background: #ede0ff; color: #5b21b6;
+    border-color: #a78bfa;
+    box-shadow: 0 1px 4px rgba(124,77,255,0.18);
+  }
+  .similar-pill svg { flex-shrink: 0; }
+
+
+  /* source stripe */
+  .s-stripe { position: absolute; left: 0; top: 0; bottom: 0; width: 3px; display: flex; flex-direction: column; gap: 1px; z-index: 2; }
+  .s-seg { flex: 1 }
+
+  /* play overlay */
+  .play-ov { position: absolute; inset: 0; background: rgba(124,77,255,0.15); display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.15s; }
+  .stream-card:hover .play-ov { opacity: 1 }
+  .play-btn { width: 22px; height: 22px; border-radius: 50%; background: #7c4dff; display: flex; align-items: center; justify-content: center; }
+
+  /* more chip */
+  .more-chip {
+    align-self: center; flex-shrink: 0; border-radius: 20px;
+    border: 1px solid #e0dfee; padding: 3px 8px;
+    font-size: 9px; font-weight: 600; color: #b0aed0;
+    cursor: pointer; background: transparent; white-space: nowrap;
+    transition: border-color 0.12s, color 0.12s;
+  }
+  .more-chip:hover { border-color: #9894bc; color: #7c78a0 }
+
+  /* source colors */
+  .c1 { background: #7c4dff }
+  .c2 { background: #e05555 }
+  .c3 { background: #4a9eff }
+  .c4 { background: #2dba85 }
+
+  /* section note */
+  .note {
+    font-size: 10px; color: #9894bc; margin-bottom: 14px;
+    padding: 7px 10px; background: #f5f4ff;
+    border-radius: 6px; border: 1px solid #e8e7f5;
+  }
+</style>
+</head>
+<body>
+
+<div class="tabs">
+  <div class="tab active" onclick="switchTab('all')">All Channels</div>
+  <div class="tab" onclick="switchTab('cat')">Filtered: PK | News</div>
+</div>
+
+<!-- ═══ VIEW 1: All Channels ═══ -->
+<div class="view active" id="view-all">
+  <div class="sidebar">
+    <div class="sidebar-header">Categories</div>
+    <div class="sidebar-item active">All Channels <span class="sidebar-count">66,731</span></div>
+    <div class="sidebar-item">Favorites <span class="sidebar-count">12</span></div>
+    <div class="sidebar-item">PK | News <span class="sidebar-count">1,240</span></div>
+    <div class="sidebar-item">PK | Entertainment <span class="sidebar-count">890</span></div>
+    <div class="sidebar-item">UK | General <span class="sidebar-count">430</span></div>
+    <div class="sidebar-item">US | Sports <span class="sidebar-count">2,100</span></div>
+  </div>
+  <div class="main">
+    <div class="commandbar">
+      <div class="search-box">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        Search channels…
+      </div>
+    </div>
+    <div class="content">
+      <div class="note">All channels — category pills on cards are clickable, no "also in" hints needed here.</div>
+      <div class="groups">
+
+        <!-- 1 stream -->
+        <div class="group">
+          <div class="info-panel">
+            <div class="info-title">Hum News</div>
+            <div class="info-meta"><span class="info-flag">🇵🇰</span><span class="info-badge">News</span></div>
+            <div class="info-network">Hum Network Ltd.</div>
+            <div class="info-desc">Pakistani Urdu-language news channel.</div>
+            <div class="info-hint">↗ Details</div>
+          </div>
+          <div class="streams">
+            <div class="stream-card">
+              <div class="s-stripe"><div class="s-seg c1"></div></div>
+              <div class="stream-inner">
+                <div class="stream-logo"><span class="stream-initials" style="color:#7c4dff">HN</span><div class="play-ov"><div class="play-btn"><svg width="7" height="7" viewBox="0 0 24 24" fill="white"><polygon points="5,3 19,12 5,21"/></svg></div></div></div>
+                <div class="stream-body"><div class="stream-title">Hum News HD</div></div>
+              </div>
+              <div class="stream-cat-wrap"><span class="stream-cat">PK | News</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2 streams, same channel different cats -->
+        <div class="group">
+          <div class="info-panel">
+            <div class="info-title">Hum TV</div>
+            <div class="info-meta"><span class="info-flag">🇵🇰</span><span class="info-badge">Entertainment</span></div>
+            <div class="info-network">Hum Network Ltd.</div>
+            <div class="info-desc">Pakistan's leading entertainment channel.</div>
+            <div class="info-hint">↗ Details</div>
+          </div>
+          <div class="streams">
+            <div class="stream-card">
+              <div class="s-stripe"><div class="s-seg c1"></div></div>
+              <div class="stream-inner">
+                <div class="stream-logo"><span class="stream-initials" style="color:#7c4dff">HT</span><div class="play-ov"><div class="play-btn"><svg width="7" height="7" viewBox="0 0 24 24" fill="white"><polygon points="5,3 19,12 5,21"/></svg></div></div></div>
+                <div class="stream-body"><div class="stream-title">Hum TV 4K</div></div>
+              </div>
+              <div class="stream-cat-wrap"><span class="stream-cat">PK | Entertainment</span></div>
+            </div>
+            <div class="stream-card">
+              <div class="s-stripe"><div class="s-seg c2"></div></div>
+              <div class="stream-inner">
+                <div class="stream-logo"><span class="stream-initials" style="color:#e05555">HT</span><div class="play-ov"><div class="play-btn"><svg width="7" height="7" viewBox="0 0 24 24" fill="white"><polygon points="5,3 19,12 5,21"/></svg></div></div></div>
+                <div class="stream-body"><div class="stream-title">Hum TV (UK)</div></div>
+              </div>
+              <div class="stream-cat-wrap"><span class="stream-cat">UK | Entertainment</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3 streams -->
+        <div class="group">
+          <div class="info-panel">
+            <div class="info-title">ARY News</div>
+            <div class="info-meta"><span class="info-flag">🇵🇰</span><span class="info-badge">News</span></div>
+            <div class="info-network">ARY Digital Network</div>
+            <div class="info-desc">Major Pakistani breaking news channel.</div>
+            <div class="info-hint">↗ Details</div>
+          </div>
+          <div class="streams">
+            <div class="stream-card">
+              <div class="s-stripe"><div class="s-seg c1"></div></div>
+              <div class="stream-inner">
+                <div class="stream-logo"><span class="stream-initials" style="color:#7c4dff">AR</span><div class="play-ov"><div class="play-btn"><svg width="7" height="7" viewBox="0 0 24 24" fill="white"><polygon points="5,3 19,12 5,21"/></svg></div></div></div>
+                <div class="stream-body"><div class="stream-title">ARY News SD</div></div>
+              </div>
+              <div class="stream-cat-wrap"><span class="stream-cat">PK | News</span></div>
+            </div>
+            <div class="stream-card">
+              <div class="s-stripe"><div class="s-seg c2"></div></div>
+              <div class="stream-inner">
+                <div class="stream-logo"><span class="stream-initials" style="color:#e05555">AR</span><div class="play-ov"><div class="play-btn"><svg width="7" height="7" viewBox="0 0 24 24" fill="white"><polygon points="5,3 19,12 5,21"/></svg></div></div></div>
+                <div class="stream-body"><div class="stream-title">ARY News HD</div></div>
+              </div>
+              <div class="stream-cat-wrap"><span class="stream-cat">PK | News</span></div>
+            </div>
+            <div class="stream-card">
+              <div class="s-stripe"><div class="s-seg c3"></div></div>
+              <div class="stream-inner">
+                <div class="stream-logo"><span class="stream-initials" style="color:#4a9eff">AR</span><div class="play-ov"><div class="play-btn"><svg width="7" height="7" viewBox="0 0 24 24" fill="white"><polygon points="5,3 19,12 5,21"/></svg></div></div></div>
+                <div class="stream-body"><div class="stream-title">ARY News FHD</div></div>
+              </div>
+              <div class="stream-cat-wrap"><span class="stream-cat">PK | News</span></div>
+            </div>
+            <div class="more-chip">+2</div>
+          </div>
+        </div>
+
+        <!-- BBC — cross-category streams -->
+        <div class="group">
+          <div class="info-panel">
+            <div class="info-title">BBC News</div>
+            <div class="info-meta"><span class="info-flag">🇬🇧</span><span class="info-badge">News</span></div>
+            <div class="info-network">BBC</div>
+            <div class="info-desc">24-hour international news from the BBC.</div>
+            <div class="info-hint">↗ Details</div>
+          </div>
+          <div class="streams">
+            <div class="stream-card">
+              <div class="s-stripe"><div class="s-seg c3"></div></div>
+              <div class="stream-inner">
+                <div class="stream-logo"><span class="stream-initials" style="color:#4a9eff">BBC</span><div class="play-ov"><div class="play-btn"><svg width="7" height="7" viewBox="0 0 24 24" fill="white"><polygon points="5,3 19,12 5,21"/></svg></div></div></div>
+                <div class="stream-body"><div class="stream-title">BBC News HD</div></div>
+              </div>
+              <div class="stream-cat-wrap"><span class="stream-cat">UK | News</span></div>
+            </div>
+            <div class="stream-card">
+              <div class="s-stripe"><div class="s-seg c1"></div></div>
+              <div class="stream-inner">
+                <div class="stream-logo"><span class="stream-initials" style="color:#7c4dff">BBC</span><div class="play-ov"><div class="play-btn"><svg width="7" height="7" viewBox="0 0 24 24" fill="white"><polygon points="5,3 19,12 5,21"/></svg></div></div></div>
+                <div class="stream-body"><div class="stream-title">BBC News FHD</div></div>
+              </div>
+              <div class="stream-cat-wrap"><span class="stream-cat">US | News</span></div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ VIEW 2: Filtered by PK | News ═══ -->
+<div class="view" id="view-cat">
+  <div class="sidebar">
+    <div class="sidebar-header">Categories</div>
+    <div class="sidebar-item">All Channels <span class="sidebar-count">66,731</span></div>
+    <div class="sidebar-item">Favorites <span class="sidebar-count">12</span></div>
+    <div class="sidebar-item active">PK | News <span class="sidebar-count">1,240</span></div>
+    <div class="sidebar-item">PK | Entertainment <span class="sidebar-count">890</span></div>
+    <div class="sidebar-item">UK | General <span class="sidebar-count">430</span></div>
+    <div class="sidebar-item">US | Sports <span class="sidebar-count">2,100</span></div>
+  </div>
+  <div class="main">
+    <div class="commandbar">
+      <div class="search-box">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        Search channels…
+      </div>
+    </div>
+    <div class="content">
+      <div class="note">Filtered to <strong>PK | News</strong> — only streams in this category shown per group. "Also in" hints appear when the channel has streams in other categories too.</div>
+      <div class="groups">
+
+        <!-- Hum News — only PK|News stream, no also-in needed -->
+        <div class="group">
+          <div class="info-panel">
+            <div class="info-title">Hum News</div>
+            <div class="info-meta"><span class="info-flag">🇵🇰</span><span class="info-badge">News</span></div>
+            <div class="info-network">Hum Network Ltd.</div>
+            <div class="info-desc">Pakistani Urdu-language news channel.</div>
+            <div class="info-hint">↗ Details</div>
+          </div>
+          <div class="streams">
+            <div class="stream-card">
+              <div class="s-stripe"><div class="s-seg c1"></div></div>
+              <div class="stream-inner">
+                <div class="stream-logo"><span class="stream-initials" style="color:#7c4dff">HN</span><div class="play-ov"><div class="play-btn"><svg width="7" height="7" viewBox="0 0 24 24" fill="white"><polygon points="5,3 19,12 5,21"/></svg></div></div></div>
+                <div class="stream-body"><div class="stream-title">Hum News HD</div></div>
+              </div>
+              <div class="similar-wrap">
+                <span class="similar-pill" title="Search for channels like Hum News">
+                  <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="10" cy="10" r="6"/><line x1="21" y1="21" x2="14.65" y2="14.65"/></svg>
+                  similar
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ARY News — 2 PK|News streams shown, 1 in UK|News hidden → also-in hint -->
+        <div class="group">
+          <div class="info-panel">
+            <div class="info-title">ARY News</div>
+            <div class="info-meta"><span class="info-flag">🇵🇰</span><span class="info-badge">News</span></div>
+            <div class="info-network">ARY Digital Network</div>
+            <div class="info-desc">Major Pakistani breaking news channel.</div>
+            <div class="info-hint">↗ Details</div>
+          </div>
+          <div class="streams">
+            <div class="stream-card">
+              <div class="s-stripe"><div class="s-seg c1"></div></div>
+              <div class="stream-inner">
+                <div class="stream-logo"><span class="stream-initials" style="color:#7c4dff">AR</span><div class="play-ov"><div class="play-btn"><svg width="7" height="7" viewBox="0 0 24 24" fill="white"><polygon points="5,3 19,12 5,21"/></svg></div></div></div>
+                <div class="stream-body"><div class="stream-title">ARY News SD</div></div>
+              </div>
+              <div class="similar-wrap">
+                <span class="similar-pill" title="Search for channels like ARY News">
+                  <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="10" cy="10" r="6"/><line x1="21" y1="21" x2="14.65" y2="14.65"/></svg>
+                  similar
+                </span>
+              </div>
+            </div>
+            <div class="stream-card">
+              <div class="s-stripe"><div class="s-seg c2"></div></div>
+              <div class="stream-inner">
+                <div class="stream-logo"><span class="stream-initials" style="color:#e05555">AR</span><div class="play-ov"><div class="play-btn"><svg width="7" height="7" viewBox="0 0 24 24" fill="white"><polygon points="5,3 19,12 5,21"/></svg></div></div></div>
+                <div class="stream-body"><div class="stream-title">ARY News HD</div></div>
+              </div>
+              <div class="similar-wrap">
+                <span class="similar-pill" title="Search for channels like ARY News">
+                  <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="10" cy="10" r="6"/><line x1="21" y1="21" x2="14.65" y2="14.65"/></svg>
+                  similar
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Geo News — 1 PK|News stream, also in PK|Entertainment -->
+        <div class="group">
+          <div class="info-panel">
+            <div class="info-title">Geo News</div>
+            <div class="info-meta"><span class="info-flag">🇵🇰</span><span class="info-badge">News</span></div>
+            <div class="info-network">Geo TV</div>
+            <div class="info-desc">Pakistan's most-watched Urdu news channel.</div>
+            <div class="info-hint">↗ Details</div>
+          </div>
+          <div class="streams">
+            <div class="stream-card">
+              <div class="s-stripe"><div class="s-seg c3"></div></div>
+              <div class="stream-inner">
+                <div class="stream-logo"><span class="stream-initials" style="color:#4a9eff">GN</span><div class="play-ov"><div class="play-btn"><svg width="7" height="7" viewBox="0 0 24 24" fill="white"><polygon points="5,3 19,12 5,21"/></svg></div></div></div>
+                <div class="stream-body"><div class="stream-title">Geo News HD</div></div>
+              </div>
+              <div class="similar-wrap">
+                <span class="similar-pill" title="Search for channels like Geo News">
+                  <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="10" cy="10" r="6"/><line x1="21" y1="21" x2="14.65" y2="14.65"/></svg>
+                  similar
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- CNN — 1 PK|News stream, also in US|News, UK|News -->
+        <div class="group">
+          <div class="info-panel">
+            <div class="info-title">CNN International</div>
+            <div class="info-meta"><span class="info-flag">🇺🇸</span><span class="info-badge">News</span></div>
+            <div class="info-network">Warner Bros. Discovery</div>
+            <div class="info-desc">Global 24-hour news network.</div>
+            <div class="info-hint">↗ Details</div>
+          </div>
+          <div class="streams">
+            <div class="stream-card">
+              <div class="s-stripe"><div class="s-seg c4"></div></div>
+              <div class="stream-inner">
+                <div class="stream-logo"><span class="stream-initials" style="color:#2dba85">CNN</span><div class="play-ov"><div class="play-btn"><svg width="7" height="7" viewBox="0 0 24 24" fill="white"><polygon points="5,3 19,12 5,21"/></svg></div></div></div>
+                <div class="stream-body"><div class="stream-title">CNN Intl (PK)</div></div>
+              </div>
+              <div class="similar-wrap">
+                <span class="similar-pill" title="Search for channels like CNN International">
+                  <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="10" cy="10" r="6"/><line x1="21" y1="21" x2="14.65" y2="14.65"/></svg>
+                  similar
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  function switchTab(id) {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'))
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'))
+    document.getElementById('view-' + id).classList.add('active')
+    event.target.classList.add('active')
+  }
+</script>
+</body>
+</html>

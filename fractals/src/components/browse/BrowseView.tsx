@@ -5,6 +5,7 @@ import { api } from '@/lib/api'
 import { ContentItem } from './ContentCard'
 import { PosterCard } from './PosterCard'
 import { ChannelCard } from './ChannelCard'
+import { ChannelGroupView } from './ChannelGroupView'
 import { Pagination } from './Pagination'
 import { useSearchStore, ContentType } from '@/stores/search.store'
 import { useAppStore } from '@/stores/app.store'
@@ -147,14 +148,36 @@ export function BrowseView({ onAddSource, onSyncSource, onRemoveSource, onSelect
       })
       return res as { items: ContentItem[]; total: number }
     },
-    enabled: !isSearching && sourcesCount > 0,
+    enabled: !isSearching && sourcesCount > 0 && type !== 'live',
+    staleTime: 30_000,
+    placeholderData: (prev) => prev,
+  })
+
+  // ── Grouped live browse — only for Live tab (g3) ────────────────────────
+  const { data: liveGroupedData, isFetching: liveGroupedFetching } = useQuery({
+    queryKey: ['browse-live-grouped', activeCategory, selectedSourceIds, page, sortIdx],
+    queryFn: async () => {
+      const res = await api.content.browseLiveGrouped({
+        categoryName: activeCategory ?? undefined,
+        sourceIds: srcFilter,
+        sortBy: sort.value,
+        sortDir: sort.dir,
+        limit: 30,
+        offset: (page - 1) * 30,
+      })
+      return res as { groups: any[]; total: number }
+    },
+    enabled: !isSearching && sourcesCount > 0 && type === 'live',
     staleTime: 30_000,
     placeholderData: (prev) => prev,
   })
 
   const items = browseData?.items ?? []
-  const total = browseData?.total ?? 0
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  const liveGroups = liveGroupedData?.groups ?? []
+  const total = type === 'live' ? (liveGroupedData?.total ?? 0) : (browseData?.total ?? 0)
+  const LIVE_PAGE_SIZE = 30
+  const effectivePageSize = type === 'live' ? LIVE_PAGE_SIZE : PAGE_SIZE
+  const totalPages = Math.max(1, Math.ceil(total / effectivePageSize))
 
   // Bulk-load user data for visible items (card indicators)
   const loadBulk = useUserStore((s) => s.loadBulk)
@@ -318,7 +341,7 @@ export function BrowseView({ onAddSource, onSyncSource, onRemoveSource, onSelect
             {activeCategory && <span style={{ marginLeft: 4 }}>in <span style={{ color: 'var(--color-text-secondary)' }}>{activeCategory}</span></span>}
           </span>
 
-          {browseFetching && (
+          {(browseFetching || liveGroupedFetching) && (
             <span style={{ fontSize: 10, color: 'var(--color-accent)', opacity: 0.7 }}>Loading…</span>
           )}
 
@@ -369,18 +392,22 @@ export function BrowseView({ onAddSource, onSyncSource, onRemoveSource, onSelect
               onSelect={onSelectContent} scopedTo={activeCategory}
             />
           ) : (
-            <BrowsePane key={`browse-${type}-${activeCategory ?? ''}`} items={items} fetching={browseFetching} onSelect={onSelectContent} type={type} hasCategory={!!activeCategory} />
+            <BrowsePane key={`browse-${type}-${activeCategory ?? ''}`}
+              items={items} fetching={browseFetching || liveGroupedFetching}
+              liveGroups={liveGroups}
+              onSelect={onSelectContent} type={type} hasCategory={!!activeCategory}
+            />
           )}
         </AnimatePresence>
       </div>
 
       {/* ── Pagination ─────────────────────────────────────────────────── */}
-      {!isSearching && total > PAGE_SIZE && (
+      {!isSearching && total > effectivePageSize && (
         <Pagination
           page={page}
           totalPages={totalPages}
           totalItems={total}
-          pageSize={PAGE_SIZE}
+          pageSize={effectivePageSize}
           onPage={(p) => { setPage(p); document.getElementById('browse-scroll')?.scrollTo(0, 0) }}
         />
       )}
@@ -473,11 +500,12 @@ function LoadMoreBtn({ onClick }: { onClick: () => void }) {
 
 // ── Browse pane ─────────────────────────────────────────────────────────────
 
-function BrowsePane({ items, fetching, onSelect, type, hasCategory }: {
-  items: ContentItem[]; fetching: boolean; onSelect: (item: ContentItem) => void; type: ContentType; hasCategory: boolean
+function BrowsePane({ items, fetching, liveGroups, onSelect, type, hasCategory }: {
+  items: ContentItem[]; fetching: boolean; liveGroups: any[]; onSelect: (item: ContentItem) => void; type: ContentType; hasCategory: boolean
 }) {
   const liveItems = items.filter(i => i.type === 'live')
   const mediaItems = items.filter(i => i.type !== 'live')
+  const isEmpty = type === 'live' ? liveGroups.length === 0 : items.length === 0
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.1 }}
@@ -486,7 +514,7 @@ function BrowsePane({ items, fetching, onSelect, type, hasCategory }: {
       {/* Personalized rows — only on default browse, no category filter */}
       {!hasCategory && <PersonalizedRows onSelect={onSelect} type={type} />}
 
-      {items.length === 0 && (
+      {isEmpty && (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', paddingTop: 80 }}>
           <p style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
             {fetching ? 'Loading…' : 'No content found'}
@@ -494,7 +522,13 @@ function BrowsePane({ items, fetching, onSelect, type, hasCategory }: {
         </div>
       )}
 
-      {liveItems.length > 0 && (
+      {/* Live tab — grouped canonical view */}
+      {type === 'live' && liveGroups.length > 0 && (
+        <ChannelGroupView groups={liveGroups} onSelect={onSelect} hasCategory={hasCategory} />
+      )}
+
+      {/* All tab — flat live grid + media grid */}
+      {type !== 'live' && liveItems.length > 0 && (
         <div style={{ marginBottom: 20 }}>
           {type === 'all' && <SectionLabel>Live TV</SectionLabel>}
           <ChannelGrid items={liveItems} onSelect={onSelect} />

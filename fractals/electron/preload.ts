@@ -23,6 +23,8 @@ export const api = {
     sync: (sourceId: string) => ipcRenderer.invoke('sources:sync', sourceId),
     cancelSync: (sourceId: string) => ipcRenderer.invoke('sources:sync:cancel', sourceId),
     buildFts: (sourceId: string) => ipcRenderer.invoke('sources:build-fts', sourceId),
+    buildLiveFts: (sourceId: string) => ipcRenderer.invoke('sources:build-live-fts', sourceId),
+    buildCanonical: (sourceId: string) => ipcRenderer.invoke('sources:build-canonical', sourceId),
     accountInfo: (sourceId: string) => ipcRenderer.invoke('sources:account-info', sourceId),
     startupCheck: () => ipcRenderer.invoke('sources:startup-check'),
     totalCount: () => ipcRenderer.invoke('sources:total-count'),
@@ -52,6 +54,8 @@ export const api = {
       ipcRenderer.invoke('content:get-catchup-url', args),
     browse: (args: { type?: 'live' | 'movie' | 'series'; categoryName?: string; sourceIds?: string[]; sortBy?: string; sortDir?: string; limit?: number; offset?: number }) =>
       ipcRenderer.invoke('content:browse', args),
+    browseLiveGrouped: (args: { categoryName?: string; sourceIds?: string[]; sortBy?: string; sortDir?: string; limit?: number; offset?: number }) =>
+      ipcRenderer.invoke('content:browse-live-grouped', args),
   },
 
   // Series
@@ -87,7 +91,7 @@ export const api = {
       ipcRenderer.invoke('user:reorder-favorites', order),
   },
 
-  // Channels (new schema — Phase A)
+  // Channels — g3 canonical-keyed
   channels: {
     favorites: (args?: { profileId?: string }) =>
       ipcRenderer.invoke('channels:favorites', args),
@@ -97,6 +101,12 @@ export const api = {
       ipcRenderer.invoke('channels:reorder-favorites', order),
     getData: (canonicalId: string) =>
       ipcRenderer.invoke('channels:get-data', canonicalId),
+    getCanonical: (canonicalId: string) =>
+      ipcRenderer.invoke('channels:get-canonical', canonicalId),
+    getVariants: (canonicalId: string) =>
+      ipcRenderer.invoke('channels:get-variants', canonicalId),
+    setPreferredStream: (args: { canonicalId: string; streamId: string }) =>
+      ipcRenderer.invoke('channels:set-preferred-stream', args),
   },
 
   // External player
@@ -146,6 +156,12 @@ export const api = {
   // Settings (key-value store)
   settings: {
     get: (key: string) => ipcRenderer.invoke('settings:get', key),
+    set: (key: string, value: string) => ipcRenderer.invoke('settings:set', { key, value }),
+  },
+
+  // iptv-org channel database (g3)
+  iptvOrg: {
+    refresh: () => ipcRenderer.invoke('iptv-org:refresh'),
   },
 
   // Events from main process

@@ -2,13 +2,15 @@ import { ipcMain, BrowserWindow, app, dialog } from 'electron'
 import { spawn } from 'child_process'
 import { existsSync, writeFileSync, readFileSync } from 'fs'
 import { join } from 'path'
+import { randomUUID } from 'crypto'
 import { Worker } from 'worker_threads'
-import { getDb, getSqlite, getSetting, rebuildFtsIfNeeded } from '../database/connection'
+import { getDb, getSqlite, getSetting, setSetting, rebuildFtsIfNeeded } from '../database/connection'
 import { sources } from '../database/schema'
 import { eq } from 'drizzle-orm'
 import { xtreamService } from '../services/xtream.service'
 import { m3uService } from '../services/m3u.service'
 import { syncEpg, getNowNext } from '../services/epg.service'
+import { normalizeForSearch } from '../lib/normalize'
 
 // ─── Minimal row interfaces ─────────────────────────────────────────────────
 
@@ -104,6 +106,19 @@ function resolveContent(sqlite: ReturnType<typeof getSqlite>, contentId: string)
   if (seriesRow) {
     return { kind: 'series', seriesSource: seriesRow }
   }
+  // g3: canonical channel id — resolve to the preferred (or first active) live stream
+  const canonicalRow = sqlite.prepare('SELECT id FROM canonical_channels WHERE id = ?').get(contentId) as { id: string } | undefined
+  if (canonicalRow) {
+    // Check for user's preferred stream first, else pick any active stream
+    const preferred = sqlite.prepare(
+      `SELECT preferred_stream_id FROM channel_user_data WHERE profile_id = ? AND canonical_channel_id = ?`
+    ).get(DEFAULT_PROFILE, contentId) as { preferred_stream_id?: string } | undefined
+    const streamId = preferred?.preferred_stream_id
+    const liveStream = streamId
+      ? sqlite.prepare(`SELECT * FROM streams WHERE id = ? AND type = 'live'`).get(streamId) as StreamRow | undefined
+      : sqlite.prepare(`SELECT s.* FROM streams s JOIN sources src ON src.id = s.source_id AND src.disabled = 0 WHERE s.canonical_channel_id = ? AND s.type = 'live' LIMIT 1`).get(contentId) as StreamRow | undefined
+    if (liveStream) return { kind: 'live', stream: liveStream }
+  }
   return null
 }
 
@@ -191,6 +206,39 @@ const G1_SERIES_SELECT = `
 // Aliases for any remaining references:
 const STREAM_SELECT = G1_STREAM_SELECT
 const SERIES_SELECT = G1_SERIES_SELECT
+
+// ─── g3: canonical channel SELECT — one card per canonical_channels row ───
+// Returns enriched channel data with variant/source aggregates.
+// poster_url: picks any stream thumbnail; variant_count: streams pointing to this canonical.
+const G3_LIVE_SELECT = `
+  cc.id                 AS id,
+  cc.id                 AS canonical_channel_id,
+  'live'                AS type,
+  cc.title              AS title,
+  cc.country,
+  cc.network,
+  cc.owners,
+  cc.categories,
+  cc.is_nsfw,
+  cc.launched,
+  cc.closed,
+  cc.replaced_by,
+  COALESCE(cc.logo_url, MIN(s.thumbnail_url)) AS poster_url,
+  cc.iptv_org_id,
+  COUNT(s.id)           AS variant_count,
+  COUNT(DISTINCT s.source_id) AS source_count,
+  GROUP_CONCAT(DISTINCT s.source_id) AS source_ids,
+  MIN(s.source_id)      AS primary_source_id,
+  MIN(s.id)             AS primary_stream_id,
+  MIN(s.category_id)    AS category_id,
+  MIN(COALESCE(cc.logo_url, s.thumbnail_url)) AS thumbnail_url,
+  MAX(CASE WHEN s.catchup_supported = 1 THEN 1 ELSE 0 END) AS catchup_supported,
+  MAX(s.catchup_days)   AS catchup_days,
+  MIN(s.epg_channel_id) AS epg_channel_id,
+  MIN(s.tvg_id)         AS tvg_id,
+  EXISTS(SELECT 1 FROM epg e JOIN streams es ON es.epg_channel_id = e.channel_external_id
+         WHERE es.canonical_channel_id = cc.id LIMIT 1) AS has_epg_data
+`
 
 // ─── Handler registration ─────────────────────────────────────────────────
 
@@ -309,9 +357,9 @@ export function registerHandlers() {
       WHERE EXISTS (SELECT 1 FROM series_sources WHERE id = @series_source_id)
     `)
     const insertChannelUd = sqlite.prepare(`
-      INSERT OR REPLACE INTO channel_user_data (profile_id, stream_id, is_favorite, fav_sort_order)
-      SELECT @profile_id, @stream_id, @is_favorite, @fav_sort_order
-      WHERE EXISTS (SELECT 1 FROM streams WHERE id = @stream_id)
+      INSERT OR REPLACE INTO channel_user_data (profile_id, canonical_channel_id, is_favorite, preferred_stream_id, fav_sort_order)
+      SELECT @profile_id, @canonical_channel_id, @is_favorite, @preferred_stream_id, @fav_sort_order
+      WHERE EXISTS (SELECT 1 FROM canonical_channels WHERE id = @canonical_channel_id)
     `)
 
     try {
@@ -360,6 +408,9 @@ export function registerHandlers() {
         sqlite.prepare(`DELETE FROM series_source_categories`).run()
         sqlite.prepare(`DELETE FROM series_sources`).run()
         sqlite.prepare(`DELETE FROM streams`).run()
+        // g3: canonical channels + FTS
+        sqlite.prepare(`DELETE FROM canonical_channels`).run()
+        sqlite.prepare(`DELETE FROM canonical_fts`).run()
         // Catalog + sources + settings
         sqlite.prepare(`DELETE FROM categories`).run()
         sqlite.prepare(`DELETE FROM sources`).run()
@@ -513,8 +564,11 @@ export function registerHandlers() {
             message: `Synced ${msg.catCount} categories, ${msg.totalItems.toLocaleString()} items`,
           })
           resolve({ success: true })
-          // Auto-build FTS index after every successful sync (fire and forget).
-          buildFtsForSource(sourceId, win).catch((err) => console.error('[fts] post-sync build failed:', err))
+          // Auto-build FTS index after every successful sync, then canonical layer + canonical FTS.
+          buildFtsForSource(sourceId, win)
+            .then(() => buildCanonicalLayer(sourceId, win))
+            .then(() => buildCanonicalFts(win))
+            .catch((err) => console.error('[canonical] post-sync build failed:', err))
           // Kick EPG sync in background after successful source sync.
           const src = sqlite.prepare('SELECT * FROM sources WHERE id = ?').get(sourceId) as SourceRow | undefined
           if (src?.server_url) runEpgSync(sqlite, win, sourceId, src)
@@ -565,6 +619,50 @@ export function registerHandlers() {
   ipcMain.handle('sources:build-fts', async (event, sourceId: string) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     return buildFtsForSource(sourceId, win)
+  })
+
+  ipcMain.handle('sources:build-live-fts', async (event, sourceId: string) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    return buildLiveFtsForSource(sourceId, win)
+  })
+
+  // ── Canonical layer (g3) ─────────────────────────────────────────────────
+  ipcMain.handle('sources:build-canonical', async (event, sourceId: string) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const result = await buildCanonicalLayer(sourceId, win)
+    if (result.success) await buildCanonicalFts(win)
+    return result
+  })
+
+  ipcMain.handle('channels:get-canonical', async (_event, canonicalId: string) => {
+    const sqlite = getSqlite()
+    return sqlite.prepare(`SELECT * FROM canonical_channels WHERE id = ?`).get(canonicalId)
+  })
+
+  ipcMain.handle('channels:get-variants', async (_event, canonicalId: string) => {
+    const sqlite = getSqlite()
+    return sqlite.prepare(`
+      SELECT s.id, s.title, s.source_id, s.stream_url, s.container_extension,
+             s.catchup_supported, s.catchup_days, s.tvg_id, s.epg_channel_id,
+             s.language_hint, s.origin_hint, s.quality_hint,
+             s.thumbnail_url, s.user_flagged,
+             src.name AS source_name, src.color_index AS source_color
+      FROM streams s
+      JOIN sources src ON src.id = s.source_id AND src.disabled = 0
+      WHERE s.canonical_channel_id = ? AND s.type = 'live'
+      ORDER BY src.name ASC, s.title ASC
+    `).all(canonicalId)
+  })
+
+  ipcMain.handle('channels:set-preferred-stream', async (_event, args: { canonicalId: string; streamId: string }) => {
+    const sqlite = getSqlite()
+    sqlite.prepare(`
+      INSERT INTO channel_user_data (profile_id, canonical_channel_id, preferred_stream_id)
+      VALUES (?, ?, ?)
+      ON CONFLICT(profile_id, canonical_channel_id) DO UPDATE SET
+        preferred_stream_id = excluded.preferred_stream_id, updated_at = unixepoch()
+    `).run(DEFAULT_PROFILE, args.canonicalId, args.streamId)
+    return { ok: true }
   })
 
   // ── EPG ─────────────────────────────────────────────────────────────────
@@ -762,14 +860,43 @@ export function registerHandlers() {
       WHERE ss.id = ?
       GROUP BY ss.id
     `).get(contentId)
-    return seriesRow ?? null
+    if (seriesRow) return seriesRow
+
+    // Canonical channel (UUID-format ID from g3 group view or canonical search)
+    const canonicalRow = sqlite.prepare(`
+      SELECT ${G3_LIVE_SELECT},
+        (SELECT MIN(cat.name)
+         FROM streams s2
+         JOIN stream_categories sc2 ON sc2.stream_id = s2.id
+         JOIN categories cat ON cat.id = sc2.category_id
+         WHERE s2.canonical_channel_id = cc.id AND s2.type = 'live') AS category_name
+      FROM canonical_channels cc
+      JOIN streams s ON s.canonical_channel_id = cc.id AND s.type = 'live'
+      LEFT JOIN sources src ON src.id = s.source_id
+      WHERE cc.id = ?
+      GROUP BY cc.id
+    `).get(contentId)
+    return canonicalRow ?? null
   })
 
   ipcMain.handle('content:get-stream-url', async (_event, args: { contentId: string; sourceId?: string }) => {
     const db = getDb()
     const sqlite = getSqlite()
 
-    const stream = sqlite.prepare('SELECT * FROM streams WHERE id = ?').get(args.contentId) as StreamRow | undefined
+    let stream = sqlite.prepare('SELECT * FROM streams WHERE id = ?').get(args.contentId) as StreamRow | undefined
+    // g3: if contentId is a canonical channel id, resolve to preferred or first active stream
+    if (!stream) {
+      const canonical = sqlite.prepare('SELECT id FROM canonical_channels WHERE id = ?').get(args.contentId) as { id: string } | undefined
+      if (canonical) {
+        const pref = sqlite.prepare(
+          `SELECT preferred_stream_id FROM channel_user_data WHERE profile_id = ? AND canonical_channel_id = ?`
+        ).get(DEFAULT_PROFILE, args.contentId) as { preferred_stream_id?: string } | undefined
+        const resolvedId = pref?.preferred_stream_id
+        stream = resolvedId
+          ? sqlite.prepare(`SELECT * FROM streams WHERE id = ?`).get(resolvedId) as StreamRow | undefined
+          : sqlite.prepare(`SELECT s.* FROM streams s JOIN sources src ON src.id = s.source_id AND src.disabled = 0 WHERE s.canonical_channel_id = ? AND s.type = 'live' LIMIT 1`).get(args.contentId) as StreamRow | undefined
+      }
+    }
     if (!stream) return { error: 'Content not found' }
 
     const sourceId = args.sourceId ?? stream.source_id
@@ -894,14 +1021,17 @@ export function registerHandlers() {
     const sqlite = getSqlite()
     const updateStream = sqlite.prepare(`UPDATE stream_user_data SET fav_sort_order = ? WHERE profile_id = ? AND stream_id = ?`)
     const updateSeries = sqlite.prepare(`UPDATE series_user_data SET fav_sort_order = ? WHERE profile_id = ? AND series_source_id = ?`)
-    const updateChan   = sqlite.prepare(`UPDATE channel_user_data SET fav_sort_order = ? WHERE profile_id = ? AND stream_id = ?`)
+    const updateChan   = sqlite.prepare(`UPDATE channel_user_data SET fav_sort_order = ? WHERE profile_id = ? AND canonical_channel_id = ?`)
     const runAll = sqlite.transaction((items: typeof order) => {
       for (const { contentId, sortOrder } of items) {
         const ref = resolveContent(sqlite, contentId)
         if (!ref) continue
         if (ref.kind === 'movie'  && ref.stream)        updateStream.run(sortOrder, DEFAULT_PROFILE, ref.stream.id)
         else if (ref.kind === 'series' && ref.seriesSource) updateSeries.run(sortOrder, DEFAULT_PROFILE, ref.seriesSource.id)
-        else if (ref.kind === 'live'   && ref.stream)       updateChan.run(sortOrder, DEFAULT_PROFILE, ref.stream.id)
+        else if (ref.kind === 'live'   && ref.stream) {
+          const canonId = (ref.stream as any).canonical_channel_id
+          if (canonId) updateChan.run(sortOrder, DEFAULT_PROFILE, canonId)
+        }
       }
     })
     runAll(order)
@@ -913,38 +1043,37 @@ export function registerHandlers() {
     const sqlite = getSqlite()
     const profileId = args?.profileId ?? DEFAULT_PROFILE
     return sqlite.prepare(`
-      SELECT ${STREAM_SELECT},
+      SELECT ${G3_LIVE_SELECT},
         cud.fav_sort_order                    AS fav_sort_order,
-        sud.last_watched_at                   AS last_watched_at,
+        cud.preferred_stream_id               AS preferred_stream_id,
         1                                      AS favorite
       FROM channel_user_data cud
-      JOIN streams s ON s.id = cud.stream_id
+      JOIN canonical_channels cc ON cc.id = cud.canonical_channel_id
+      JOIN streams s ON s.canonical_channel_id = cc.id AND s.type = 'live'
       JOIN sources src ON src.id = s.source_id AND src.disabled = 0
-      LEFT JOIN stream_user_data sud ON sud.stream_id = s.id AND sud.profile_id = ?
-      WHERE cud.is_favorite = 1 AND cud.profile_id = ? AND s.type = 'live'
-      ORDER BY COALESCE(cud.fav_sort_order, 999999) ASC, sud.last_watched_at DESC
-    `).all(profileId, profileId)
+      WHERE cud.is_favorite = 1 AND cud.profile_id = ?
+      GROUP BY cc.id
+      ORDER BY COALESCE(cud.fav_sort_order, 999999) ASC, cc.title ASC
+    `).all(profileId)
   })
 
-  ipcMain.handle('channels:toggle-favorite', async (_event, streamId: string) => {
+  ipcMain.handle('channels:toggle-favorite', async (_event, canonicalId: string) => {
     const sqlite = getSqlite()
-    // The renderer still calls this with item.id — which in V3 is a stream id
-    // for live channels. Keep parameter name as canonicalId in preload for
-    // backward compat, but treat it as a stream id here.
-    const stream = sqlite.prepare('SELECT id FROM streams WHERE id = ?').get(streamId) as { id?: string } | undefined
-    if (!stream?.id) return { favorite: false }
+    const canonical = sqlite.prepare('SELECT id FROM canonical_channels WHERE id = ?').get(canonicalId) as { id?: string } | undefined
+    if (!canonical?.id) return { favorite: false }
     sqlite.prepare(`
-      INSERT INTO channel_user_data (profile_id, stream_id, is_favorite)
+      INSERT INTO channel_user_data (profile_id, canonical_channel_id, is_favorite)
       VALUES (?, ?, 1)
-      ON CONFLICT(profile_id, stream_id) DO UPDATE SET is_favorite = NOT is_favorite
-    `).run(DEFAULT_PROFILE, stream.id)
-    const row = sqlite.prepare(`SELECT is_favorite FROM channel_user_data WHERE profile_id = ? AND stream_id = ?`).get(DEFAULT_PROFILE, stream.id) as { is_favorite?: number } | undefined
+      ON CONFLICT(profile_id, canonical_channel_id) DO UPDATE SET
+        is_favorite = NOT is_favorite, updated_at = unixepoch()
+    `).run(DEFAULT_PROFILE, canonical.id)
+    const row = sqlite.prepare(`SELECT is_favorite FROM channel_user_data WHERE profile_id = ? AND canonical_channel_id = ?`).get(DEFAULT_PROFILE, canonical.id) as { is_favorite?: number } | undefined
     return { favorite: !!row?.is_favorite }
   })
 
   ipcMain.handle('channels:reorder-favorites', async (_event, order: { canonicalId: string; sortOrder: number }[]) => {
     const sqlite = getSqlite()
-    const update = sqlite.prepare(`UPDATE channel_user_data SET fav_sort_order = ? WHERE profile_id = ? AND stream_id = ?`)
+    const update = sqlite.prepare(`UPDATE channel_user_data SET fav_sort_order = ? WHERE profile_id = ? AND canonical_channel_id = ?`)
     const runAll = sqlite.transaction((items: typeof order) => {
       for (const { canonicalId, sortOrder } of items) update.run(sortOrder, DEFAULT_PROFILE, canonicalId)
     })
@@ -952,16 +1081,14 @@ export function registerHandlers() {
     return { ok: true }
   })
 
-  ipcMain.handle('channels:get-data', async (_event, streamId: string) => {
+  ipcMain.handle('channels:get-data', async (_event, canonicalId: string) => {
     const sqlite = getSqlite()
-    const fav = sqlite.prepare(`SELECT is_favorite FROM channel_user_data WHERE profile_id = ? AND stream_id = ?`).get(DEFAULT_PROFILE, streamId) as { is_favorite?: number } | undefined
-    const sud = sqlite.prepare(`SELECT watch_position, completed FROM stream_user_data WHERE profile_id = ? AND stream_id = ?`).get(DEFAULT_PROFILE, streamId) as { watch_position?: number; completed?: number } | undefined
+    const cud = sqlite.prepare(`SELECT is_favorite, preferred_stream_id FROM channel_user_data WHERE profile_id = ? AND canonical_channel_id = ?`).get(DEFAULT_PROFILE, canonicalId) as { is_favorite?: number; preferred_stream_id?: string } | undefined
     return {
-      favorite:    !!fav?.is_favorite,
-      watchlisted: false,
-      rating:      null,
-      position:    sud?.watch_position ?? 0,
-      completed:   !!sud?.completed,
+      favorite:            !!cud?.is_favorite,
+      preferred_stream_id: cud?.preferred_stream_id ?? null,
+      watchlisted:         false,
+      rating:              null,
     }
   })
 
@@ -1116,6 +1243,40 @@ export function registerHandlers() {
 
   // ── Settings (key-value) ─────────────────────────────────────────────
   ipcMain.handle('settings:get', (_event, key: string) => getSetting(key))
+  ipcMain.handle('settings:set', (_event, args: { key: string; value: string }) => {
+    setSetting(args.key, args.value)
+    return { ok: true }
+  })
+
+  // ── iptv-org channel database (g3) ───────────────────────────────────
+  // Pulls the public iptv-org channels.json (~39K rows, ~15 MB), parses it,
+  // and replaces the local `iptv_channels` table. Runs on main thread with
+  // setImmediate yields between 5000-row batches to keep UI responsive.
+  // Retries once on network failure.
+  ipcMain.handle('iptv-org:refresh', async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const send = (phase: string, current: number, total: number, message: string) =>
+      win?.webContents.send('iptv-org:progress', { phase, current, total, message })
+
+    const pull = await refreshIptvOrgChannels(win)
+    if (!pull.success) return pull
+
+    // Re-run canonical enrichment across every enabled source so freshly
+    // pulled iptv-org rows flow into canonical_channels. FTS is rebuilt
+    // once at the end from the updated canonical table.
+    const sqlite = getSqlite()
+    const sources = (sqlite.prepare(`SELECT id FROM sources WHERE disabled = 0`).all() as { id: string }[]).map(r => r.id)
+    for (let i = 0; i < sources.length; i++) {
+      const sid = sources[i]
+      send('enriching', i, sources.length, `Rebuilding canonical for source ${i + 1}/${sources.length}…`)
+      await buildCanonicalLayer(sid, win)
+    }
+    send('enriching', sources.length, sources.length, 'Rebuilding canonical search index…')
+    await buildCanonicalFts(win)
+
+    send('done', pull.total ?? 0, pull.total ?? 0, `Pulled ${(pull.total ?? 0).toLocaleString()} channels and re-enriched ${sources.length} source${sources.length === 1 ? '' : 's'}`)
+    return pull
+  })
 
   // ── Enrichment — V3 keyless pipeline stubs ───────────────────────────
   // The TMDB-powered enrichment UI is deprecated in V3. The keyless
@@ -1157,17 +1318,41 @@ export function registerHandlers() {
     const typeFilter = args.type ? `AND cat.type = ?` : ''
     const typeParam: unknown[] = args.type ? [args.type] : []
 
-    // Count items across both `stream_categories` and `series_source_categories`
-    // so series parents contribute to their categories.
+    // Count items by ACTUAL stream type, not by cat.type. Providers sometimes
+    // tag a category 'live' but put movies/episodes in it — trusting cat.type
+    // produces ghost categories with counts that don't match what browse shows.
+    //
+    // - live: count stream_categories rows where the linked stream is type='live'
+    // - movie: count stream_categories rows where the linked stream is type='movie'
+    // - series: count series_source_categories only (series live in series_sources)
+    // - no type specified: sum streams + series_sources (all types)
+    let countExpr: string
+    if (args.type === 'live' || args.type === 'movie') {
+      countExpr = `COALESCE((
+        SELECT COUNT(DISTINCT sc.stream_id)
+        FROM stream_categories sc
+        JOIN streams s ON s.id = sc.stream_id
+        WHERE sc.category_id = cat.id AND s.type = '${args.type}'
+      ), 0)`
+    } else if (args.type === 'series') {
+      countExpr = `COALESCE((
+        SELECT COUNT(DISTINCT ssc.series_source_id)
+        FROM series_source_categories ssc
+        WHERE ssc.category_id = cat.id
+      ), 0)`
+    } else {
+      countExpr = `(
+        COALESCE((SELECT COUNT(DISTINCT sc.stream_id)        FROM stream_categories sc        WHERE sc.category_id = cat.id), 0) +
+        COALESCE((SELECT COUNT(DISTINCT ssc.series_source_id) FROM series_source_categories ssc WHERE ssc.category_id = cat.id), 0)
+      )`
+    }
+
     const sql = `
       SELECT
         cat.name,
         cat.type,
         GROUP_CONCAT(DISTINCT cat.source_id) AS source_ids,
-        (
-          COALESCE((SELECT COUNT(DISTINCT sc.stream_id)        FROM stream_categories sc        WHERE sc.category_id = cat.id), 0) +
-          COALESCE((SELECT COUNT(DISTINCT ssc.series_source_id) FROM series_source_categories ssc WHERE ssc.category_id = cat.id), 0)
-        ) AS item_count,
+        ${countExpr} AS item_count,
         MIN(cat.content_synced) AS needs_sync,
         MIN(cat.position)       AS position
       FROM categories cat
@@ -1200,6 +1385,116 @@ export function registerHandlers() {
     if (!filterIds.length) return { items: [], total: 0 }
 
     return runBrowseSearch(type, categoryName, filterIds, limit, offset, sortBy, sortDir)
+  })
+
+  // ── Browse live grouped (g3) — canonical groups with per-stream cards ──
+  ipcMain.handle('content:browse-live-grouped', (_event, args: {
+    categoryName?: string
+    sourceIds?: string[]
+    sortBy?: 'title' | 'year' | 'rating' | 'updated'
+    sortDir?: 'asc' | 'desc'
+    limit?: number
+    offset?: number
+  }) => {
+    const sqlite = getSqlite()
+    const { categoryName, sortBy = 'title', sortDir = 'asc', limit = 30, offset = 0 } = args ?? {}
+
+    const enabledSources = (sqlite.prepare(`SELECT id FROM sources WHERE disabled = 0`).all() as { id: string }[]).map(r => r.id)
+    const filterIds = args?.sourceIds?.length
+      ? args.sourceIds.filter(id => enabledSources.includes(id))
+      : enabledSources
+    if (!filterIds.length) return { groups: [], total: 0 }
+
+    const sourceList = filterIds.map(() => '?').join(',')
+    const catFilter = categoryName
+      ? `AND EXISTS (SELECT 1 FROM json_each(cc.categories) WHERE value = ?)`
+      : ''
+    const catParams: unknown[] = categoryName ? [categoryName] : []
+    const canonicalSortCol: Record<string, string> = {
+      title:   'cc.title',
+      year:    'cc.launched',
+      rating:  'cc.title',
+      updated: 'cc.title',
+    }
+    const dir = sortDir === 'asc' ? 'ASC' : 'DESC'
+
+    // Perf: use EXISTS instead of JOIN+DISTINCT/GROUP BY. Avoids expanding
+    // streams per canonical row and keeps count/list queries O(canonical rows
+    // that match), with index lookups on (canonical_channel_id, type).
+    const existsClause = `EXISTS (
+      SELECT 1 FROM streams s
+      WHERE s.canonical_channel_id = cc.id
+        AND s.type = 'live'
+        AND s.source_id IN (${sourceList})
+    )`
+
+    const total = (sqlite.prepare(`
+      SELECT COUNT(*) as cnt
+      FROM canonical_channels cc
+      WHERE ${existsClause}
+      ${catFilter}
+    `).get(...filterIds, ...catParams) as { cnt: number }).cnt
+
+    if (total === 0) return { groups: [], total: 0 }
+
+    const canonicals = sqlite.prepare(`
+      SELECT
+        cc.id,
+        cc.title,
+        cc.country,
+        cc.network,
+        cc.categories,
+        cc.is_nsfw,
+        cc.launched,
+        cc.closed,
+        cc.replaced_by,
+        cc.iptv_org_id,
+        cc.logo_url AS poster_url
+      FROM canonical_channels cc
+      WHERE ${existsClause}
+      ${catFilter}
+      ORDER BY ${canonicalSortCol[sortBy] ?? 'cc.title'} ${dir}
+      LIMIT ? OFFSET ?
+    `).all(...filterIds, ...catParams, limit, offset) as any[]
+
+    if (!canonicals.length) return { groups: [], total }
+
+    const canonicalIds = canonicals.map((c: any) => c.id)
+    const canonicalList = canonicalIds.map(() => '?').join(',')
+
+    const streamRows = sqlite.prepare(`
+      SELECT
+        s.id,
+        s.canonical_channel_id,
+        s.title,
+        s.source_id,
+        s.thumbnail_url,
+        (SELECT MIN(cat.name)
+         FROM stream_categories sc2
+         JOIN categories cat ON cat.id = sc2.category_id
+         WHERE sc2.stream_id = s.id) AS category_name
+      FROM streams s
+      WHERE s.canonical_channel_id IN (${canonicalList})
+        AND s.type = 'live'
+        AND s.source_id IN (${sourceList})
+      ORDER BY s.canonical_channel_id, s.source_id, s.title
+    `).all(...canonicalIds, ...filterIds) as any[]
+
+    const streamsByCanonical: Record<string, any[]> = {}
+    for (const row of streamRows) {
+      const cid = row.canonical_channel_id
+      if (!streamsByCanonical[cid]) streamsByCanonical[cid] = []
+      streamsByCanonical[cid].push(row)
+    }
+
+    // Prefer a stream thumbnail when canonical has no logo_url.
+    const groups = canonicals.map((c: any) => {
+      const streams = streamsByCanonical[c.id] ?? []
+      const poster = c.poster_url ?? streams.find((s: any) => s.thumbnail_url)?.thumbnail_url ?? null
+      return { ...c, poster_url: poster, streams }
+    })
+
+    return { groups, total }
   })
 
   // ── External player ───────────────────────────────────────────────────
@@ -1238,10 +1533,41 @@ export function registerHandlers() {
 
 // ─── Helpers: browse + search ─────────────────────────────────────────────
 
-// ─── g1 search: LIKE on provider titles, no FTS, no canonical joins ──────
+// ─── g1 search: LIKE on provider titles (movies/episodes only) ───────────
+// g3: live channels always go through canonical; g1 falls back to title LIKE on canonical.
 function g1SearchStreams(
   query: string,
   type: 'live' | 'movie' | undefined,
+  categoryName: string | undefined,
+  filterIds: string[],
+  limit: number
+): unknown[] {
+  if (type === 'live') return g1SearchLive(query, categoryName, filterIds, limit)
+  const sqlite = getSqlite()
+  const sourceList = filterIds.map(() => '?').join(',')
+  const words = query.split(/\s+/).filter(Boolean)
+  if (!words.length) return []
+  const likeParams = words.map(w => `%${w}%`)
+  const likeConds = words.map(() => `s.title LIKE ?`).join(' AND ')
+  const catJoin = categoryName
+    ? `JOIN stream_categories sc ON sc.stream_id = s.id JOIN categories cat ON cat.id = sc.category_id AND cat.name = ?`
+    : ''
+  const catParams: unknown[] = categoryName ? [categoryName] : []
+  return sqlite.prepare(`
+    SELECT ${G1_STREAM_SELECT}
+    FROM streams s
+    ${catJoin}
+    WHERE ${likeConds} AND s.type = 'movie' AND s.source_id IN (${sourceList})
+    ORDER BY s.added_at DESC
+    LIMIT ?
+  `).all(...catParams, ...likeParams, ...filterIds, limit) as unknown[]
+}
+
+// g1 LIKE fallback for live channels — searches canonical title.
+// Two-pass: (1) filter canonical IDs with EXISTS, (2) hydrate aggregates only
+// for the LIMIT page. Avoids expanding streams-per-canonical during the sort.
+function g1SearchLive(
+  query: string,
   categoryName: string | undefined,
   filterIds: string[],
   limit: number
@@ -1251,21 +1577,55 @@ function g1SearchStreams(
   const words = query.split(/\s+/).filter(Boolean)
   if (!words.length) return []
   const likeParams = words.map(w => `%${w}%`)
-  const likeConds = words.map(() => `s.title LIKE ?`).join(' AND ')
-  const typeConds = type ? `AND s.type = ?` : `AND s.type IN ('live','movie')`
-  const typeParams: unknown[] = type ? [type] : []
-  const catJoin = categoryName
-    ? `JOIN stream_categories sc ON sc.stream_id = s.id JOIN categories cat ON cat.id = sc.category_id AND cat.name = ?`
+  const likeConds = words.map(() => `cc.title LIKE ?`).join(' AND ')
+  const catFilter = categoryName
+    ? `AND EXISTS (SELECT 1 FROM json_each(cc.categories) WHERE value = ?)`
     : ''
   const catParams: unknown[] = categoryName ? [categoryName] : []
-  return sqlite.prepare(`
-    SELECT ${G1_STREAM_SELECT}
-    FROM streams s
-    ${catJoin}
-    WHERE ${likeConds} ${typeConds} AND s.source_id IN (${sourceList})
-    ORDER BY s.added_at DESC
+
+  const idRows = sqlite.prepare(`
+    SELECT cc.id FROM canonical_channels cc
+    WHERE ${likeConds}
+      AND EXISTS (
+        SELECT 1 FROM streams s
+        WHERE s.canonical_channel_id = cc.id AND s.type = 'live' AND s.source_id IN (${sourceList})
+      )
+      ${catFilter}
+    ORDER BY cc.title ASC
     LIMIT ?
-  `).all(...catParams, ...likeParams, ...typeParams, ...filterIds, limit) as unknown[]
+  `).all(...likeParams, ...filterIds, ...catParams, limit) as { id: string }[]
+
+  if (!idRows.length) return []
+  return hydrateCanonicalLive(idRows.map(r => r.id), filterIds, 'cc.title ASC')
+}
+
+// Hydrate G3_LIVE_SELECT aggregates for a bounded set of canonical IDs,
+// preserving a caller-supplied order.
+function hydrateCanonicalLive(
+  ids: string[],
+  filterIds: string[],
+  orderBy: string
+): unknown[] {
+  if (!ids.length) return []
+  const sqlite = getSqlite()
+  const idList = ids.map(() => '?').join(',')
+  const sourceList = filterIds.map(() => '?').join(',')
+  const rows = sqlite.prepare(`
+    SELECT ${G3_LIVE_SELECT}
+    FROM canonical_channels cc
+    JOIN streams s ON s.canonical_channel_id = cc.id AND s.type = 'live'
+    JOIN sources src ON src.id = s.source_id AND src.disabled = 0 AND src.id IN (${sourceList})
+    WHERE cc.id IN (${idList})
+    GROUP BY cc.id
+    ORDER BY ${orderBy}
+  `).all(...filterIds, ...ids) as any[]
+
+  if (orderBy !== 'cc.title ASC') {
+    const pos: Record<string, number> = {}
+    ids.forEach((id, i) => { pos[id] = i })
+    rows.sort((a, b) => (pos[a.id] ?? 0) - (pos[b.id] ?? 0))
+  }
+  return rows
 }
 
 function g1SearchSeries(
@@ -1294,7 +1654,8 @@ function g1SearchSeries(
   `).all(...catParams, ...likeParams, ...filterIds, limit) as unknown[]
 }
 
-// ─── g2 search: FTS5 on content_fts, join back to streams/series_sources ────
+// ─── g2 search: FTS5 on content_fts (movies/series/live) ───────────────────
+// Live: use canonical_fts (g3) when canonical data exists, else content_fts.
 function g2SearchStreams(
   query: string,
   type: 'live' | 'movie' | undefined,
@@ -1302,12 +1663,32 @@ function g2SearchStreams(
   filterIds: string[],
   limit: number
 ): unknown[] {
+  if (type === 'live') {
+    const sqlite = getSqlite()
+    const hasCanonical = sqlite.prepare('SELECT 1 FROM canonical_channels LIMIT 1').get() != null
+    if (hasCanonical) return g3SearchLive(query, categoryName, filterIds, limit)
+    // No canonical data yet — use content_fts (live streams indexed via "Reindex Channels")
+    const ftsQuery = buildFtsQuery(query)
+    if (!ftsQuery) return []
+    const sourceList = filterIds.map(() => '?').join(',')
+    const catJoin = categoryName
+      ? `JOIN stream_categories sc ON sc.stream_id = s.id JOIN categories cat ON cat.id = sc.category_id AND cat.name = ?`
+      : ''
+    const catParams: unknown[] = categoryName ? [categoryName] : []
+    return sqlite.prepare(`
+      SELECT ${G1_STREAM_SELECT}
+      FROM content_fts fts
+      JOIN streams s ON s.id = fts.id
+      ${catJoin}
+      WHERE content_fts MATCH ? AND fts.type = 'live' AND s.source_id IN (${sourceList})
+      ORDER BY rank
+      LIMIT ?
+    `).all(...catParams, ftsQuery, ...filterIds, limit) as unknown[]
+  }
   const sqlite = getSqlite()
   const sourceList = filterIds.map(() => '?').join(',')
   const ftsQuery = buildFtsQuery(query)
   if (!ftsQuery) return []
-  const typeConds = type ? `AND s.type = ?` : `AND s.type IN ('live','movie')`
-  const typeParams: unknown[] = type ? [type] : []
   const catJoin = categoryName
     ? `JOIN stream_categories sc ON sc.stream_id = s.id JOIN categories cat ON cat.id = sc.category_id AND cat.name = ?`
     : ''
@@ -1317,10 +1698,49 @@ function g2SearchStreams(
     FROM content_fts fts
     JOIN streams s ON s.id = fts.id
     ${catJoin}
-    WHERE content_fts MATCH ? ${typeConds} AND s.source_id IN (${sourceList})
+    WHERE content_fts MATCH ? AND s.type = 'movie' AND s.source_id IN (${sourceList})
     ORDER BY rank
     LIMIT ?
-  `).all(ftsQuery, ...catParams, ...typeParams, ...filterIds, limit) as unknown[]
+  `).all(ftsQuery, ...catParams, ...filterIds, limit) as unknown[]
+}
+
+// ─── g3 search: FTS5 on canonical_fts for live channels ─────────────────────
+// Two-pass: rank-order canonical IDs via FTS + EXISTS stream filter, then
+// hydrate aggregates only for the page. Keeps FTS the inner driver so rank
+// ordering stays correct and stream JOIN never multiplies rows during ORDER BY.
+function g3SearchLive(
+  query: string,
+  categoryName: string | undefined,
+  filterIds: string[],
+  limit: number
+): unknown[] {
+  const sqlite = getSqlite()
+  const sourceList = filterIds.map(() => '?').join(',')
+  const ftsQuery = buildFtsQuery(query)
+  if (!ftsQuery) return []
+  const catFilter = categoryName
+    ? `AND EXISTS (SELECT 1 FROM json_each(cc.categories) WHERE value = ?)`
+    : ''
+  const catParams: unknown[] = categoryName ? [categoryName] : []
+
+  const idRows = sqlite.prepare(`
+    SELECT fts.id
+    FROM canonical_fts fts
+    JOIN canonical_channels cc ON cc.id = fts.id
+    WHERE canonical_fts MATCH ?
+      AND EXISTS (
+        SELECT 1 FROM streams s
+        WHERE s.canonical_channel_id = cc.id AND s.type = 'live' AND s.source_id IN (${sourceList})
+      )
+      ${catFilter}
+    ORDER BY rank
+    LIMIT ?
+  `).all(ftsQuery, ...filterIds, ...catParams, limit) as { id: string }[]
+
+  if (!idRows.length) return []
+  const ids = idRows.map(r => r.id)
+  // Preserve rank order by passing a sentinel orderBy; hydrate re-sorts in JS.
+  return hydrateCanonicalLive(ids, filterIds, 'rank-order')
 }
 
 function g2SearchSeries(
@@ -1371,8 +1791,9 @@ async function buildFtsForSource(
     // Wipe existing FTS rows for this source
     sqlite.prepare('DELETE FROM content_fts WHERE source_id = ?').run(sourceId)
 
-    // Count streams + series for progress
-    const streamCount = (sqlite.prepare('SELECT COUNT(*) as n FROM streams WHERE source_id = ?').get(sourceId) as CountRow).n
+    // g3: live streams are indexed via canonical_fts — exclude them here.
+    // Only movies and episodes go into content_fts.
+    const streamCount = (sqlite.prepare(`SELECT COUNT(*) as n FROM streams WHERE source_id = ? AND type != 'live'`).get(sourceId) as CountRow).n
     const seriesCount = (sqlite.prepare('SELECT COUNT(*) as n FROM series_sources WHERE source_id = ?').get(sourceId) as CountRow).n
     const total = streamCount + seriesCount
 
@@ -1382,7 +1803,7 @@ async function buildFtsForSource(
     const insertStreamFts = sqlite.prepare(`
       INSERT INTO content_fts (id, source_id, type, title)
       SELECT id, source_id, type, fold_ligatures(title) FROM streams
-      WHERE source_id = ? AND rowid > ? ORDER BY rowid LIMIT ?
+      WHERE source_id = ? AND type != 'live' AND rowid > ? ORDER BY rowid LIMIT ?
     `)
     let lastRowid = 0
     let indexed = 0
@@ -1423,6 +1844,498 @@ async function buildFtsForSource(
     }
 
     send('done', total, total, `Indexed ${total.toLocaleString()} items`)
+    return { success: true, total }
+  } catch (err) {
+    send('error', 0, 0, String(err))
+    return { success: false, error: String(err) }
+  }
+}
+
+/**
+ * Build FTS5 rows for live streams of a single source.
+ * Separate from buildFtsForSource so it can be triggered independently.
+ */
+async function buildLiveFtsForSource(
+  sourceId: string,
+  win: BrowserWindow | null
+): Promise<{ success: boolean; total?: number; error?: string }> {
+  const sqlite = getSqlite()
+  const source = sqlite.prepare('SELECT id FROM sources WHERE id = ?').get(sourceId) as { id: string } | undefined
+  if (!source) return { success: false, error: 'Source not found' }
+
+  const send = (phase: string, current: number, total: number, message: string) =>
+    win?.webContents.send('fts:progress', { sourceId, phase, current, total, message })
+
+  try {
+    sqlite.prepare(`DELETE FROM content_fts WHERE source_id = ? AND type = 'live'`).run(sourceId)
+
+    const liveCount = (sqlite.prepare(
+      `SELECT COUNT(*) as n FROM streams WHERE source_id = ? AND type = 'live'`
+    ).get(sourceId) as { n: number }).n
+
+    send('indexing-streams', 0, liveCount, `Indexing ${liveCount.toLocaleString()} live channels…`)
+
+    const insert = sqlite.prepare(`
+      INSERT INTO content_fts (id, source_id, type, title)
+      SELECT id, source_id, type, fold_ligatures(title)
+      FROM streams
+      WHERE source_id = ? AND type = 'live' AND rowid > ?
+      ORDER BY rowid LIMIT ?
+    `)
+
+    const BATCH = 5000
+    let lastRowid = 0
+    let indexed = 0
+    while (true) {
+      const maxRow = sqlite.prepare(
+        `SELECT MAX(rowid) as m FROM (SELECT rowid FROM streams WHERE source_id = ? AND type = 'live' AND rowid > ? ORDER BY rowid LIMIT ?)`
+      ).get(sourceId, lastRowid, BATCH) as { m: number | null }
+      if (!maxRow.m) break
+      insert.run(sourceId, lastRowid, BATCH)
+      lastRowid = maxRow.m
+      indexed += Math.min(BATCH, liveCount - indexed)
+      send('indexing-streams', Math.min(indexed, liveCount), liveCount,
+        `Channels: ${Math.min(indexed, liveCount).toLocaleString()}/${liveCount.toLocaleString()}`)
+      await yieldToEventLoop()
+    }
+
+    send('done', liveCount, liveCount, `Indexed ${liveCount.toLocaleString()} live channels`)
+    return { success: true, total: liveCount }
+  } catch (err) {
+    send('error', 0, 0, String(err))
+    return { success: false, error: String(err) }
+  }
+}
+
+// ─── g3: Canonical layer build ──────────────────────────────────────────────
+// Two-pass match for live streams → canonical_channels:
+//   Pass 1 — exact tvg_id match against iptv_channels.id
+//   Pass 2 — normalized title + alt_names match
+//   Fallback — synthetic canonical created from stream title
+// Runs per-source after FTS indexing. Emits progress on 'canonical:progress'.
+
+interface CanonicalChannelRow {
+  id: string; title: string; alt_names: string | null
+  country: string | null; network: string | null
+  owners: string | null; categories: string | null; is_nsfw: number
+  launched: string | null; closed: string | null; replaced_by: string | null
+  website: string | null; logo_url: string | null; iptv_org_id: string | null
+}
+
+async function buildCanonicalLayer(
+  sourceId: string,
+  win: BrowserWindow | null
+): Promise<{ success: boolean; total?: number; matched?: number; error?: string }> {
+  const sqlite = getSqlite()
+  const send = (phase: string, current: number, total: number, message: string) =>
+    win?.webContents.send('canonical:progress', { sourceId, phase, current, total, message })
+
+  try {
+    const liveStreams = sqlite.prepare(
+      `SELECT id, title, tvg_id FROM streams WHERE source_id = ? AND type = 'live'`
+    ).all(sourceId) as { id: string; title: string; tvg_id: string | null }[]
+
+    const total = liveStreams.length
+    if (total === 0) {
+      send('done', 0, 0, 'No live streams')
+      return { success: true, total: 0, matched: 0 }
+    }
+
+    send('matching', 0, total, `Matching ${total.toLocaleString()} live streams…`)
+
+    // Build a lookup map for iptv_channels by id for Pass 1 (tvg_id exact)
+    // and by normalized title for Pass 2.
+    const iptvById = new Map<string, CanonicalChannelRow>()
+    const iptvByNorm = new Map<string, CanonicalChannelRow>()
+
+    const iptvRows = sqlite.prepare(`SELECT * FROM iptv_channels`).all() as Array<{
+      id: string; name: string | null; alt_names: string | null
+      network: string | null; owners: string | null; country: string | null
+      categories: string | null; is_nsfw: number
+      launched: string | null; closed: string | null
+      replaced_by: string | null; website: string | null
+      logo: string | null
+    }>
+
+    for (const ic of iptvRows) {
+      const canonical: CanonicalChannelRow = {
+        id: '', title: ic.name ?? ic.id, alt_names: ic.alt_names ?? null,
+        country: ic.country ?? null, network: ic.network ?? null,
+        owners: ic.owners ?? null, categories: ic.categories ?? null,
+        is_nsfw: ic.is_nsfw ?? 0,
+        launched: ic.launched ?? null, closed: ic.closed ?? null,
+        replaced_by: ic.replaced_by ?? null, website: ic.website ?? null,
+        logo_url: ic.logo ?? null, iptv_org_id: ic.id,
+      }
+      iptvById.set(ic.id, canonical)
+      // Primary title
+      const norm = normalizeForSearch(ic.name ?? ic.id)
+      if (norm) iptvByNorm.set(norm, canonical)
+      // Alt names
+      if (ic.alt_names) {
+        try {
+          const alts: string[] = JSON.parse(ic.alt_names)
+          for (const alt of alts) {
+            const altNorm = normalizeForSearch(alt)
+            if (altNorm && !iptvByNorm.has(altNorm)) iptvByNorm.set(altNorm, canonical)
+          }
+        } catch {}
+      }
+    }
+
+    // Build a lookup for already-existing canonical rows (for re-use across sources)
+    const existingByIptvOrgId = new Map<string, string>() // iptv_org_id → canonical.id
+    const existingByTitle = new Map<string, string>()     // normalized title → canonical.id
+    const existingRows = sqlite.prepare(
+      `SELECT id, title, iptv_org_id FROM canonical_channels`
+    ).all() as { id: string; title: string; iptv_org_id: string | null }[]
+    for (const ec of existingRows) {
+      if (ec.iptv_org_id) existingByIptvOrgId.set(ec.iptv_org_id, ec.id)
+      existingByTitle.set(normalizeForSearch(ec.title), ec.id)
+    }
+
+    const upsertCanonical = sqlite.prepare(`
+      INSERT INTO canonical_channels (id, title, alt_names, country, network, owners, categories,
+        is_nsfw, launched, closed, replaced_by, website, logo_url, iptv_org_id, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, unixepoch())
+      ON CONFLICT(id) DO UPDATE SET
+        title = excluded.title, alt_names = excluded.alt_names,
+        country = excluded.country, network = excluded.network,
+        owners = excluded.owners, categories = excluded.categories, is_nsfw = excluded.is_nsfw,
+        launched = excluded.launched, closed = excluded.closed, replaced_by = excluded.replaced_by,
+        website = excluded.website, logo_url = excluded.logo_url,
+        iptv_org_id = excluded.iptv_org_id, updated_at = excluded.updated_at
+    `)
+
+    const linkStream = sqlite.prepare(
+      `UPDATE streams SET canonical_channel_id = ? WHERE id = ?`
+    )
+
+    const BATCH = 1000
+    let matched = 0
+    let processed = 0
+
+    for (let i = 0; i < liveStreams.length; i += BATCH) {
+      const batch = liveStreams.slice(i, i + BATCH)
+
+      sqlite.transaction(() => {
+        for (const stream of batch) {
+          let canonicalId: string | null = null
+          let iptvMatch: CanonicalChannelRow | undefined
+
+          // Pass 1: tvg_id exact match
+          if (stream.tvg_id) {
+            iptvMatch = iptvById.get(stream.tvg_id)
+          }
+
+          // Pass 2: normalized title match
+          if (!iptvMatch) {
+            const norm = normalizeForSearch(stream.title)
+            iptvMatch = iptvByNorm.get(norm)
+          }
+
+          if (iptvMatch) {
+            // Found an iptv-org match — find or create a canonical row for it.
+            // Order of resolution:
+            //   a) already linked to this iptv_org_id → reuse
+            //   b) a prior synthetic (or matched) row shares the normalized title →
+            //      upgrade it in place: keep the UUID, fill in iptv-org fields.
+            //      Prevents the duplicate-canonical bug where a synthetic created
+            //      before the matched stream was processed stayed orphaned.
+            //   c) otherwise → create fresh
+            const titleNorm = normalizeForSearch(iptvMatch.title)
+            const existingOrgId = existingByIptvOrgId.get(iptvMatch.iptv_org_id!)
+            const existingTitleId = existingByTitle.get(titleNorm)
+            if (existingOrgId) {
+              canonicalId = existingOrgId
+            } else if (existingTitleId) {
+              canonicalId = existingTitleId
+              upsertCanonical.run(
+                canonicalId, iptvMatch.title, iptvMatch.alt_names,
+                iptvMatch.country, iptvMatch.network,
+                iptvMatch.owners, iptvMatch.categories, iptvMatch.is_nsfw,
+                iptvMatch.launched, iptvMatch.closed, iptvMatch.replaced_by,
+                iptvMatch.website, iptvMatch.logo_url, iptvMatch.iptv_org_id
+              )
+              existingByIptvOrgId.set(iptvMatch.iptv_org_id!, canonicalId)
+            } else {
+              canonicalId = randomUUID()
+              upsertCanonical.run(
+                canonicalId, iptvMatch.title, iptvMatch.alt_names,
+                iptvMatch.country, iptvMatch.network,
+                iptvMatch.owners, iptvMatch.categories, iptvMatch.is_nsfw,
+                iptvMatch.launched, iptvMatch.closed, iptvMatch.replaced_by,
+                iptvMatch.website, iptvMatch.logo_url, iptvMatch.iptv_org_id
+              )
+              existingByIptvOrgId.set(iptvMatch.iptv_org_id!, canonicalId)
+              existingByTitle.set(titleNorm, canonicalId)
+            }
+            matched++
+          } else {
+            // No iptv-org match — find or create synthetic canonical from stream title
+            const norm = normalizeForSearch(stream.title)
+            const existingId = existingByTitle.get(norm)
+            if (existingId) {
+              canonicalId = existingId
+            } else {
+              canonicalId = randomUUID()
+              upsertCanonical.run(
+                canonicalId, stream.title, null, null, null, null, null, 0,
+                null, null, null, null, null, null
+              )
+              existingByTitle.set(norm, canonicalId)
+            }
+          }
+
+          linkStream.run(canonicalId, stream.id)
+        }
+      })()
+
+      processed += batch.length
+      send('matching', processed, total, `Matched ${processed.toLocaleString()}/${total.toLocaleString()}…`)
+      await yieldToEventLoop()
+    }
+
+    send('done', total, total, `Done: ${matched.toLocaleString()} iptv-org matches, ${total - matched} synthetic`)
+    return { success: true, total, matched }
+  } catch (err) {
+    send('error', 0, 0, String(err))
+    return { success: false, error: String(err) }
+  }
+}
+
+/**
+ * Build canonical_fts rows for all canonical_channels.
+ * Full rebuild each time — canonical IDs are stable UUIDs so we can
+ * use DELETE + INSERT rather than per-source deltas.
+ */
+async function buildCanonicalFts(
+  win: BrowserWindow | null
+): Promise<{ success: boolean; total?: number; error?: string }> {
+  const sqlite = getSqlite()
+  const send = (phase: string, current: number, total: number, message: string) =>
+    win?.webContents.send('fts:progress', { sourceId: '__canonical__', phase, current, total, message })
+
+  try {
+    send('indexing-canonical', 0, 0, 'Indexing canonical channels…')
+
+    const total = (sqlite.prepare('SELECT COUNT(*) as n FROM canonical_channels').get() as CountRow).n
+
+    sqlite.prepare('DELETE FROM canonical_fts').run()
+
+    const BATCH = 5000
+    let lastRowid = 0
+    let indexed = 0
+
+    const insertCanonicalFts = sqlite.prepare(`
+      INSERT INTO canonical_fts (id, title, alt_names)
+      SELECT id, fold_ligatures(title),
+             COALESCE(
+               (SELECT GROUP_CONCAT(fold_ligatures(value), ' ')
+                FROM json_each(alt_names)
+                WHERE alt_names IS NOT NULL),
+               ''
+             )
+      FROM canonical_channels
+      WHERE rowid > ? ORDER BY rowid LIMIT ?
+    `)
+
+    while (true) {
+      const maxRow = sqlite.prepare(
+        `SELECT MAX(rowid) as m FROM (SELECT rowid FROM canonical_channels WHERE rowid > ? ORDER BY rowid LIMIT ?)`
+      ).get(lastRowid, BATCH) as { m: number | null }
+      if (!maxRow.m) break
+
+      insertCanonicalFts.run(lastRowid, BATCH)
+      lastRowid = maxRow.m
+      indexed += Math.min(BATCH, total - indexed)
+      send('indexing-canonical', Math.min(indexed, total), total,
+        `Canonical: ${Math.min(indexed, total).toLocaleString()}/${total.toLocaleString()}`)
+      await yieldToEventLoop()
+    }
+
+    send('done', total, total, `Indexed ${total.toLocaleString()} canonical channels`)
+    return { success: true, total }
+  } catch (err) {
+    send('error', 0, 0, String(err))
+    return { success: false, error: String(err) }
+  }
+}
+
+// ─── iptv-org pull ──────────────────────────────────────────────────────────
+// Shape of rows in https://iptv-org.github.io/api/channels.json
+// (verified against live API — logo/languages/subdivision/city are in
+// sibling files, not this one)
+interface IptvOrgChannel {
+  id: string
+  name?: string
+  alt_names?: string[]
+  network?: string | null
+  owners?: string[]
+  country?: string
+  categories?: string[]
+  is_nsfw?: boolean
+  launched?: string | null
+  closed?: string | null
+  replaced_by?: string | null
+  website?: string | null
+}
+
+/**
+ * Sanity-check an incoming iptv-org channels payload before we overwrite
+ * the local table. Returns null if the shape looks fine, or a human-readable
+ * reason string if not. On mismatch the caller aborts and keeps existing rows.
+ */
+function validateIptvOrgPayload(channels: unknown[]): string | null {
+  if (!Array.isArray(channels)) return 'not an array'
+  if (channels.length === 0) return 'empty payload'
+  // Payload below this size is almost certainly a truncated/error response
+  // (real channels.json is ~39K rows). 1000 is a generous safety floor.
+  if (channels.length < 1000) return `suspiciously small (${channels.length} rows)`
+
+  // Sample the first, middle, and last rows — cheap, catches shape drift
+  const sampleIdx = [0, Math.floor(channels.length / 2), channels.length - 1]
+  for (const idx of sampleIdx) {
+    const row = channels[idx] as Record<string, unknown> | null
+    if (!row || typeof row !== 'object') return `row ${idx} is not an object`
+    if (typeof row.id !== 'string' || !row.id) return `row ${idx} missing 'id' (string)`
+    if (row.name !== undefined && typeof row.name !== 'string') return `row ${idx} 'name' is not a string`
+    if (row.country !== undefined && typeof row.country !== 'string') return `row ${idx} 'country' is not a string`
+    if (row.categories !== undefined && !Array.isArray(row.categories)) return `row ${idx} 'categories' is not an array`
+    if (row.alt_names !== undefined && !Array.isArray(row.alt_names)) return `row ${idx} 'alt_names' is not an array`
+  }
+  return null
+}
+
+async function refreshIptvOrgChannels(
+  win: BrowserWindow | null
+): Promise<{ success: boolean; total?: number; error?: string }> {
+  const send = (phase: string, current: number, total: number, message: string) =>
+    win?.webContents.send('iptv-org:progress', { phase, current, total, message })
+
+  const url = getSetting('iptv_channels_url') ?? 'https://iptv-org.github.io/api/channels.json'
+  const logosUrl = getSetting('iptv_logos_url') ?? 'https://iptv-org.github.io/api/logos.json'
+
+  // Fetch with one retry
+  const fetchOnce = async (u: string) => {
+    const res = await fetch(u)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    return res.text()
+  }
+  let body: string
+  try {
+    send('fetching', 0, 0, `Downloading from ${url}…`)
+    try {
+      body = await fetchOnce(url)
+    } catch (err) {
+      send('fetching', 0, 0, `Retrying after error: ${String(err)}`)
+      body = await fetchOnce(url)
+    }
+  } catch (err) {
+    send('error', 0, 0, `Fetch failed: ${String(err)}`)
+    return { success: false, error: `Fetch failed: ${String(err)}` }
+  }
+
+  // Parse
+  let channels: IptvOrgChannel[]
+  try {
+    send('parsing', 0, 0, 'Parsing JSON…')
+    channels = JSON.parse(body) as IptvOrgChannel[]
+    if (!Array.isArray(channels)) throw new Error('Expected JSON array')
+  } catch (err) {
+    send('error', 0, 0, `Parse failed: ${String(err)}`)
+    return { success: false, error: `Parse failed: ${String(err)}` }
+  }
+
+  // Schema validation BEFORE touching local data. If iptv-org changes
+  // their API shape, we keep the existing rows rather than wiping them.
+  // Check: non-empty array, and a sample of rows must carry required fields.
+  const validationError = validateIptvOrgPayload(channels)
+  if (validationError) {
+    send('error', 0, 0, `Schema mismatch: ${validationError} — existing data preserved`)
+    return { success: false, error: `Schema mismatch: ${validationError} — existing data preserved` }
+  }
+
+  // Fetch logos.json — sibling feed, keyed by channel id. Non-fatal: if it
+  // fails we keep channels but skip logo enrichment. Shape: array of
+  // { channel: string, url: string, format?: 'PNG'|'SVG'|'APNG'|'JPEG'|'WEBP'|'GIF', width?, height? }.
+  const logoByChannel = new Map<string, string>()
+  try {
+    send('fetching', 0, 0, `Downloading logos from ${logosUrl}…`)
+    let logosBody: string
+    try {
+      logosBody = await fetchOnce(logosUrl)
+    } catch (err) {
+      send('fetching', 0, 0, `Retrying logos after error: ${String(err)}`)
+      logosBody = await fetchOnce(logosUrl)
+    }
+    const logos = JSON.parse(logosBody) as Array<{ channel?: string; url?: string; format?: string; width?: number; height?: number }>
+    if (Array.isArray(logos)) {
+      // First-wins per channel, but prefer SVG > PNG > anything else.
+      const rank = (f?: string) => f === 'SVG' ? 2 : f === 'PNG' ? 1 : 0
+      const bestRank = new Map<string, number>()
+      for (const l of logos) {
+        if (!l?.channel || !l?.url) continue
+        const r = rank(l.format)
+        const cur = bestRank.get(l.channel)
+        if (cur === undefined || r > cur) {
+          bestRank.set(l.channel, r)
+          logoByChannel.set(l.channel, l.url)
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[iptv-org] logos fetch failed, continuing without logos:', String(err))
+  }
+
+  const total = channels.length
+  const sqlite = getSqlite()
+
+  try {
+    // Replace strategy: delete all, then batch insert. Only reached after
+    // the schema validation above — otherwise existing rows stay intact.
+    sqlite.prepare('DELETE FROM iptv_channels').run()
+
+    const insert = sqlite.prepare(`
+      INSERT OR REPLACE INTO iptv_channels
+        (id, name, alt_names, network, owners, country,
+         categories, is_nsfw, launched, closed, replaced_by, website, logo)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+    const insertMany = sqlite.transaction((rows: IptvOrgChannel[]) => {
+      for (const c of rows) {
+        insert.run(
+          c.id,
+          c.name ?? null,
+          c.alt_names?.length ? JSON.stringify(c.alt_names) : null,
+          c.network ?? null,
+          c.owners?.length ? JSON.stringify(c.owners) : null,
+          c.country ?? null,
+          c.categories?.length ? JSON.stringify(c.categories) : null,
+          c.is_nsfw ? 1 : 0,
+          c.launched ?? null,
+          c.closed ?? null,
+          c.replaced_by ?? null,
+          c.website ?? null,
+          logoByChannel.get(c.id) ?? null,
+        )
+      }
+    })
+
+    const BATCH = 5000
+    let done = 0
+    send('inserting', 0, total, `Inserting 0/${total.toLocaleString()}…`)
+    for (let i = 0; i < channels.length; i += BATCH) {
+      const slice = channels.slice(i, i + BATCH)
+      insertMany(slice)
+      done += slice.length
+      send('inserting', done, total, `Inserting ${done.toLocaleString()}/${total.toLocaleString()}…`)
+      await yieldToEventLoop()
+    }
+
+    setSetting('iptv_channels_last_pull', String(Math.floor(Date.now() / 1000)))
+    // Terminal 'done' is emitted by the IPC handler after canonical re-enrichment.
+    send('pulled', total, total, `Pulled ${total.toLocaleString()} channels — rebuilding canonical…`)
     return { success: true, total }
   } catch (err) {
     send('error', 0, 0, String(err))
@@ -1500,8 +2413,40 @@ function runBrowseSearch(
     return { items, total }
   }
 
-  // Movies / Live / All (streams only).
-  const typeFilter = type ? `AND s.type = ?` : `AND s.type IN ('live','movie','episode')`
+  // Live channels — group by canonical, one card per real-world channel.
+  if (type === 'live') {
+    const catFilter = categoryName
+      ? `AND EXISTS (SELECT 1 FROM json_each(cc.categories) WHERE value = ?)`
+      : ''
+    const catParams: unknown[] = categoryName ? [categoryName] : []
+    const canonicalSortCol: Record<string, string> = {
+      title:   'cc.title',
+      year:    'cc.launched',
+      rating:  'cc.title',
+      updated: 'cc.title',
+    }
+    const total = (sqlite.prepare(`
+      SELECT COUNT(DISTINCT cc.id) as cnt
+      FROM canonical_channels cc
+      JOIN streams s ON s.canonical_channel_id = cc.id AND s.type = 'live'
+      JOIN sources src ON src.id = s.source_id AND src.disabled = 0 AND src.id IN (${sourceList})
+      ${catFilter}
+    `).get(...filterIds, ...catParams) as { cnt: number }).cnt
+    const items = sqlite.prepare(`
+      SELECT ${G3_LIVE_SELECT}
+      FROM canonical_channels cc
+      JOIN streams s ON s.canonical_channel_id = cc.id AND s.type = 'live'
+      JOIN sources src ON src.id = s.source_id AND src.disabled = 0 AND src.id IN (${sourceList})
+      ${catFilter}
+      GROUP BY cc.id
+      ORDER BY ${canonicalSortCol[sortBy] ?? 'cc.title'} ${dir}
+      LIMIT ? OFFSET ?
+    `).all(...filterIds, ...catParams, limit, offset) as unknown[]
+    return { items, total }
+  }
+
+  // Movies / episodes (streams only, no canonical grouping).
+  const typeFilter = type ? `AND s.type = ?` : `AND s.type IN ('movie','episode')`
   const typeParams: unknown[] = type ? [type] : []
   const catJoin = categoryName
     ? `JOIN stream_categories sc ON sc.stream_id = s.id JOIN categories cat ON cat.id = sc.category_id AND cat.name = ?`
@@ -1540,8 +2485,11 @@ function readUserData(sqlite: ReturnType<typeof getSqlite>, ref: ResolvedContent
     const row = sqlite.prepare(`SELECT * FROM series_user_data WHERE profile_id = ? AND series_source_id = ?`).get(DEFAULT_PROFILE, ref.seriesSource.id) as any
     if (row) { fav = row.is_favorite ?? 0; wl = row.is_watchlisted ?? 0; rating = row.rating ?? null; favSort = row.fav_sort_order ?? null }
   } else if (ref.kind === 'live' && ref.stream) {
-    const row = sqlite.prepare(`SELECT * FROM channel_user_data WHERE profile_id = ? AND stream_id = ?`).get(DEFAULT_PROFILE, ref.stream.id) as any
-    if (row) { fav = row.is_favorite ?? 0; favSort = row.fav_sort_order ?? null }
+    const canonId = (ref.stream as any).canonical_channel_id
+    if (canonId) {
+      const row = sqlite.prepare(`SELECT * FROM channel_user_data WHERE profile_id = ? AND canonical_channel_id = ?`).get(DEFAULT_PROFILE, canonId) as any
+      if (row) { fav = row.is_favorite ?? 0; favSort = row.fav_sort_order ?? null }
+    }
     const sud = sqlite.prepare(`SELECT watch_position, last_watched_at, completed FROM stream_user_data WHERE profile_id = ? AND stream_id = ?`).get(DEFAULT_PROFILE, ref.stream.id) as any
     if (sud) { position = sud.watch_position ?? 0; lastWatched = sud.last_watched_at ?? null; completed = sud.completed ?? 0 }
   } else if (ref.kind === 'episode' && ref.stream) {
@@ -1596,12 +2544,15 @@ function toggleFavorite(sqlite: ReturnType<typeof getSqlite>, ref: ResolvedConte
     return !!row?.is_favorite
   }
   if (ref.kind === 'live' && ref.stream) {
+    const canonId = (ref.stream as any).canonical_channel_id
+    if (!canonId) return false
     sqlite.prepare(`
-      INSERT INTO channel_user_data (profile_id, stream_id, is_favorite)
+      INSERT INTO channel_user_data (profile_id, canonical_channel_id, is_favorite)
       VALUES (?, ?, 1)
-      ON CONFLICT(profile_id, stream_id) DO UPDATE SET is_favorite = NOT is_favorite
-    `).run(DEFAULT_PROFILE, ref.stream.id)
-    const row = sqlite.prepare(`SELECT is_favorite FROM channel_user_data WHERE profile_id = ? AND stream_id = ?`).get(DEFAULT_PROFILE, ref.stream.id) as any
+      ON CONFLICT(profile_id, canonical_channel_id) DO UPDATE SET
+        is_favorite = NOT is_favorite, updated_at = unixepoch()
+    `).run(DEFAULT_PROFILE, canonId)
+    const row = sqlite.prepare(`SELECT is_favorite FROM channel_user_data WHERE profile_id = ? AND canonical_channel_id = ?`).get(DEFAULT_PROFILE, canonId) as any
     return !!row?.is_favorite
   }
   return false
@@ -1671,17 +2622,18 @@ function listFavorites(sqlite: ReturnType<typeof getSqlite>, type?: 'live' | 'mo
   }
   if (!type || type === 'live') {
     const rows = sqlite.prepare(`
-      SELECT ${STREAM_SELECT},
+      SELECT ${G3_LIVE_SELECT},
              cud.fav_sort_order            AS fav_sort_order,
-             sud.last_watched_at           AS last_watched_at,
+             cud.preferred_stream_id       AS preferred_stream_id,
              1                              AS favorite
       FROM channel_user_data cud
-      JOIN streams s ON s.id = cud.stream_id AND s.type = 'live'
+      JOIN canonical_channels cc ON cc.id = cud.canonical_channel_id
+      JOIN streams s ON s.canonical_channel_id = cc.id AND s.type = 'live'
       JOIN sources src ON src.id = s.source_id AND src.disabled = 0
-      LEFT JOIN stream_user_data sud ON sud.stream_id = s.id AND sud.profile_id = ?
       WHERE cud.is_favorite = 1 AND cud.profile_id = ?
-      ORDER BY COALESCE(cud.fav_sort_order, 999999) ASC, sud.last_watched_at DESC
-    `).all(DEFAULT_PROFILE, DEFAULT_PROFILE) as unknown[]
+      GROUP BY cc.id
+      ORDER BY COALESCE(cud.fav_sort_order, 999999) ASC, cc.title ASC
+    `).all(DEFAULT_PROFILE) as unknown[]
     results.push(...rows)
   }
   return results

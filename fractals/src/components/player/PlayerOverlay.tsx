@@ -83,6 +83,13 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
     setCategoryName(null)
     if (!content) return
     if (content.category_name) { setCategoryName(content.category_name.split(',')[0]); return }
+    // Canonical live items carry categories as a JSON array — use first entry as fallback
+    if (content.type === 'live' && (content as any).categories) {
+      try {
+        const arr = JSON.parse((content as any).categories) as string[]
+        if (arr[0]) { setCategoryName(arr[0]); return }
+      } catch { /* ignore */ }
+    }
     api.content.get(content.id).then((item: any) => {
       if (item?.category_name) setCategoryName(item.category_name.split(',')[0])
     })
@@ -681,14 +688,16 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
         </div>
       )}
 
-      {/* ── Fullscreen top bar (live) ── */}
+      {/* ── Fullscreen top bar (live) — auto-hides with Controls ── */}
       {mode === 'fullscreen' && localContent?.type === 'live' && (
         <div style={{
           position: 'absolute', top: 0, left: 0, right: 0, zIndex: 100,
           padding: '14px 18px',
           background: 'linear-gradient(180deg, rgba(0,0,0,0.72) 0%, transparent 100%)',
           display: 'flex', alignItems: 'center', gap: 12,
-          pointerEvents: 'none',
+          pointerEvents: showControls ? 'auto' : 'none',
+          opacity: showControls ? 1 : 0,
+          transition: 'opacity 0.2s',
         }}>
           <button onClick={onClose} title="Back (Esc)" style={{ ...backBtnStyle, pointerEvents: 'all' }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="m12 19-7-7 7-7" /><path d="M19 12H5" /></svg>

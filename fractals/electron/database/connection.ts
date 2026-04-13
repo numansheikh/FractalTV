@@ -86,6 +86,56 @@ export function getSqlite() {
  * the full design rationale (L1–L14 locked decisions).
  */
 function createTables(db: Database.Database) {
+  // One-shot migration: early iptv_channels schema had dead columns
+  // (subdivision, city, languages, logo) that don't exist in the real
+  // iptv-org channels.json. Drop it so CREATE TABLE IF NOT EXISTS below
+  // rebuilds the current shape. User re-pulls via Settings → Refresh.
+  const hasLegacyIptvChannels = db.prepare(
+    `SELECT 1 FROM pragma_table_info('iptv_channels') WHERE name = 'logo'`
+  ).get()
+  if (hasLegacyIptvChannels) {
+    console.log('[DB] Dropping legacy iptv_channels table (pre-current schema)')
+    db.exec('DROP TABLE iptv_channels')
+  }
+
+  // One-shot migration: g3 adds canonical_channel_id + user_flagged to streams.
+  // ADD COLUMN is safe on existing rows (NULL / 0 defaults).
+  const streamsHasCanonical = db.prepare(
+    `SELECT 1 FROM pragma_table_info('streams') WHERE name = 'canonical_channel_id'`
+  ).get()
+  if (!streamsHasCanonical) {
+    console.log('[DB] Migrating streams: adding canonical_channel_id + user_flagged')
+    db.exec(`ALTER TABLE streams ADD COLUMN canonical_channel_id TEXT REFERENCES canonical_channels(id) ON DELETE SET NULL`)
+    db.exec(`ALTER TABLE streams ADD COLUMN user_flagged INTEGER NOT NULL DEFAULT 0`)
+  }
+
+  // One-shot migration: g3 re-keys channel_user_data from stream_id → canonical_channel_id.
+  // Data is expendable (pre-release, user re-favorites after migration).
+  const chanUdHasStreamId = db.prepare(
+    `SELECT 1 FROM pragma_table_info('channel_user_data') WHERE name = 'stream_id'`
+  ).get()
+  if (chanUdHasStreamId) {
+    console.log('[DB] Migrating channel_user_data: re-keying to canonical_channel_id (data dropped)')
+    db.exec(`DROP TABLE channel_user_data`)
+  }
+
+  // One-shot migration: canonical_channels gains alt_names (JSON array of
+  // aliases copied from iptv-org). Used by canonical_fts so searches like
+  // "CP" can find "Canal Plus". Pre-existing rows get NULL and will be
+  // repopulated next canonical build.
+  const canonicalHasAltNames = db.prepare(
+    `SELECT 1 FROM pragma_table_info('canonical_channels') WHERE name = 'alt_names'`
+  ).get()
+  if (!canonicalHasAltNames) {
+    const canonicalTableExists = db.prepare(
+      `SELECT 1 FROM sqlite_master WHERE type='table' AND name='canonical_channels'`
+    ).get()
+    if (canonicalTableExists) {
+      console.log('[DB] Migrating canonical_channels: adding alt_names')
+      db.exec(`ALTER TABLE canonical_channels ADD COLUMN alt_names TEXT`)
+    }
+  }
+
   db.exec(`
     -- ─── Provider metadata (untouched from V2) ────────────────────────
 
@@ -144,9 +194,37 @@ function createTables(db: Database.Database) {
       value TEXT NOT NULL
     );
 
+    -- ─── Canonical channel identity (g3) ─────────────────────────────
+    -- One row per real-world channel. Live streams point here via FK.
+    -- Denormalized: all iptv-org fields copied in at match time so runtime
+    -- reads never join iptv_channels. Synthetic canonicals (unmatched streams)
+    -- have iptv_org_id = NULL and only title populated from stream title.
+
+    CREATE TABLE IF NOT EXISTS canonical_channels (
+      id              TEXT PRIMARY KEY,       -- local UUID
+      title           TEXT NOT NULL,
+      alt_names       TEXT,                   -- JSON array of iptv-org aliases
+      country         TEXT,
+      network         TEXT,
+      owners          TEXT,                   -- JSON array
+      categories      TEXT,                   -- JSON array
+      is_nsfw         INTEGER NOT NULL DEFAULT 0,
+      launched        TEXT,
+      closed          TEXT,
+      replaced_by     TEXT,
+      website         TEXT,
+      logo_url        TEXT,
+      iptv_org_id     TEXT,                   -- NULL for synthetic rows
+      created_at      INTEGER NOT NULL DEFAULT (unixepoch()),
+      updated_at      INTEGER NOT NULL DEFAULT (unixepoch())
+    );
+    CREATE INDEX IF NOT EXISTS idx_canonical_iptv_org ON canonical_channels(iptv_org_id);
+    CREATE INDEX IF NOT EXISTS idx_canonical_title    ON canonical_channels(title);
+
     -- ─── Streams (raw provider inventory + normalizer hints) ────────────
-    -- g1 tier: no canonical tables, no polymorphic FKs. Streams are the
-    -- primary content entity. Episodes link to series_sources via parent_series_id.
+    -- g3: canonical_channel_id links live streams to canonical_channels.
+    --     user_flagged is a placeholder for future stream health UX.
+    -- Episodes link to series_sources via parent_series_id.
 
     CREATE TABLE IF NOT EXISTS streams (
       id                    TEXT PRIMARY KEY,              -- '{sourceId}:{type}:{stream_id}'
@@ -171,6 +249,10 @@ function createTables(db: Database.Database) {
       origin_hint           TEXT,
       quality_hint          TEXT,
       year_hint             INTEGER,
+
+      -- g3: canonical identity + stream health flag
+      canonical_channel_id  TEXT REFERENCES canonical_channels(id) ON DELETE SET NULL,
+      user_flagged          INTEGER NOT NULL DEFAULT 0,
 
       -- Episode → parent series link (NULL for non-episodes)
       parent_series_id      TEXT REFERENCES series_sources(id) ON DELETE SET NULL,
@@ -237,13 +319,14 @@ function createTables(db: Database.Database) {
     );
 
     CREATE TABLE IF NOT EXISTS channel_user_data (
-      profile_id        TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
-      stream_id         TEXT NOT NULL REFERENCES streams(id) ON DELETE CASCADE,
-      is_favorite       INTEGER NOT NULL DEFAULT 0,
-      fav_sort_order    INTEGER,
-      created_at        INTEGER NOT NULL DEFAULT (unixepoch()),
-      updated_at        INTEGER NOT NULL DEFAULT (unixepoch()),
-      PRIMARY KEY (profile_id, stream_id)
+      profile_id              TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+      canonical_channel_id    TEXT NOT NULL REFERENCES canonical_channels(id) ON DELETE CASCADE,
+      is_favorite             INTEGER NOT NULL DEFAULT 0,
+      preferred_stream_id     TEXT,                        -- user's preferred variant (NULL = auto-best)
+      fav_sort_order          INTEGER,
+      created_at              INTEGER NOT NULL DEFAULT (unixepoch()),
+      updated_at              INTEGER NOT NULL DEFAULT (unixepoch()),
+      PRIMARY KEY (profile_id, canonical_channel_id)
     );
 
     -- ─── Indexes ──────────────────────────────────────────────────────
@@ -255,6 +338,7 @@ function createTables(db: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_streams_category        ON streams(category_id, source_id);
     CREATE INDEX IF NOT EXISTS idx_streams_epg             ON streams(epg_channel_id);
     CREATE INDEX IF NOT EXISTS idx_streams_parent_series   ON streams(parent_series_id);
+    CREATE INDEX IF NOT EXISTS idx_streams_canonical       ON streams(canonical_channel_id, type);
 
     CREATE INDEX IF NOT EXISTS idx_series_sources_source   ON series_sources(source_id);
     CREATE INDEX IF NOT EXISTS idx_series_sources_category ON series_sources(category_id, source_id);
@@ -273,6 +357,16 @@ function createTables(db: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_series_ud_watchlist     ON series_user_data(profile_id, is_watchlisted);
     CREATE INDEX IF NOT EXISTS idx_channel_ud_favorites    ON channel_user_data(profile_id, is_favorite);
 
+    -- ─── FTS5 (g3) — canonical channels ─────────────────────────────
+    -- Live channel search hits canonical_fts first; FTS hit → canonical_id
+    -- → fan out to streams for variant resolution. VoD stays on content_fts.
+    CREATE VIRTUAL TABLE IF NOT EXISTS canonical_fts USING fts5(
+      id UNINDEXED,
+      title,
+      alt_names,
+      tokenize = 'unicode61 remove_diacritics 2'
+    );
+
     -- ─── FTS5 (g2) ──────────────────────────────────────────────────
     CREATE VIRTUAL TABLE IF NOT EXISTS content_fts USING fts5(
       id UNINDEXED,
@@ -281,7 +375,47 @@ function createTables(db: Database.Database) {
       title,
       tokenize = 'unicode61 remove_diacritics 2'
     );
+
+    -- ─── iptv-org channel database (g3) ─────────────────────────────
+    -- Schema mirrors iptv-org /api/channels.json exactly. Sibling files
+    -- (logos.json, streams.json, languages.json) are pulled separately
+    -- in later cuts — not mixed into this table.
+    CREATE TABLE IF NOT EXISTS iptv_channels (
+      id            TEXT PRIMARY KEY,
+      name          TEXT,
+      alt_names     TEXT,                  -- JSON array
+      network       TEXT,
+      owners        TEXT,                  -- JSON array
+      country       TEXT,
+      categories    TEXT,                  -- JSON array
+      is_nsfw       INTEGER NOT NULL DEFAULT 0,
+      launched      TEXT,
+      closed        TEXT,
+      replaced_by   TEXT,
+      website       TEXT,
+      logo          TEXT                   -- best-pick URL from logos.json
+    );
+    CREATE INDEX IF NOT EXISTS idx_iptv_channels_name ON iptv_channels(name);
   `)
+
+  // One-shot migration: iptv_channels gains `logo` column for the URL picked
+  // from iptv-org's sibling logos.json feed (channels.json carries no logos).
+  const iptvHasLogo = db.prepare(
+    `SELECT 1 FROM pragma_table_info('iptv_channels') WHERE name = 'logo'`
+  ).get()
+  if (!iptvHasLogo) {
+    console.log('[DB] Migrating iptv_channels: adding logo')
+    db.exec(`ALTER TABLE iptv_channels ADD COLUMN logo TEXT`)
+  }
+
+  // Seed default settings if missing
+  const seedSetting = (key: string, value: string) =>
+    db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`).run(key, value)
+  seedSetting('iptv_channels_url', 'https://iptv-org.github.io/api/channels.json')
+  seedSetting('iptv_channels_ttl_days', '15')
+  // g3: channel card badge config — JSON array, ordered by display position
+  // Available values: 'country' | 'variants' | 'sources' | 'network' | 'category' | 'nsfw' | 'defunct'
+  seedSetting('channel_card_badges', JSON.stringify(['country', 'variants', 'sources']))
 
   // Reset any sources stuck in 'syncing' from a previous crashed/killed run
   db.prepare(`UPDATE sources SET status = 'active' WHERE status = 'syncing'`).run()

@@ -104,10 +104,8 @@ async function run() {
     // ── Backup user data before wipe (survives CASCADE) ─────────────────
     db.prepare(`CREATE TEMP TABLE IF NOT EXISTS _bak_stream_ud AS SELECT * FROM stream_user_data WHERE 0`).run()
     db.prepare(`CREATE TEMP TABLE IF NOT EXISTS _bak_series_ud AS SELECT * FROM series_user_data WHERE 0`).run()
-    db.prepare(`CREATE TEMP TABLE IF NOT EXISTS _bak_channel_ud AS SELECT * FROM channel_user_data WHERE 0`).run()
     db.prepare(`DELETE FROM _bak_stream_ud`).run()
     db.prepare(`DELETE FROM _bak_series_ud`).run()
-    db.prepare(`DELETE FROM _bak_channel_ud`).run()
 
     db.prepare(`
       INSERT INTO _bak_stream_ud SELECT sud.* FROM stream_user_data sud
@@ -117,10 +115,8 @@ async function run() {
       INSERT INTO _bak_series_ud SELECT sud.* FROM series_user_data sud
       JOIN series_sources ss ON ss.id = sud.series_source_id WHERE ss.source_id = ?
     `).run(sourceId)
-    db.prepare(`
-      INSERT INTO _bak_channel_ud SELECT cud.* FROM channel_user_data cud
-      JOIN streams s ON s.id = cud.stream_id WHERE s.source_id = ?
-    `).run(sourceId)
+    // g3: channel_user_data is now keyed by canonical_channel_id (not stream_id).
+    // Canonical rows survive stream deletion, so no backup/restore needed.
 
     // ── Wipe this source's streams ─────────────────────────────────────────
     db.prepare(`DELETE FROM stream_categories WHERE stream_id IN (SELECT id FROM streams WHERE source_id = ?)`).run(sourceId)
@@ -287,13 +283,8 @@ async function run() {
       INSERT OR IGNORE INTO series_user_data SELECT b.* FROM _bak_series_ud b
       WHERE EXISTS (SELECT 1 FROM series_sources WHERE id = b.series_source_id)
     `).run()
-    db.prepare(`
-      INSERT OR IGNORE INTO channel_user_data SELECT b.* FROM _bak_channel_ud b
-      WHERE EXISTS (SELECT 1 FROM streams WHERE id = b.stream_id)
-    `).run()
     db.prepare(`DROP TABLE IF EXISTS _bak_stream_ud`).run()
     db.prepare(`DROP TABLE IF EXISTS _bak_series_ud`).run()
-    db.prepare(`DROP TABLE IF EXISTS _bak_channel_ud`).run()
 
     db.prepare('UPDATE categories SET content_synced = 1 WHERE source_id = ?').run(sourceId)
     const streamsCount = (db.prepare('SELECT COUNT(*) as n FROM streams WHERE source_id = ?').get(sourceId) as { n: number }).n

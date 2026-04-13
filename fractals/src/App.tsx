@@ -12,7 +12,6 @@ import { ContextMenu } from '@/components/shared/ContextMenu'
 import { ContentItem } from '@/lib/types'
 // PlayerOverlay is NOT lazy — must be persistent (never unmounts) for mini-player
 import { PlayerOverlay } from '@/components/player/PlayerOverlay'
-
 // Detail + overlay panels loaded lazily
 const MovieDetail = lazy(() => import('@/components/detail/MovieDetail').then((m) => ({ default: m.MovieDetail })))
 const SeriesDetail = lazy(() => import('@/components/detail/SeriesDetail').then((m) => ({ default: m.SeriesDetail })))
@@ -158,6 +157,19 @@ function AppShell() {
       }
     })
   }, [setIndexProgress, setFtsEnabled])
+
+  // Canonical layer build progress (g3). On done, invalidate browse so channels appear.
+  useEffect(() => {
+    return api.on('canonical:progress', (progress: any) => {
+      const p = progress as SyncProgress & { sourceId: string }
+      if (p.phase === 'done' || p.phase === 'error') {
+        setIndexProgress(p.sourceId, null)
+        if (p.phase === 'done') invalidateContentQueries()
+      } else {
+        setIndexProgress(p.sourceId, { phase: p.phase, current: p.current, total: p.total, message: p.message })
+      }
+    })
+  }, [setIndexProgress])
 
   const handleSync = async (sourceId: string) => {
     if (syncingIds.current.has(sourceId)) return

@@ -304,7 +304,7 @@ export function HomeView({ onSelectContent }: Props) {
     onSelectContent(item)
   }, [favChannels, effectiveMode, onSelectContent, setChannelSurfContext])
 
-  // No auto-fallback — let My Channels show an empty state instead
+  // No auto-fallback — let TV mode show an empty state instead
 
   // Focus search on /
   useEffect(() => {
@@ -423,7 +423,7 @@ export function HomeView({ onSelectContent }: Props) {
                   <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.35 }}>
                     <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
                   </svg>
-                  <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-1)', margin: 0 }}>No favourite channels yet</p>
+                  <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-1)', margin: 0 }}>No favorite channels yet</p>
                   <p style={{ fontSize: 12, color: 'var(--text-2)', margin: 0, textAlign: 'center', maxWidth: 260, lineHeight: 1.6 }}>
                     Heart a channel from Live TV to add it here. Your list will be saved and reorderable.
                   </p>
@@ -439,7 +439,7 @@ export function HomeView({ onSelectContent }: Props) {
               ? (
                 <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 40 }}>
                   <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-1)', margin: 0 }}>No channels from selected source</p>
-                  <p style={{ fontSize: 12, color: 'var(--text-2)', margin: 0 }}>Switch source filter to see your favourites.</p>
+                  <p style={{ fontSize: 12, color: 'var(--text-2)', margin: 0 }}>Switch source filter to see your favorites.</p>
                 </div>
               )
               : <ChannelsMode items={favChannels} allItems={channelsFavData} onSelectContent={handleSelectContent} />
@@ -519,7 +519,7 @@ function DiscoverMode({ favChannels, selectedSourceIds, onSelectContent, onNavig
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
       <DiscoverStrip
-        title="Favourite Channels" accent="var(--accent-live)" type="live"
+        title="Favorite Channels" accent="var(--accent-live)" type="live"
         items={favChannels} hasMore={favChannels.length > STRIP_MAX} isLoading={false}
         onMore={() => onNavigate('channels')} onSelectContent={onSelectContent} stripMax={STRIP_MAX}
       />

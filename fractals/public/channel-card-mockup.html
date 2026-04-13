@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Channel Card Concepts</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0 }
+  body {
+    background: #08080c;
+    color: #f2f0ff;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 13px;
+    padding: 32px;
+  }
+  h1 { font-size: 18px; font-weight: 700; color: #f2f0ff; margin-bottom: 6px }
+  h2 { font-size: 13px; font-weight: 600; color: #9894bc; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.06em }
+  .subtitle { font-size: 12px; color: #54526e; margin-bottom: 32px }
+  .section { margin-bottom: 48px }
+  .section-header { margin-bottom: 20px; padding-bottom: 12px; border-bottom: 1px solid #1e1e2a }
+  .section-desc { font-size: 11px; color: #54526e; margin-top: 4px }
+  .grid { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-start }
+
+  /* ── Base card ── */
+  .card {
+    background: #12121a;
+    border: 1px solid #1e1e2a;
+    border-radius: 8px;
+    overflow: hidden;
+    cursor: pointer;
+    transition: border-color 0.12s;
+    position: relative;
+  }
+  .card:hover { border-color: #2e2e42 }
+  .logo-area {
+    aspect-ratio: 16/9;
+    background: #1a1a28;
+    display: flex; align-items: center; justify-content: center;
+    position: relative; overflow: hidden;
+  }
+  .logo-area img { width: 100%; height: 100%; object-fit: contain; padding: 12% }
+  .initials {
+    font-size: 16px; font-weight: 800; letter-spacing: -0.02em;
+    opacity: 0.5;
+  }
+  .card-body { padding: 7px 9px 8px }
+  .card-title {
+    font-size: 11px; font-weight: 500; color: #f2f0ff;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    margin-bottom: 3px;
+  }
+  .card-sub {
+    font-size: 9px; color: #54526e;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .badges { display: flex; gap: 4px; align-items: center; margin-top: 3px }
+  .badge {
+    font-size: 9px; font-weight: 600; padding: 1px 4px;
+    border-radius: 3px; line-height: 1.4;
+    background: #1e1e2a; color: #9894bc;
+  }
+  .flag { font-size: 11px; line-height: 1 }
+
+  /* source stripe */
+  .stripe {
+    position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+    display: flex; flex-direction: column; gap: 1px; z-index: 3;
+  }
+  .stripe-seg { flex: 1 }
+
+  /* source colors */
+  .c1 { background: #7c4dff }
+  .c2 { background: #e05555 }
+  .c3 { background: #4a9eff }
+  .c4 { background: #2dba85 }
+
+  /* card widths */
+  .w-160 { width: 160px }
+  .w-140 { width: 140px }
+
+  /* ─────────────────────────────────────────
+     OPTION A: Flat list — individual streams
+     ───────────────────────────────────────── */
+  .option-a .card { width: 160px }
+
+  /* ─────────────────────────────────────────
+     OPTION B: Stacked / fan
+     ───────────────────────────────────────── */
+  .stack-wrap {
+    position: relative;
+    width: 160px;
+    cursor: pointer;
+  }
+  /* shadow cards behind */
+  .stack-wrap .shadow-card {
+    position: absolute;
+    width: 156px; border-radius: 8px;
+    background: #1a1a28; border: 1px solid #1e1e2a;
+    overflow: hidden;
+  }
+  .stack-wrap .shadow-card .logo-area { aspect-ratio: 16/9 }
+
+  /* 2-stream stack */
+  .stack-2 .shadow-card:nth-child(1) {
+    top: -6px; left: 6px;
+    opacity: 0.55; transform: rotate(1.5deg);
+  }
+  .stack-2 .front { position: relative; z-index: 2 }
+
+  /* 3-stream stack */
+  .stack-3 .shadow-card:nth-child(1) {
+    top: -10px; left: 8px;
+    opacity: 0.35; transform: rotate(2.5deg);
+  }
+  .stack-3 .shadow-card:nth-child(2) {
+    top: -5px; left: 4px;
+    opacity: 0.55; transform: rotate(1.2deg);
+  }
+  .stack-3 .front { position: relative; z-index: 3 }
+
+  /* 5-stream stack */
+  .stack-5 .shadow-card:nth-child(1) {
+    top: -14px; left: 10px;
+    opacity: 0.2; transform: rotate(3.5deg);
+  }
+  .stack-5 .shadow-card:nth-child(2) {
+    top: -10px; left: 8px;
+    opacity: 0.3; transform: rotate(2.5deg);
+  }
+  .stack-5 .shadow-card:nth-child(3) {
+    top: -6px; left: 4px;
+    opacity: 0.45; transform: rotate(1.2deg);
+  }
+  .stack-5 .shadow-card:nth-child(4) {
+    top: -3px; left: 2px;
+    opacity: 0.6; transform: rotate(0.5deg);
+  }
+  .stack-5 .front { position: relative; z-index: 5 }
+
+  .stack-count {
+    position: absolute; top: 6px; right: 6px;
+    background: rgba(0,0,0,0.7); border-radius: 10px;
+    padding: 2px 6px; font-size: 9px; font-weight: 700;
+    color: #f2f0ff; z-index: 10; letter-spacing: 0.02em;
+  }
+
+  /* ─────────────────────────────────────────
+     OPTION C: Expanded fan on hover (simulated with two states)
+     ───────────────────────────────────────── */
+  .fan-collapsed { width: 160px; position: relative; cursor: pointer }
+  .fan-expanded {
+    display: flex; gap: -20px;
+    position: relative; cursor: pointer;
+    align-items: flex-end;
+  }
+  .fan-expanded .fan-card {
+    width: 140px; flex-shrink: 0;
+    transition: transform 0.2s;
+    position: relative;
+  }
+  .fan-expanded .fan-card:not(:first-child) { margin-left: -50px }
+  .fan-expanded .fan-card:hover { transform: translateY(-8px); z-index: 10 }
+  .fan-expanded .fan-card .card { width: 140px }
+  .fan-label {
+    font-size: 9px; font-weight: 600; color: #9894bc;
+    text-align: center; margin-top: 5px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    max-width: 130px;
+  }
+
+  /* ─────────────────────────────────────────
+     OPTION D: Base card + peek strip below
+     ───────────────────────────────────────── */
+  .peek-wrap { width: 160px; cursor: pointer }
+  .peek-base { width: 160px }
+  .peek-strip {
+    display: flex; gap: 3px; padding: 4px 6px;
+    background: #0e0e18; border: 1px solid #1e1e2a;
+    border-top: none; border-radius: 0 0 8px 8px;
+    overflow: hidden;
+  }
+  .peek-chip {
+    flex: 1; height: 4px; border-radius: 2px; min-width: 0;
+  }
+
+  /* ─────────────────────────────────────────
+     OPTION E: Composite — base + overlaid mini cards
+     ───────────────────────────────────────── */
+  .composite-wrap { position: relative; width: 160px; cursor: pointer }
+  .composite-base { width: 160px }
+  .composite-streams {
+    position: absolute;
+    bottom: -1px; right: -1px;
+    display: flex; flex-direction: column; gap: 2px;
+    padding: 4px;
+    z-index: 5;
+  }
+  .mini-stream {
+    display: flex; align-items: center; gap: 5px;
+    background: rgba(8,8,12,0.88);
+    border: 1px solid #2e2e42;
+    border-radius: 5px;
+    padding: 3px 6px;
+    backdrop-filter: blur(6px);
+    font-size: 9px; font-weight: 500; color: #9894bc;
+    white-space: nowrap;
+    transition: background 0.1s, color 0.1s;
+  }
+  .mini-stream:hover { background: rgba(124,77,255,0.18); color: #f2f0ff; border-color: #7c4dff }
+  .mini-dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0 }
+
+  /* state labels */
+  .state-label {
+    font-size: 9px; font-weight: 700; color: #54526e;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    margin-bottom: 8px;
+  }
+  .pair { display: flex; gap: 32px; align-items: flex-start; flex-wrap: wrap }
+  .pair-item { display: flex; flex-direction: column }
+</style>
+</head>
+<body>
+
+<h1>Channel Card Concepts — Live Browse</h1>
+<p class="subtitle">Canonical grouping options. Each section shows 1-stream, 2-stream, 3-stream, and 5-stream examples.</p>
+
+<!-- ════════════════════════════════════════════════════════════
+     OPTION A — Flat list (no grouping, baseline)
+     ════════════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-header">
+    <h2>Option A — Flat list (no grouping)</h2>
+    <p class="section-desc">Every stream is its own card. Simple. 66k cards for 66k streams.</p>
+  </div>
+  <div class="grid option-a">
+
+    <!-- 1 stream -->
+    <div class="card w-160">
+      <div class="stripe"><div class="stripe-seg c1"></div></div>
+      <div class="logo-area">
+        <span class="initials" style="color:#7c4dff">HN</span>
+      </div>
+      <div class="card-body">
+        <div class="card-title">Hum News HD</div>
+        <div class="badges"><span class="flag">🇵🇰</span></div>
+      </div>
+    </div>
+
+    <!-- 2 streams — same channel, 2 sources -->
+    <div class="card w-160">
+      <div class="stripe"><div class="stripe-seg c1"></div></div>
+      <div class="logo-area">
+        <span class="initials" style="color:#7c4dff">HT</span>
+      </div>
+      <div class="card-body">
+        <div class="card-title">Hum TV HD</div>
+        <div class="badges"><span class="flag">🇵🇰</span><span class="badge">×2</span></div>
+      </div>
+    </div>
+    <div class="card w-160">
+      <div class="stripe"><div class="stripe-seg c2"></div></div>
+      <div class="logo-area">
+        <span class="initials" style="color:#e05555">HT</span>
+      </div>
+      <div class="card-body">
+        <div class="card-title">Hum TV FHD</div>
+        <div class="badges"><span class="flag">🇵🇰</span></div>
+      </div>
+    </div>
+
+    <!-- 3 streams -->
+    <div class="card w-160">
+      <div class="stripe"><div class="stripe-seg c1"></div></div>
+      <div class="logo-area"><span class="initials" style="color:#7c4dff">GN</span></div>
+      <div class="card-body">
+        <div class="card-title">Geo News</div>
+        <div class="badges"><span class="flag">🇵🇰</span></div>
+      </div>
+    </div>
+    <div class="card w-160">
+      <div class="stripe"><div class="stripe-seg c2"></div></div>
+      <div class="logo-area"><span class="initials" style="color:#e05555">GN</span></div>
+      <div class="card-body">
+        <div class="card-title">Geo News HD</div>
+        <div class="badges"><span class="flag">🇵🇰</span></div>
+      </div>
+    </div>
+    <div class="card w-160">
+      <div class="stripe"><div class="stripe-seg c3"></div></div>
+      <div class="logo-area"><span class="initials" style="color:#4a9eff">GN</span></div>
+      <div class="card-body">
+        <div class="card-title">Geo News 4K</div>
+        <div class="badges"><span class="flag">🇵🇰</span></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════
+     OPTION B — Stacked cards
+     ════════════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-header">
+    <h2>Option B — Stacked cards</h2>
+    <p class="section-desc">One stack per canonical channel. Shadow cards peek behind. Count badge top-right.</p>
+  </div>
+  <div class="grid">
+
+    <!-- 1 stream — no stack -->
+    <div>
+      <div class="state-label">1 stream</div>
+      <div class="card w-160">
+        <div class="stripe"><div class="stripe-seg c1"></div></div>
+        <div class="logo-area"><span class="initials" style="color:#7c4dff">HN</span></div>
+        <div class="card-body">
+          <div class="card-title">Hum News</div>
+          <div class="badges"><span class="flag">🇵🇰</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2 streams -->
+    <div>
+      <div class="state-label">2 streams</div>
+      <div class="stack-wrap stack-2">
+        <div class="shadow-card">
+          <div class="logo-area"><span class="initials" style="color:#e05555">HT</span></div>
+        </div>
+        <div class="card front w-160">
+          <div class="stripe">
+            <div class="stripe-seg c1"></div>
+            <div class="stripe-seg c2"></div>
+          </div>
+          <div class="stack-count">×2</div>
+          <div class="logo-area"><span class="initials" style="color:#7c4dff">HT</span></div>
+          <div class="card-body">
+            <div class="card-title">Hum TV</div>
+            <div class="badges"><span class="flag">🇵🇰</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3 streams -->
+    <div>
+      <div class="state-label">3 streams</div>
+      <div class="stack-wrap stack-3">
+        <div class="shadow-card">
+          <div class="logo-area"><span class="initials" style="color:#4a9eff">GN</span></div>
+        </div>
+        <div class="shadow-card">
+          <div class="logo-area"><span class="initials" style="color:#e05555">GN</span></div>
+        </div>
+        <div class="card front w-160">
+          <div class="stripe">
+            <div class="stripe-seg c1"></div>
+            <div class="stripe-seg c2"></div>
+            <div class="stripe-seg c3"></div>
+          </div>
+          <div class="stack-count">×3</div>
+          <div class="logo-area"><span class="initials" style="color:#7c4dff">GN</span></div>
+          <div class="card-body">
+            <div class="card-title">Geo News</div>
+            <div class="badges"><span class="flag">🇵🇰</span><span class="badge">×3</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 5 streams -->
+    <div>
+      <div class="state-label">5 streams</div>
+      <div class="stack-wrap stack-5">
+        <div class="shadow-card"><div class="logo-area"><span class="initials" style="color:#2dba85">AR</span></div></div>
+        <div class="shadow-card"><div class="logo-area"><span class="initials" style="color:#4a9eff">AR</span></div></div>
+        <div class="shadow-card"><div class="logo-area"><span class="initials" style="color:#e05555">AR</span></div></div>
+        <div class="shadow-card"><div class="logo-area"><span class="initials" style="color:#9894bc">AR</span></div></div>
+        <div class="card front w-160">
+          <div class="stripe">
+            <div class="stripe-seg c1"></div>
+            <div class="stripe-seg c2"></div>
+            <div class="stripe-seg c3"></div>
+            <div class="stripe-seg c4"></div>
+          </div>
+          <div class="stack-count">×5</div>
+          <div class="logo-area"><span class="initials" style="color:#7c4dff">AR</span></div>
+          <div class="card-body">
+            <div class="card-title">ARY News</div>
+            <div class="badges"><span class="flag">🇵🇰</span><span class="badge">×5</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════
+     OPTION C — Horizontal fan (collapsed → expanded)
+     ════════════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-header">
+    <h2>Option C — Horizontal fan</h2>
+    <p class="section-desc">Collapsed = one card. Expanded (click/hover) = cards fan out horizontally, each pickable.</p>
+  </div>
+
+  <div class="pair">
+    <div class="pair-item">
+      <div class="state-label">Collapsed</div>
+      <div class="grid">
+        <div class="fan-collapsed">
+          <div class="card w-160">
+            <div class="stripe">
+              <div class="stripe-seg c1"></div>
+              <div class="stripe-seg c2"></div>
+            </div>
+            <div class="stack-count">×2</div>
+            <div class="logo-area"><span class="initials" style="color:#7c4dff">HT</span></div>
+            <div class="card-body">
+              <div class="card-title">Hum TV</div>
+              <div class="badges"><span class="flag">🇵🇰</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="fan-collapsed">
+          <div class="card w-160">
+            <div class="stripe">
+              <div class="stripe-seg c1"></div>
+              <div class="stripe-seg c2"></div>
+              <div class="stripe-seg c3"></div>
+            </div>
+            <div class="stack-count">×3</div>
+            <div class="logo-area"><span class="initials" style="color:#7c4dff">GN</span></div>
+            <div class="card-body">
+              <div class="card-title">Geo News</div>
+              <div class="badges"><span class="flag">🇵🇰</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="pair-item">
+      <div class="state-label">Expanded (hover/click)</div>
+      <div class="grid" style="align-items:flex-end">
+        <!-- 2 stream fan -->
+        <div class="fan-expanded">
+          <div class="fan-card">
+            <div class="card">
+              <div class="stripe"><div class="stripe-seg c1"></div></div>
+              <div class="logo-area"><span class="initials" style="color:#7c4dff">HT</span></div>
+              <div class="card-body">
+                <div class="card-title">Hum TV HD</div>
+                <div class="card-sub">Source A</div>
+              </div>
+            </div>
+            <div class="fan-label">Hum TV HD</div>
+          </div>
+          <div class="fan-card">
+            <div class="card">
+              <div class="stripe"><div class="stripe-seg c2"></div></div>
+              <div class="logo-area"><span class="initials" style="color:#e05555">HT</span></div>
+              <div class="card-body">
+                <div class="card-title">Hum TV FHD</div>
+                <div class="card-sub">Source B</div>
+              </div>
+            </div>
+            <div class="fan-label">Hum TV FHD</div>
+          </div>
+        </div>
+
+        <!-- 3 stream fan -->
+        <div class="fan-expanded">
+          <div class="fan-card">
+            <div class="card">
+              <div class="stripe"><div class="stripe-seg c1"></div></div>
+              <div class="logo-area"><span class="initials" style="color:#7c4dff">GN</span></div>
+              <div class="card-body"><div class="card-title">Geo News</div><div class="card-sub">Source A</div></div>
+            </div>
+            <div class="fan-label">Geo News</div>
+          </div>
+          <div class="fan-card">
+            <div class="card">
+              <div class="stripe"><div class="stripe-seg c2"></div></div>
+              <div class="logo-area"><span class="initials" style="color:#e05555">GN</span></div>
+              <div class="card-body"><div class="card-title">Geo News HD</div><div class="card-sub">Source B</div></div>
+            </div>
+            <div class="fan-label">Geo News HD</div>
+          </div>
+          <div class="fan-card">
+            <div class="card">
+              <div class="stripe"><div class="stripe-seg c3"></div></div>
+              <div class="logo-area"><span class="initials" style="color:#4a9eff">GN</span></div>
+              <div class="card-body"><div class="card-title">Geo News 4K</div><div class="card-sub">Source C</div></div>
+            </div>
+            <div class="fan-label">Geo News 4K</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════
+     OPTION D — Base card + source peek strip
+     ════════════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-header">
+    <h2>Option D — Peek strip</h2>
+    <p class="section-desc">Base card shows canonical info. A thin strip below shows one chip per stream variant, colored by source. Click a chip to play that stream.</p>
+  </div>
+  <div class="grid">
+
+    <!-- 1 stream — no strip -->
+    <div>
+      <div class="state-label">1 stream</div>
+      <div class="peek-wrap">
+        <div class="card peek-base">
+          <div class="stripe"><div class="stripe-seg c1"></div></div>
+          <div class="logo-area"><span class="initials" style="color:#7c4dff">HN</span></div>
+          <div class="card-body">
+            <div class="card-title">Hum News</div>
+            <div class="badges"><span class="flag">🇵🇰</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2 streams -->
+    <div>
+      <div class="state-label">2 streams</div>
+      <div class="peek-wrap">
+        <div class="card peek-base" style="border-radius: 8px 8px 0 0">
+          <div class="stripe">
+            <div class="stripe-seg c1"></div>
+            <div class="stripe-seg c2"></div>
+          </div>
+          <div class="logo-area"><span class="initials" style="color:#7c4dff">HT</span></div>
+          <div class="card-body">
+            <div class="card-title">Hum TV</div>
+            <div class="badges"><span class="flag">🇵🇰</span></div>
+          </div>
+        </div>
+        <div class="peek-strip">
+          <div class="peek-chip c1" title="Hum TV HD — Source A"></div>
+          <div class="peek-chip c2" title="Hum TV FHD — Source B"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3 streams -->
+    <div>
+      <div class="state-label">3 streams</div>
+      <div class="peek-wrap">
+        <div class="card peek-base" style="border-radius: 8px 8px 0 0">
+          <div class="stripe">
+            <div class="stripe-seg c1"></div>
+            <div class="stripe-seg c2"></div>
+            <div class="stripe-seg c3"></div>
+          </div>
+          <div class="logo-area"><span class="initials" style="color:#7c4dff">GN</span></div>
+          <div class="card-body">
+            <div class="card-title">Geo News</div>
+            <div class="badges"><span class="flag">🇵🇰</span></div>
+          </div>
+        </div>
+        <div class="peek-strip">
+          <div class="peek-chip c1" title="Geo News — Source A"></div>
+          <div class="peek-chip c2" title="Geo News HD — Source B"></div>
+          <div class="peek-chip c3" title="Geo News 4K — Source C"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 5 streams -->
+    <div>
+      <div class="state-label">5 streams</div>
+      <div class="peek-wrap">
+        <div class="card peek-base" style="border-radius: 8px 8px 0 0">
+          <div class="stripe">
+            <div class="stripe-seg c1"></div>
+            <div class="stripe-seg c2"></div>
+            <div class="stripe-seg c3"></div>
+            <div class="stripe-seg c4"></div>
+          </div>
+          <div class="logo-area"><span class="initials" style="color:#7c4dff">AR</span></div>
+          <div class="card-body">
+            <div class="card-title">ARY News</div>
+            <div class="badges"><span class="flag">🇵🇰</span><span class="badge">×5</span></div>
+          </div>
+        </div>
+        <div class="peek-strip">
+          <div class="peek-chip c1"></div>
+          <div class="peek-chip c2"></div>
+          <div class="peek-chip c3"></div>
+          <div class="peek-chip c4"></div>
+          <div class="peek-chip" style="background:#54526e"></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════
+     OPTION E — Composite: base + overlaid stream cards
+     ════════════════════════════════════════════════════════════ -->
+<div class="section">
+  <div class="section-header">
+    <h2>Option E — Composite overlay</h2>
+    <p class="section-desc">Base card shows canonical info. Stream variant pills are overlaid bottom-right. Each pill is directly clickable to play that specific stream.</p>
+  </div>
+  <div class="grid">
+
+    <!-- 1 stream -->
+    <div>
+      <div class="state-label">1 stream</div>
+      <div class="card w-160">
+        <div class="stripe"><div class="stripe-seg c1"></div></div>
+        <div class="logo-area"><span class="initials" style="color:#7c4dff">HN</span></div>
+        <div class="card-body">
+          <div class="card-title">Hum News</div>
+          <div class="badges"><span class="flag">🇵🇰</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2 streams -->
+    <div>
+      <div class="state-label">2 streams</div>
+      <div class="composite-wrap">
+        <div class="card composite-base">
+          <div class="stripe">
+            <div class="stripe-seg c1"></div>
+            <div class="stripe-seg c2"></div>
+          </div>
+          <div class="logo-area"><span class="initials" style="color:#7c4dff">HT</span></div>
+          <div class="card-body">
+            <div class="card-title">Hum TV</div>
+            <div class="badges"><span class="flag">🇵🇰</span></div>
+          </div>
+        </div>
+        <div class="composite-streams">
+          <div class="mini-stream"><div class="mini-dot c1"></div>Hum TV HD</div>
+          <div class="mini-stream"><div class="mini-dot c2"></div>Hum TV FHD</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3 streams -->
+    <div>
+      <div class="state-label">3 streams</div>
+      <div class="composite-wrap">
+        <div class="card composite-base">
+          <div class="stripe">
+            <div class="stripe-seg c1"></div>
+            <div class="stripe-seg c2"></div>
+            <div class="stripe-seg c3"></div>
+          </div>
+          <div class="logo-area"><span class="initials" style="color:#7c4dff">GN</span></div>
+          <div class="card-body">
+            <div class="card-title">Geo News</div>
+            <div class="badges"><span class="flag">🇵🇰</span></div>
+          </div>
+        </div>
+        <div class="composite-streams">
+          <div class="mini-stream"><div class="mini-dot c1"></div>Geo News</div>
+          <div class="mini-stream"><div class="mini-dot c2"></div>Geo News HD</div>
+          <div class="mini-stream"><div class="mini-dot c3"></div>Geo News 4K</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 5 streams -->
+    <div>
+      <div class="state-label">5 streams</div>
+      <div class="composite-wrap">
+        <div class="card composite-base">
+          <div class="stripe">
+            <div class="stripe-seg c1"></div>
+            <div class="stripe-seg c2"></div>
+            <div class="stripe-seg c3"></div>
+            <div class="stripe-seg c4"></div>
+          </div>
+          <div class="logo-area"><span class="initials" style="color:#7c4dff">AR</span></div>
+          <div class="card-body">
+            <div class="card-title">ARY News</div>
+            <div class="badges"><span class="flag">🇵🇰</span><span class="badge">×5</span></div>
+          </div>
+        </div>
+        <div class="composite-streams">
+          <div class="mini-stream"><div class="mini-dot c1"></div>ARY News SD</div>
+          <div class="mini-stream"><div class="mini-dot c2"></div>ARY News HD</div>
+          <div class="mini-stream"><div class="mini-dot c3"></div>ARY News FHD</div>
+          <div class="mini-stream" style="color:#54526e; font-style:italic"><div class="mini-dot" style="background:#54526e"></div>+2 more…</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+</body>
+</html>

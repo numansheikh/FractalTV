@@ -11,6 +11,13 @@ interface Props {
   onClick: (item: ContentItem) => void
 }
 
+// Country code → flag emoji (basic ISO 3166-1 alpha-2)
+function countryFlag(code: string | undefined): string | null {
+  if (!code || code.length !== 2) return null
+  const base = 0x1F1E6 - 65
+  return String.fromCodePoint(base + code.toUpperCase().charCodeAt(0), base + code.toUpperCase().charCodeAt(1))
+}
+
 export function ChannelCard({ item, onClick }: Props) {
   const [hovered, setHovered] = useState(false)
   const [imgError, setImgError] = useState(false)
@@ -22,11 +29,20 @@ export function ChannelCard({ item, onClick }: Props) {
 
   const poster = item.posterUrl ?? item.poster_url
   const hasPoster = poster && !imgError
-  const primarySourceId = item.primarySourceId ?? item.primary_source_id ?? (item as any).source_ids ?? item.id?.split(':')[0]
+  const primarySourceId = item.primarySourceId ?? item.primary_source_id ?? item.id?.split(':')[0]
+  const allSourceIds = ((item as any).source_ids as string | undefined)?.split(',').filter(Boolean) ?? (primarySourceId ? [primarySourceId] : [])
   const sourceColor = primarySourceId ? colorMap[primarySourceId] : undefined
   const sourceName = primarySourceId ? sources.find((s) => s.id === primarySourceId)?.name : undefined
-  const showSourceBar = sources.length > 1 && !!sourceColor
+  const showSourceBar = sources.length > 1 && allSourceIds.length > 0
   const isFavorite = userData?.favorite === 1
+
+  // g3 canonical badges
+  const flag = countryFlag(item.country)
+  const variantCount = item.variant_count ?? 0
+  const sourceCount = item.source_count ?? 0
+  const isDefunct = !!item.closed
+  const hasMultiSource = sourceCount > 1
+  const hasMultiVariant = variantCount > 1
 
   // Channel initials for fallback
   const initials = item.title
@@ -54,13 +70,30 @@ export function ChannelCard({ item, onClick }: Props) {
         borderRight: `1px solid ${hovered ? 'var(--border-strong)' : 'var(--border-subtle)'}`,
         borderBottom: `1px solid ${hovered ? 'var(--border-strong)' : 'var(--border-subtle)'}`,
         borderLeft: showSourceBar
-          ? `3px solid ${sourceColor!.accent}`
+          ? '3px solid transparent'
           : `1px solid ${hovered ? 'var(--border-strong)' : 'var(--border-subtle)'}`,
         transition: 'border-color 0.12s',
         userSelect: 'none',
         position: 'relative',
       }}
     >
+      {/* Source stripe — stacked colored segments, one per source */}
+      {showSourceBar && (
+        <div style={{
+          position: 'absolute', left: 0, top: 0, bottom: 0, width: 3,
+          display: 'flex', flexDirection: 'column',
+          gap: allSourceIds.length > 1 ? 1 : 0,
+          zIndex: 3,
+        }}>
+          {allSourceIds.map((sid) => (
+            <div key={sid} style={{
+              flex: 1,
+              background: colorMap[sid]?.accent ?? 'var(--border-subtle)',
+            }} />
+          ))}
+        </div>
+      )}
+
       {/* Logo area — 16:9 */}
       <div style={{
         aspectRatio: '16/9',
@@ -126,21 +159,43 @@ export function ChannelCard({ item, onClick }: Props) {
         )}
       </div>
 
-      {/* Channel name */}
+      {/* Channel name + badges */}
       <div style={{ padding: '5px 7px 6px' }}>
         <p style={{
           fontSize: 11,
           fontWeight: 500,
           lineHeight: 1.3,
-          color: 'var(--text-1)',
+          color: isDefunct ? 'var(--text-3)' : 'var(--text-1)',
           margin: 0,
+          marginBottom: 3,
           display: '-webkit-box',
           WebkitLineClamp: 2,
           WebkitBoxOrient: 'vertical',
           overflow: 'hidden',
         }}>
           {item.title}
+          {isDefunct && <span style={{ marginLeft: 4, fontSize: 9, color: 'var(--text-3)', fontWeight: 400 }}>DEFUNCT</span>}
         </p>
+
+        {/* Badges row */}
+        {(flag || hasMultiVariant) && (
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
+            {flag && (
+              <span style={{ fontSize: 11, lineHeight: 1 }} title={item.country ?? ''}>
+                {flag}
+              </span>
+            )}
+            {hasMultiVariant && (
+              <span style={{
+                fontSize: 9, fontWeight: 600, color: 'var(--text-2)',
+                background: 'var(--bg-3)', borderRadius: 3,
+                padding: '1px 4px', lineHeight: 1.4,
+              }} title={`${variantCount} variants`}>
+                ×{variantCount}
+              </span>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )

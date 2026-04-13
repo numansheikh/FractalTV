@@ -59,18 +59,51 @@ Branch: `search-rebuild-g1-g2`
 
 ---
 
-## g3 — next up
+## g3 — in progress
 
-Branch: `search-rebuild-g1-g2-g3` (created)
+Branch: `search-rebuild-g1-g2-g3`
 
-**Goal:** Keyless canonical identity layer (no API keys). Title-normalization-based grouping, plus iptv-org public-data enrichment for live channels.
+**Goal:** Keyless canonical identity layer (no API keys). iptv-org enrichment for live channels. FTS moves to canonical. Channel detail panel.
 
-**Scope (tentative):**
-- Canonical rows keyed by normalized title + year for movies/series
-- Bridge table: provider streams → canonical
-- Deduplication across sources (same movie from two providers → one canonical row)
-- iptv-org JSON ingest (39K channels, country/category/logo/NSFW) matched via `tvg-id`
-- Search target shifts from provider titles to canonical (FTS5 on canonical + bridge back to streams for playback)
+**Design decisions (locked 2026-04-13):**
+
+### Schema
+- `canonical_channels` (denormalized): `id` UUID PK, `title`, `country`, `network`, `owners` (JSON), `categories` (JSON), `is_nsfw`, `launched`, `closed`, `replaced_by`, `website`, `logo_url`, `iptv_org_id` TEXT nullable indexed, `created_at`, `updated_at`
+- `streams`: add `canonical_channel_id` FK + `user_flagged INTEGER DEFAULT 0`
+- `channel_user_data`: drop + rebuild keyed by `canonical_channel_id` (existing data expendable)
+- Canonical ID: local UUID; `iptv_org_id` is separate nullable column — join only at batch match time, never at runtime
+
+### Match strategy (runs at sync time, two passes)
+1. Pass 1 — exact: `stream.tvg_id == iptv_channels.id` → link + copy iptv-org fields into canonical
+2. Pass 2 — title: normalized title + alt_names match against canonical
+3. Unmatched → synthetic canonical created from stream title
+
+### FTS
+- Drop stream-keyed `content_fts`
+- New FTS5 virtual table over `canonical_channels(title, alt_names)`
+- Query path: FTS hit → canonical_id → fan out to streams for variants
+- VoD FTS (movies/series) unchanged — deferred to g5
+
+### UI
+- Channel card: shows canonical title; badges = country flag + variant count + multi-source dots
+- Badges are user-configurable (Settings → Data → checkbox list, fixed order)
+- Channel detail panel: new overlay mirroring Movie/Series pattern; shows enrichment + variant picker
+- NSFW filtering: deferred
+
+### Deferred
+- Stream health / user-flag UI (column added, logic later — TODO)
+- VoD canonical (g5+)
+- TV-oriented redesign pass (post-g3)
+
+### Next dev session queue
+- [ ] **Sources panel pipeline buttons** — add three separate action buttons per source: Reindex (FTS), Build Canonical, and the existing Sync. Each runs independently so you can re-run just canonical without a full resync. FTS toggle to move from prominent to a debug option in Settings → Data.
+
+### iptv-org ingestion — parked (TTL/splash bundle)
+
+Design locked 2026-04-13 (see memory `project_iptv_ingestion_plan.md`). Not blocking; refresh-button enrichment rerun is enough for now. Pick these up together:
+- [ ] First-launch splash screen blocking UI while initial iptv-org pull runs (empty DB)
+- [ ] TTL-expired gate on add-source flow (Hybrid C: empty → block, populated → parallel)
+- [ ] TTL-expired gate on manual sync flow (same Hybrid C behavior)
 
 ---
 
@@ -78,6 +111,7 @@ Branch: `search-rebuild-g1-g2-g3` (created)
 
 - [ ] **Episode stream hang** — player infinite spinner on 404. Needs timeout + error overlay.
 - [ ] **Black screen** — occasional idle black screen requiring Cmd+R. Undiagnosed, deferred.
+- [ ] **ADV mode thorough testing** — test ADV (advanced search) across g1, g2, g3 phases: basic query, diacritic input, ligature folding, FTS fallback to LIKE, canonical title match, per-view isolation.
 - [x] **Diacritic / ligature search** — FIXED in g2.
 - [x] **Search type bleeding** — FIXED in g1 (2026-04-12).
 
@@ -123,10 +157,11 @@ Three-tier split (same React codebase, feature flags):
 
 ---
 
-## Snapshot (2026-04-12)
+## Snapshot (2026-04-13)
 
-- Phase state: g1 locked, g2 locked, g3 starting
-- DB: 12 tables + `content_fts` virtual table
-- Branches: `search-rebuild-g1` (g1 locked), `search-rebuild-g1-g2` (g2 locked), `search-rebuild-g1-g2-g3` (g3 WIP)
+- Phase state: g1 locked, g2 locked, g3 in progress
+- DB: 12 tables + `content_fts` virtual table + `iptv_channels` (39K rows pulled)
+- Branches: `search-rebuild-g1` (g1), `search-rebuild-g1-g2` (g2), `search-rebuild-g1-g2-g3` (g3 WIP)
 - Two real-world sources synced + indexed + tested
 - Search: LIKE (g1) + FTS5 with diacritic/ligature folding (g2)
+- iptv-org pull infrastructure complete: `iptv-org:refresh` IPC, progress events, validation, Settings UI

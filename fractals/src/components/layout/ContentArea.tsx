@@ -14,15 +14,18 @@ import { BrowseSidebar } from '@/components/browse/BrowseSidebar'
 // Lazy imports — will be provided by agents
 let VirtualGrid: any = null
 let LibraryView: any = null
+let ChannelGroupView: any = null
 
 async function loadComponents() {
   try {
-    const [g, l] = await Promise.all([
+    const [g, l, cgv] = await Promise.all([
       import('@/components/grids/VirtualGrid').catch(() => null),
       import('@/components/library/LibraryView').catch(() => null),
+      import('@/components/browse/ChannelGroupView').catch(() => null),
     ])
     if (g) VirtualGrid = g.VirtualGrid
     if (l) LibraryView = l.LibraryView
+    if (cgv) ChannelGroupView = cgv.ChannelGroupView
   } catch {}
 }
 loadComponents()
@@ -75,10 +78,10 @@ export function ContentArea({ sort, onSelectContent, onAddSource }: Props) {
     loadComponents().then(() => setReady(true))
   }, [])
 
-  // Reset to page 1 when filters/view/sort change
+  // Reset to page 1 when filters/view/sort/viewMode change
   useEffect(() => {
     setPage(1)
-  }, [activeView, categoryFilter, selectedSourceIds, sort, query])
+  }, [activeView, categoryFilter, selectedSourceIds, sort, query, viewMode])
 
   const contentType = VIEW_TYPE[activeView] ?? (typeFilter !== 'all' ? (typeFilter === 'movie' ? 'movie' : typeFilter) as any : undefined)
   const [sortBy, sortDir] = sort.split(':') as [string, 'asc' | 'desc']
@@ -87,7 +90,7 @@ export function ContentArea({ sort, onSelectContent, onAddSource }: Props) {
   const showSidebar = isBrowseView
   const isFavoritesFilter = categoryFilter === '__favorites__'
 
-  // Favourites query — used when __favorites__ sentinel is active
+  // Favorites query — used when __favorites__ sentinel is active
   // Source filtering applied client-side (favorites API doesn't accept sourceIds)
   const { data: allFavData = [], isLoading: favLoading } = useQuery<ContentItem[]>({
     queryKey: ['browse-favorites', contentType],
@@ -107,7 +110,26 @@ export function ContentArea({ sort, onSelectContent, onAddSource }: Props) {
       return true
     })
 
-  // Browse query — page-based offset
+  const isGroupMode = activeView === 'live' && viewMode === 'group'
+
+  // Group view query — canonical groups for live channels. Runs first so browse
+  // query can decide whether to fetch (skip if groups were returned).
+  const LIVE_GROUP_PAGE_SIZE = 30
+  const { data: liveGroupedData, isLoading: liveGroupedLoading } = useQuery({
+    queryKey: ['browse-live-grouped', categoryFilter, selectedSourceIds, page, LIVE_GROUP_PAGE_SIZE],
+    queryFn: () => api.content.browseLiveGrouped({
+      categoryName: categoryFilter && categoryFilter !== '__favorites__' ? categoryFilter : undefined,
+      sourceIds: selectedSourceIds.length ? selectedSourceIds : undefined,
+      limit: LIVE_GROUP_PAGE_SIZE,
+      offset: (page - 1) * LIVE_GROUP_PAGE_SIZE,
+    }),
+    staleTime: 30_000,
+    enabled: !query && !isFavoritesFilter && isGroupMode,
+  })
+
+  // Browse query — page-based offset. In group mode, only runs as fallback when
+  // the grouped query resolved empty (no canonical data for this filter).
+  const groupFallbackNeeded = isGroupMode && liveGroupedData !== undefined && liveGroupedData.groups.length === 0
   const { data: browseData, isLoading: browseLoading } = useQuery({
     queryKey: ['browse', contentType, categoryFilter, selectedSourceIds, sortBy, sortDir, page, pageSize],
     queryFn: () => api.content.browse({
@@ -119,10 +141,10 @@ export function ContentArea({ sort, onSelectContent, onAddSource }: Props) {
       offset: (page - 1) * pageSize,
     }),
     staleTime: 30_000,
-    enabled: !query && !isFavoritesFilter && activeView !== 'library' && activeView !== 'home',
+    enabled: !query && !isFavoritesFilter && activeView !== 'library' && activeView !== 'home' && (!isGroupMode || groupFallbackNeeded),
   })
 
-  const isLoading = isFavoritesFilter ? favLoading : browseLoading
+  const isLoading = isFavoritesFilter ? favLoading : isGroupMode ? (liveGroupedLoading || (groupFallbackNeeded && browseLoading)) : browseLoading
 
   const ftsEnabled = useAppStore((s) => s.ftsEnabled)
   const searchBase = {
@@ -173,18 +195,28 @@ export function ContentArea({ sort, onSelectContent, onAddSource }: Props) {
 
   const liveSearchResults = liveSearchData?.items ?? []
 
+  const liveGroups = liveGroupedData?.groups ?? []
+  const hasGroups = liveGroups.length > 0
   const items: ContentItem[] = isFavoritesFilter
-    ? favData  // favData already has query filter applied client-side
+    ? favData
     : query
       ? searchItems
       : ((browseData?.items ?? []) as ContentItem[])
-  const total: number = isFavoritesFilter ? favData.length : query ? singleSearchTotal : (browseData?.total ?? 0)
+  const total: number = isFavoritesFilter ? favData.length
+    : query ? singleSearchTotal
+    : isGroupMode && hasGroups ? (liveGroupedData?.total ?? 0)
+    : (browseData?.total ?? 0)
+  // Show group view only when: group mode + no search + canonical groups actually exist
+  const showGroupView = isGroupMode && !query && hasGroups
+  const effectivePageSize = showGroupView ? LIVE_GROUP_PAGE_SIZE : pageSize
+  const hasAny = showGroupView ? liveGroups.length > 0 : items.length > 0
+  const isLoadingAny = isLoading || isSearchFetching
+  const showSkeleton = isLoadingAny && !hasAny
+  const isEmpty = !isLoadingAny && !hasAny
 
   useEffect(() => {
     if (items.length > 0) loadBulk(items.map((i) => i.id), isFavoritesFilter)
   }, [items, loadBulk, isFavoritesFilter])
-
-  const isEmpty = !isLoading && !isSearchFetching && items.length === 0
 
   // Wrap select — live items set surf context from whatever list is currently displayed
   const handleSelect = useCallback((item: ContentItem) => {
@@ -235,7 +267,7 @@ export function ContentArea({ sort, onSelectContent, onAddSource }: Props) {
 
         {/* Content grid */}
         <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
-          {isLoading && isEmpty && (
+          {showSkeleton && (
             <div style={{ flex: 1, padding: '12px 16px', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 10 }}>
               {Array.from({ length: 24 }).map((_, i) => (
                 <BrowseSkeleton key={i} type={contentType === 'live' ? 'live' : 'poster'} />
@@ -319,14 +351,24 @@ export function ContentArea({ sort, onSelectContent, onAddSource }: Props) {
           {!isEmpty && (
             <>
               <div style={{ flex: 1, minHeight: 0 }}>
-                {ready && VirtualGrid
-                  ? <VirtualGrid items={items} onSelect={handleSelect} viewMode={activeView === 'live' ? viewMode : 'grid'} isLoading={isLoading} contentType={contentType} />
-                  : <FallbackGrid items={items} onSelect={handleSelect} />
+                {showGroupView
+                  ? (ready && ChannelGroupView
+                      ? <ChannelGroupView
+                          groups={liveGroups}
+                          onSelect={handleSelect}
+                          hasCategory={!!(categoryFilter && categoryFilter !== '__favorites__')}
+                        />
+                      : <FallbackGrid items={[]} onSelect={handleSelect} />
+                    )
+                  : (ready && VirtualGrid
+                      ? <VirtualGrid items={items} onSelect={handleSelect} viewMode={activeView === 'live' ? viewMode : 'grid'} isLoading={isLoading} contentType={contentType} />
+                      : <FallbackGrid items={items} onSelect={handleSelect} />
+                    )
                 }
               </div>
               {/* Pagination bar — shown when total exceeds page size */}
-              {total > pageSize && (() => {
-                const totalPages = Math.ceil(total / pageSize)
+              {total > effectivePageSize && (() => {
+                const totalPages = Math.ceil(total / effectivePageSize)
                 return (
                   <div style={{
                     padding: '8px 16px',
@@ -367,7 +409,7 @@ export function ContentArea({ sort, onSelectContent, onAddSource }: Props) {
 
                     {/* Page label */}
                     <span style={{ fontSize: 11, color: 'var(--text-1)', fontFamily: 'var(--font-ui)', whiteSpace: 'nowrap', minWidth: 80, textAlign: 'right' }}>
-                      {isLoading ? 'Loading…' : `${((page - 1) * pageSize + 1).toLocaleString()}–${Math.min(page * pageSize, total).toLocaleString()} of ${total.toLocaleString()}`}
+                      {isLoading ? 'Loading…' : `${((page - 1) * effectivePageSize + 1).toLocaleString()}–${Math.min(page * effectivePageSize, total).toLocaleString()} of ${total.toLocaleString()}`}
                     </span>
                   </div>
                 )

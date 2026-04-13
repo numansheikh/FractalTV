@@ -310,7 +310,7 @@ function InterfaceTab() {
               const label = mode === 'discover' ? 'Discover' : 'TV'
               const desc = mode === 'discover'
                 ? 'Strips of channels, movies & series'
-                : 'Your favourite channels, drag to reorder'
+                : 'Your favorite channels, drag to reorder'
               return (
                 <button
                   key={mode}
@@ -623,7 +623,7 @@ function DataTab({ enrichStatus, enrichProgress, enrichMsg, pct, isPending, onSt
         // Reset persisted UI preferences to defaults
         useAppStore.setState({
           sort: 'updated:desc',
-          viewMode: 'grid',
+          viewMode: 'group',
           pageSize: 60,
           homeMode: 'discover',
           hasSeenChannelsModePrompt: false,
@@ -723,6 +723,9 @@ function DataTab({ enrichStatus, enrichProgress, enrichMsg, pct, isPending, onSt
     <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
       {/* ── Enrichment — hidden until TMDB integration (g2+) ── */}
 
+      {/* ── iptv-org channel database (g3) ── */}
+      <IptvOrgSection />
+
       {/* ── Backup/Import ── */}
       <section>
         <SectionLabel>Sources backup</SectionLabel>
@@ -738,7 +741,7 @@ function DataTab({ enrichStatus, enrichProgress, enrichMsg, pct, isPending, onSt
                   </label>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 11, color: 'var(--text-1)', cursor: 'pointer' }}>
                     <input type="checkbox" checked={includeUserData} onChange={(e) => setIncludeUserData(e.target.checked)} style={{ accentColor: 'var(--accent-interactive)', cursor: 'pointer' }} />
-                    User data (favourites, watchlist, history)
+                    User data (favorites, watchlist, history)
                   </label>
                 </div>
               </div>
@@ -879,6 +882,161 @@ function DataTab({ enrichStatus, enrichProgress, enrichMsg, pct, isPending, onSt
         </div>
       </section>
     </div>
+  )
+}
+
+/* ── iptv-org channel database section (g3) ─────────────────────── */
+function IptvOrgSection() {
+  const [lastPull, setLastPull] = useState<number | null>(null)
+  const [url, setUrl] = useState<string>('')
+  const [ttlDays, setTtlDays] = useState<string>('15')
+  const [progress, setProgress] = useState<{ phase: string; current: number; total: number; message: string } | null>(null)
+  const [msg, setMsg] = useState<string | null>(null)
+  const [advanced, setAdvanced] = useState(false)
+
+  // Load current settings
+  const loadSettings = async () => {
+    const [u, t, lp] = await Promise.all([
+      api.settings.get('iptv_channels_url'),
+      api.settings.get('iptv_channels_ttl_days'),
+      api.settings.get('iptv_channels_last_pull'),
+    ])
+    setUrl(u ?? 'https://iptv-org.github.io/api/channels.json')
+    setTtlDays(t ?? '15')
+    setLastPull(lp ? parseInt(lp, 10) : null)
+  }
+
+  useEffect(() => { loadSettings() }, [])
+
+  // Subscribe to iptv-org:progress
+  useEffect(() => {
+    return api.on('iptv-org:progress', (data: any) => {
+      if (data.phase === 'done') {
+        setProgress(null)
+        setMsg(`Pulled ${data.total.toLocaleString()} channels.`)
+        loadSettings()
+      } else if (data.phase === 'error') {
+        setProgress(null)
+        setMsg(`Error: ${data.message}`)
+      } else {
+        setProgress({ phase: data.phase, current: data.current, total: data.total, message: data.message })
+      }
+    })
+  }, [])
+
+  const handleRefresh = async () => {
+    setMsg(null)
+    setProgress({ phase: 'fetching', current: 0, total: 0, message: 'Starting…' })
+    const result = await api.iptvOrg.refresh()
+    if (!result.success) {
+      setProgress(null)
+      setMsg(`Error: ${result.error ?? 'Unknown'}`)
+    }
+  }
+
+  const handleSaveUrl = async () => {
+    await api.settings.set('iptv_channels_url', url.trim())
+    setMsg('URL saved.')
+  }
+  const handleSaveTtl = async () => {
+    const n = parseInt(ttlDays, 10)
+    if (!Number.isFinite(n) || n < 1) { setMsg('TTL must be a positive number'); return }
+    await api.settings.set('iptv_channels_ttl_days', String(n))
+    setMsg(`TTL saved (${n} days).`)
+  }
+
+  const lastPullLabel = lastPull
+    ? new Date(lastPull * 1000).toLocaleString()
+    : 'Never'
+
+  const pct = progress && progress.total > 0
+    ? Math.round((progress.current / progress.total) * 100)
+    : null
+
+  return (
+    <section>
+      <SectionLabel>Channel database (iptv-org)</SectionLabel>
+      <div style={{ padding: '12px 14px', borderRadius: 8, background: 'var(--bg-2)', border: '1px solid var(--border-subtle)' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-0)', marginBottom: 4 }}>Public channel database</div>
+            <div style={{ fontSize: 11, color: 'var(--text-2)', marginBottom: 6 }}>
+              Keyless channel metadata (logos, country, categories, NSFW flag) from iptv-org.
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-1)' }}>
+              Last pull: <span style={{ color: 'var(--text-0)' }}>{lastPullLabel}</span>
+            </div>
+          </div>
+          <button
+            onClick={handleRefresh}
+            disabled={!!progress}
+            style={{ padding: '5px 12px', borderRadius: 6, fontSize: 11, cursor: progress ? 'default' : 'pointer', flexShrink: 0, background: 'var(--bg-3)', color: 'var(--text-1)', border: '1px solid var(--border-default)', opacity: progress ? 0.6 : 1 }}
+            onMouseEnter={(e) => { if (!progress) e.currentTarget.style.background = 'var(--bg-4)' }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--bg-3)' }}
+          >
+            {progress ? 'Working…' : 'Refresh'}
+          </button>
+        </div>
+
+        {progress && (
+          <div style={{ marginTop: 10 }}>
+            <div style={{ fontSize: 11, color: 'var(--text-1)', marginBottom: 4 }}>{progress.message}</div>
+            <div style={{ height: 4, background: 'var(--bg-4)', borderRadius: 2, overflow: 'hidden' }}>
+              <div style={{
+                height: '100%',
+                width: pct != null ? `${pct}%` : '30%',
+                background: 'var(--accent-interactive)',
+                transition: 'width 200ms',
+              }} />
+            </div>
+          </div>
+        )}
+
+        {msg && !progress && (
+          <div style={{ marginTop: 8, fontSize: 11, color: msg.startsWith('Error') ? 'var(--accent-live)' : 'var(--text-1)' }}>{msg}</div>
+        )}
+
+        <button
+          onClick={() => setAdvanced(v => !v)}
+          style={{ marginTop: 10, padding: 0, background: 'transparent', border: 'none', color: 'var(--text-2)', fontSize: 11, cursor: 'pointer' }}
+        >
+          {advanced ? '▾ Advanced' : '▸ Advanced'}
+        </button>
+
+        {advanced && (
+          <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div>
+              <div style={{ fontSize: 11, color: 'var(--text-1)', marginBottom: 4 }}>Source URL</div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input
+                  value={url}
+                  onChange={(e) => setUrl(e.target.value)}
+                  style={{ flex: 1, padding: '4px 8px', fontSize: 11, fontFamily: 'var(--font-mono)', background: 'var(--bg-1)', color: 'var(--text-0)', border: '1px solid var(--border-default)', borderRadius: 4 }}
+                />
+                <button
+                  onClick={handleSaveUrl}
+                  style={{ padding: '4px 10px', borderRadius: 4, fontSize: 11, cursor: 'pointer', background: 'var(--bg-3)', color: 'var(--text-1)', border: '1px solid var(--border-default)' }}
+                >Save</button>
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: 'var(--text-1)', marginBottom: 4 }}>TTL (days before stale)</div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input
+                  value={ttlDays}
+                  onChange={(e) => setTtlDays(e.target.value)}
+                  style={{ width: 80, padding: '4px 8px', fontSize: 11, fontFamily: 'var(--font-mono)', background: 'var(--bg-1)', color: 'var(--text-0)', border: '1px solid var(--border-default)', borderRadius: 4 }}
+                />
+                <button
+                  onClick={handleSaveTtl}
+                  style={{ padding: '4px 10px', borderRadius: 4, fontSize: 11, cursor: 'pointer', background: 'var(--bg-3)', color: 'var(--text-1)', border: '1px solid var(--border-default)' }}
+                >Save</button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
   )
 }
 

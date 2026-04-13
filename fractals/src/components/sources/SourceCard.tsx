@@ -114,6 +114,27 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
     }
   }
 
+  const handleBuildLiveFts = async () => {
+    if (isIndexing || isSyncing) return
+    setIndexProgress(source.id, { phase: 'starting', current: 0, total: 0, message: 'Indexing live channels…' })
+    try {
+      const result = await api.sources.buildLiveFts(source.id)
+      if (result.success) setFtsEnabled(true)
+    } finally {
+      setIndexProgress(source.id, null)
+    }
+  }
+
+  const handleBuildCanonical = async () => {
+    if (isIndexing || isSyncing) return
+    setIndexProgress(source.id, { phase: 'starting', current: 0, total: 0, message: 'Starting canonical build…' })
+    try {
+      await api.sources.buildCanonical(source.id)
+    } finally {
+      setIndexProgress(source.id, null)
+    }
+  }
+
   const isSyncing = progress !== null && progress.phase !== 'done' && progress.phase !== 'error'
   const syncPct = progress && progress.total > 0
     ? Math.min(100, Math.round((progress.current / progress.total) * 100))
@@ -490,7 +511,23 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
               : <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
             }
             onClick={handleBuildFts} disabled={isIndexing || isSyncing}>
-            {isIndexing ? 'Indexing…' : 'Reindex FTS'}
+            {isIndexing ? 'Indexing…' : 'Reindex Movies/Series'}
+          </ActionButton>
+          <ActionButton
+            icon={isIndexing
+              ? <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ animation: 'spin 1s linear infinite' }}><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
+              : <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7h18M3 12h18M3 17h12"/><circle cx="19" cy="17" r="3"/></svg>
+            }
+            onClick={handleBuildLiveFts} disabled={isIndexing || isSyncing}>
+            {isIndexing ? 'Indexing…' : 'Reindex Channels'}
+          </ActionButton>
+          <ActionButton
+            icon={isIndexing
+              ? <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ animation: 'spin 1s linear infinite' }}><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
+              : <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h.01M15 9h.01M9 15h6"/></svg>
+            }
+            onClick={handleBuildCanonical} disabled={isIndexing || isSyncing}>
+            {isIndexing ? 'Building…' : 'Group Channels'}
           </ActionButton>
         </div>
       )}

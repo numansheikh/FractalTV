@@ -24,8 +24,8 @@ interface AppState {
   categoryFilters: Record<string, string | null>
   selectedSourceIds: string[]
 
-  // View mode (grid vs list — live TV only)
-  viewMode: 'grid' | 'list'
+  // View mode (group/grid/list — live TV only)
+  viewMode: 'group' | 'grid' | 'list'
 
   // Browse page size
   pageSize: number
@@ -54,7 +54,7 @@ interface AppState {
   // Actions
   setView: (view: ActiveView) => void
   goBack: () => void
-  setViewMode: (mode: 'grid' | 'list') => void
+  setViewMode: (mode: 'group' | 'grid' | 'list') => void
   setPageSize: (n: number) => void
   setSort: (s: string) => void
   setSelectedContent: (item: ContentItem | null) => void
@@ -97,7 +97,7 @@ export const useAppStore = create<AppState>()(
       typeFilter: 'all',
       categoryFilters: {},
       selectedSourceIds: [],
-      viewMode: 'grid',
+      viewMode: 'group',
       pageSize: 60,
       sort: 'updated:desc',
       homeMode: 'discover',

@@ -148,16 +148,14 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
           borderRight: '1px solid var(--border-subtle)',
           overflow: 'hidden',
         }}>
-          {/* Season selector */}
+          {/* Season Selector */}
           <div style={{
-            height: 48,
-            padding: '0 8px',
+            padding: '6px 8px',
             display: 'flex',
             flexDirection: 'row',
             alignItems: 'center',
+            flexWrap: 'wrap',
             gap: 6,
-            overflowX: 'auto',
-            flexShrink: 0,
             borderBottom: '1px solid var(--border-subtle)',
           }}>
             {seriesFetching && !seasonKeys.length && (

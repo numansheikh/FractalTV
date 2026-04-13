@@ -41,6 +41,12 @@ export const api = {
     buildFts: (sourceId: string): Promise<{ success: boolean; total?: number; error?: string }> =>
       isElectron ? (window.api as any).sources.buildFts(sourceId) : Promise.resolve({ success: false, error: 'Not in Electron' }),
 
+    buildLiveFts: (sourceId: string): Promise<{ success: boolean; total?: number; error?: string }> =>
+      isElectron ? (window.api as any).sources.buildLiveFts(sourceId) : Promise.resolve({ success: false, error: 'Not in Electron' }),
+
+    buildCanonical: (sourceId: string): Promise<{ success: boolean; total?: number; matched?: number; error?: string }> =>
+      isElectron ? (window.api as any).sources.buildCanonical(sourceId) : Promise.resolve({ success: false, error: 'Not in Electron' }),
+
     accountInfo: (sourceId: string) =>
       isElectron ? window.api.sources.accountInfo(sourceId) : Promise.resolve(null),
 
@@ -82,6 +88,8 @@ export const api = {
 
     browse: (args: { type?: 'live' | 'movie' | 'series'; categoryName?: string; sourceIds?: string[]; sortBy?: string; sortDir?: string; limit?: number; offset?: number }) =>
       isElectron ? window.api.content.browse(args) : Promise.resolve({ items: [], total: 0 }),
+    browseLiveGrouped: (args: { categoryName?: string; sourceIds?: string[]; sortBy?: string; sortDir?: string; limit?: number; offset?: number }): Promise<{ groups: any[]; total: number }> =>
+      isElectron ? (window.api as any).content.browseLiveGrouped(args) : Promise.resolve({ groups: [], total: 0 }),
   },
 
   user: {
@@ -140,7 +148,13 @@ export const api = {
     reorderFavorites: (order: { canonicalId: string; sortOrder: number }[]): Promise<{ ok: boolean }> =>
       isElectron ? (window.api as any).channels.reorderFavorites(order) : Promise.resolve({ ok: false }),
     getData: (canonicalId: string) =>
-      isElectron ? (window.api as any).channels.getData(canonicalId) : Promise.resolve({ favorite: false, watchlisted: false, rating: null, position: 0, completed: false }),
+      isElectron ? (window.api as any).channels.getData(canonicalId) : Promise.resolve({ favorite: false, preferred_stream_id: null }),
+    getCanonical: (canonicalId: string): Promise<any> =>
+      isElectron ? (window.api as any).channels.getCanonical(canonicalId) : Promise.resolve(null),
+    getVariants: (canonicalId: string): Promise<any[]> =>
+      isElectron ? (window.api as any).channels.getVariants(canonicalId) : Promise.resolve([]),
+    setPreferredStream: (args: { canonicalId: string; streamId: string }): Promise<{ ok: boolean }> =>
+      isElectron ? (window.api as any).channels.setPreferredStream(args) : Promise.resolve({ ok: false }),
   },
 
   player: {
@@ -179,6 +193,13 @@ export const api = {
   settings: {
     get: (key: string): Promise<string | null> =>
       isElectron ? (window.api as any).settings.get(key) : Promise.resolve(null),
+    set: (key: string, value: string): Promise<{ ok: boolean }> =>
+      isElectron ? (window.api as any).settings.set(key, value) : Promise.resolve({ ok: false }),
+  },
+
+  iptvOrg: {
+    refresh: (): Promise<{ success: boolean; total?: number; error?: string }> =>
+      isElectron ? (window.api as any).iptvOrg.refresh() : Promise.resolve({ success: false, error: 'Not in Electron' }),
   },
 
   dialog: {

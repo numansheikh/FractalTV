@@ -38,8 +38,22 @@ export interface ContentItem {
   // Parent series info — set on episode items so player can navigate back
   _parent?: { id: string; title: string; type: 'series' }
 
-  // Set when returned from channels:favorites (new schema)
-  canonical_id?: string
+  // g3 canonical channel fields (live only)
+  canonical_channel_id?: string
+  canonical_id?: string           // legacy alias
+  country?: string
+  network?: string
+  owners?: string                 // JSON array string
+  categories?: string             // JSON array string
+  is_nsfw?: number
+  launched?: string
+  closed?: string
+  replaced_by?: string
+  iptv_org_id?: string
+  variant_count?: number
+  source_count?: number
+  primary_stream_id?: string      // first/best stream id for quick-play
+  preferred_stream_id?: string    // user's pinned variant
 
   // Continue-watching fields — present when returned from user:continue-watching
   last_position?: number
