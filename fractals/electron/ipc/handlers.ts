@@ -533,6 +533,7 @@ export function registerHandlers() {
   })
 
   ipcMain.handle('sources:sync', async (event, sourceId: string) => {
+    console.log(`[ipc] Step 3: sources:sync invoked for ${sourceId}`)
     const win = BrowserWindow.fromWebContents(event.sender)
     const sqlite = getSqlite()
 
@@ -611,6 +612,7 @@ export function registerHandlers() {
   // INSERT...SELECT for 300K rows is ~1-2s in SQLite. Yields between batches
   // so the UI stays responsive.
   ipcMain.handle('sources:build-fts', async (event, sourceId: string) => {
+    console.log(`[ipc] Step 5: sources:build-fts invoked for ${sourceId}`)
     const win = BrowserWindow.fromWebContents(event.sender)
     return buildFtsForSource(sourceId, win)
   })
@@ -622,12 +624,14 @@ export function registerHandlers() {
 
   // ── Canonical layer (g3) ─────────────────────────────────────────────────
   ipcMain.handle('sources:build-canonical', async (event, sourceId: string) => {
+    console.log(`[ipc] Step 6: sources:build-canonical invoked for ${sourceId}`)
     const win = BrowserWindow.fromWebContents(event.sender)
     // Manual pipeline: canonical FTS is a separate button.
     return buildCanonicalLayer(sourceId, win)
   })
 
   ipcMain.handle('sources:build-canonical-fts', async (event) => {
+    console.log(`[ipc] Step 7: sources:build-canonical-fts invoked`)
     const win = BrowserWindow.fromWebContents(event.sender)
     return buildCanonicalFts(win)
   })
@@ -675,6 +679,7 @@ export function registerHandlers() {
 
   // ── EPG ─────────────────────────────────────────────────────────────────
   ipcMain.handle('epg:sync', async (event, sourceId: string) => {
+    console.log(`[ipc] Step 4: epg:sync invoked for ${sourceId}`)
     const win = BrowserWindow.fromWebContents(event.sender)
     const sqlite = getSqlite()
     const source = sqlite.prepare('SELECT * FROM sources WHERE id = ?').get(sourceId) as SourceRow | undefined
@@ -1262,6 +1267,7 @@ export function registerHandlers() {
   // setImmediate yields between 5000-row batches to keep UI responsive.
   // Retries once on network failure.
   ipcMain.handle('iptv-org:refresh', async (event) => {
+    console.log(`[ipc] iptv-org:refresh invoked (global)`)
     const win = BrowserWindow.fromWebContents(event.sender)
     const send = (phase: string, current: number, total: number, message: string) =>
       win?.webContents.send('iptv-org:progress', { phase, current, total, message })
