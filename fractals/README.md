@@ -4,7 +4,7 @@ A local-first IPTV client — like Plex, but for IPTV streams you already have a
 
 Add your Xtream Codes accounts once. Fractals merges all sources into a single unified library, enriches everything with metadata from TMDB, and lets you search across all content by title, actor, director, genre, or free text.
 
-**Status:** Active development on `master`. Phase 0 (core scaffold) + Phase 1 (UX refinement) + Phase 2 (V2 canonical/streams data model cutover) complete. Phase 3 (multi-platform) not yet started. See `../BACKLOG.md` for the full roadmap.
+**Status:** Active branch is **`g1c`**. g1 (pure provider-data app, 12 tables, LIKE search) is complete on `g1-baseline` (tag at `3cfac99c`). The g1c schema redesign is **design-locked but not yet implemented**: a 15-table surface with split per-type content / categories / user-data, FTS5 baked in on a normalized `search_title` column, and no canonical layer. See [`../PLAN.md`](../PLAN.md) for the full design and the nine locked decisions.
 
 ---
 

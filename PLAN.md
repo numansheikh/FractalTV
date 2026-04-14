@@ -23,6 +23,40 @@ Architecture, tech stack, schema, conventions, design language: see `fractals/CL
 
 ---
 
+## g1c — schema redesign (DESIGN LOCKED, NOT YET IMPLEMENTED)
+
+Branch: `g1c` (currently checked out). Sits on top of tag `g1-baseline` at commit `3cfac99c`.
+
+This is the next implementation milestone. The design below is locked; no code has been written yet.
+
+**15-table surface:**
+
+- **Core (3):** `sources`, `profiles`, `settings`
+- **Content (8):**
+  - Channels: `channel_categories`, `channels`, `epg`
+  - Movies: `movie_categories`, `movies`
+  - Series: `series_categories`, `series`, `episodes`
+- **User data (4):** `channel_user_data`, `movie_user_data`, `series_user_data`, `episode_user_data`
+- **FTS (3, virtual):** `channel_fts`, `movie_fts`, `series_fts`
+
+**Locked design decisions:**
+
+1. **No canonical layer.** Multi-source dedup stays a permanent g1c tradeoff (same channel from two providers = two rows in favorites). Canonical was the biggest complexity source in the discarded g2-flat branch.
+2. **`streams` split into four content tables** — `channels`, `movies`, `series`, `episodes`. No `_titles` suffix. "Title" is the user-facing label; DB names stay bare. Episodes are sub-parts of series, not Titles themselves.
+3. **Categories split three ways** — `channel_categories`, `movie_categories`, `series_categories`. No shared `type` column. Episodes inherit category from parent series.
+4. **No join tables for categories.** Provider reality is 1:many (single `category_id` on Xtream streams, single `group-title` on M3U). `category_id` goes directly on each content table as an FK. Drops the old `stream_categories` and `series_source_categories`.
+5. **User data split four ways.** `movie_user_data` carries favorites/watchlist/rating/watch_position; `episode_user_data` carries only playback state (watch_position, completed, last_watched_at); `channel_user_data` carries favorites; `series_user_data` carries favorites/watchlist/rating.
+6. **FTS baked in from the start** — `channel_fts`, `movie_fts`, `series_fts`. No episode FTS; episodes are found via parent series. Each FTS table indexes only `search_title` for now. Multi-column FTS (cast/plot/genre for movies+series, tvg_id for channels) is a future expansion when enrichment lands. Tokenizer: `unicode61 remove_diacritics 0` (normalizer already folded upstream). Storage: standalone (FTS copies `search_title`). Populated during Sync in the same transaction as the content INSERT. No triggers. Query side normalizes the user's input with the same normalizer before MATCH.
+7. **EPG lives in the Content section**, not Core. EPG is channel metadata even though its FK is on `source_id` (intentional — EPG is re-fetched anyway, orphan-tolerant).
+8. **Normalization stage** between content tables and FTS. `channels`, `movies`, `series` each carry a persisted `search_title` column derived from `title` at sync time. Episodes do NOT get `search_title`. Normalizer is minimal: lowercase + diacritic strip + ligature fold (æ→ae, ß→ss, œ→oe). No punctuation strip, no whitespace collapse, no leading-article strip. Column name `search_title` chosen over `normalized_title` (role-based) and `name` (rejected — collides with "primary human label" convention).
+9. **Metadata columns** on each content table use the `md_` prefix (`md_country`, `md_language`, `md_year`, `md_origin`, `md_quality`). Replaces the current `language_hint` / `origin_hint` / `quality_hint` / `year_hint`. Column shape locked now; population deferred until enrichment lands.
+
+**Migration strategy:** drop old tables and rebuild fresh. Data is expendable — users re-sync from their providers. No in-place migration.
+
+**Status:** DESIGN LOCKED, NOT YET IMPLEMENTED. See `fractals/docs/archive/TODO.md` for the implementation task list.
+
+---
+
 ## g1 — locked (2026-04-12)
 
 Branch: `search-rebuild-g1`
@@ -104,10 +138,10 @@ Three-tier split (same React codebase, feature flags):
 
 ---
 
-## Snapshot (2026-04-12)
+## Snapshot (2026-04-14)
 
-- Phase state: g1 locked, g2 next
-- DB: 12 tables, no canonical layer
-- Branch: `search-rebuild-g1` (g1 complete), `search-rebuild-g2` (to be created)
-- Two real-world sources synced + tested
-- Search: LIKE + debounce baseline, FTS5 coming in g2
+- Phase state: g1 locked; g1c schema redesign DESIGN LOCKED, NOT YET IMPLEMENTED
+- Active branch: `g1c` (on top of tag `g1-baseline` @ `3cfac99c`)
+- Target DB: 15 tables — split per-type content/categories/user-data, FTS baked in, no canonical layer
+- Migration: drop old tables + rebuild; user re-syncs
+- Search: LIKE + debounce baseline today; g1c introduces FTS5 on `search_title` with minimal normalizer (lowercase + diacritic strip + ligature fold)

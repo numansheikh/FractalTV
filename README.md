@@ -15,6 +15,10 @@ A cross-platform, local-first IPTV client that treats content as the primary abs
 
 For everything below — architecture, running locally, keyboard shortcuts, conventions — see **[`fractals/README.md`](fractals/README.md)** and **[`fractals/CLAUDE.md`](fractals/CLAUDE.md)**.
 
+## Current state
+
+Active branch: **`g1c`**. The g1c schema redesign is **design-locked but not yet implemented** — it sits on top of tag `g1-baseline` at commit `3cfac99c`. The redesign moves the database to a 15-table surface (split per-type content / categories / user-data, FTS5 baked in, no canonical layer) and introduces a `search_title` normalization stage. Full design and implementation task list live in [`PLAN.md`](PLAN.md).
+
 ## Roadmap
 
 High-level work is tracked in **[`BACKLOG.md`](BACKLOG.md)**. Five active buckets:
