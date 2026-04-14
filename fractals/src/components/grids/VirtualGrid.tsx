@@ -2,7 +2,8 @@ import { useRef, useState, useEffect, useCallback } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { useQueryClient } from '@tanstack/react-query'
 import { ContentItem } from '@/lib/types'
-import { PosterCard } from '@/components/cards/PosterCard'
+import { MoviePosterCard } from '@/components/cards/MoviePosterCard'
+import { SeriesPosterCard } from '@/components/cards/SeriesPosterCard'
 import { ChannelCard } from '@/components/cards/ChannelCard'
 import { useSourcesStore } from '@/stores/sources.store'
 import { useUserStore } from '@/stores/user.store'
@@ -258,9 +259,12 @@ export function VirtualGrid({ items, onSelect, viewMode = 'grid', isLoading, con
 
   // Compute actual card width to derive row height from aspect ratio + metadata
   const actualCardWidth = isList ? 0 : Math.min(maxCardWidth, Math.floor((availableWidth - (columns - 1) * gap) / columns))
+  // Metadata strip: compact tinted caption + 12px overhang for the hanging Details button.
+  // Both poster types now share 76px; captionHeight stays as a single value.
+  const captionHeight = 76
   const gridRowHeight = isLive
-    ? Math.ceil(actualCardWidth * 9 / 16) + 34  // 16:9 + name strip
-    : Math.ceil(actualCardWidth * 3 / 2) + 52   // 2:3 + metadata strip
+    ? Math.ceil(actualCardWidth * 9 / 16) + 34              // 16:9 + name strip
+    : Math.ceil(actualCardWidth * 3 / 2) + captionHeight    // 2:3 + metadata strip
   const rowHeight = isList ? listRowHeight : gridRowHeight
 
   const rows: ContentItem[][] = []
@@ -377,7 +381,9 @@ export function VirtualGrid({ items, onSelect, viewMode = 'grid', isLoading, con
                     ? <ChannelListRow item={item} onClick={onSelect} />
                     : item.type === 'live'
                       ? <ChannelCard item={item} onClick={onSelect} />
-                      : <PosterCard item={item} onClick={onSelect} />
+                      : item.type === 'series'
+                        ? <SeriesPosterCard item={item} onClick={onSelect} />
+                        : <MoviePosterCard item={item} onClick={onSelect} />
                   }
                 </div>
               ))}

@@ -35,7 +35,7 @@ To get posters, ratings, plots, and cast information:
 
 Use the tabs at the top to filter by content type:
 - **All** — everything
-- **Live TV** — live channels
+- **Channels** — live channels
 - **Movies** — VOD movies
 - **Series** — TV series
 

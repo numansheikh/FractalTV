@@ -107,7 +107,7 @@ Active work is organized into five buckets in [`../BACKLOG.md`](../BACKLOG.md):
 1. **Data & Search** *(next pick)* — canonical data model + search redesign + TMDB enrichment. Detailed scoping in `~/.claude/plans/scalable-leaping-cake.md`.
 2. **Product shape** — three-tier split (M3U Player / Xtream Lite / Fractals Pro) + M3U parsing improvements. Business plan in `docs/business-plan.md`.
 3. **Multi-platform reach** — Android, iOS, Android TV, Samsung Tizen via Capacitor. Full plan in `docs/multi-platform-strategy.md`.
-4. **Experience polish** — Live TV nav breadcrumb, series full-page view, player fixes.
+4. **Experience polish** — Channels nav breadcrumb, series full-page view, player fixes.
 5. **Tech health** — QA cycle 2 follow-ups (type safety, security, hardening). See `docs/qa-cycle-2.md`.
 
 The legacy Angular reference implementation lives in `../legacy/`.

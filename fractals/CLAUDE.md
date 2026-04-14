@@ -373,7 +373,7 @@ Canonical identity / deduplication is not on the roadmap — it's a permanent g1
 - NavRail sources icon pulses during sync activity
 
 **Home screen**
-- Two modes: Discover (content strips) / My Channels (drag-to-reorder favorites grid)
+- Two modes: Discover (content strips) / TV (drag-to-reorder favorites grid)
 - Info strip shows live sync progress during sync, greeting + stats otherwise
 - Inline search results (debounced, min 2 chars)
 
@@ -391,9 +391,9 @@ Canonical identity / deduplication is not on the roadmap — it's a permanent g1
 - Category sidebar auto-scrolls active item to center
 - Configurable grid page size (25/50/75/100/200)
 
-**Live TV**
-- Grid → Split View → Fullscreen navigation stack
-- Split view: 300px channel list + player + EPG strip
+**Channels (Live)**
+- Grid → Live View → Fullscreen navigation stack
+- Live View: 300px channel list + player + EPG strip
 - EPG: auto-expanded, styled description cards, now/next display
 - Full Guide: bottom sheet, 200px/hr timeline, 300px channel column, detail panel
 - Channel surf: `[`/`]` keys, Cmd+Up/Down, PgUp/PgDn
@@ -402,7 +402,7 @@ Canonical identity / deduplication is not on the roadmap — it's a permanent g1
 - `__favorites__` sentinel in BrowseSidebar
 - Four user data tables: `channel_user_data`, `movie_user_data`, `series_user_data`, `episode_user_data`
 - Optimistic updates with rollback
-- Drag-to-reorder My Channels (@dnd-kit)
+- Drag-to-reorder TV mode grid (@dnd-kit)
 - User data is wiped on resync (CASCADE) — g1c hard cut, users re-sync from providers
 
 **Player**
@@ -448,7 +448,7 @@ Canonical identity / deduplication is not on the roadmap — it's a permanent g1
 
 - **Source ID quad fallback** — Always resolve `primarySourceId` as: `item.primarySourceId ?? item.primary_source_id ?? (item as any).source_ids ?? item.id?.split(':')[0]`. Some channels have `primary_source_id = NULL` in the DB; the content ID (`{sourceId}:{type}:{streamId}`) is the reliable last resort.
 
-- **Shared timezone-aware time formatting** — `src/lib/time.ts` exports `fmtTime(unix)` that reads timezone from app store. Used by LiveSplitView, EpgGuide, TimeshiftBar.
+- **Shared timezone-aware time formatting** — `src/lib/time.ts` exports `fmtTime(unix)` that reads timezone from app store. Used by LiveView, EpgGuide, TimeshiftBar.
 
 ## Known limitations & open work
 

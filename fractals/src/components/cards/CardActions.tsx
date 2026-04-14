@@ -8,9 +8,10 @@ interface Props {
   item: ContentItem
   onPlay: () => void
   showWatchlist?: boolean
+  showPlay?: boolean
 }
 
-export function CardActions({ item, onPlay, showWatchlist = true }: Props) {
+export function CardActions({ item, onPlay, showWatchlist = true, showPlay = true }: Props) {
   const userData = useUserStore((s) => s.data[item.id])
   const setFav = useUserStore((s) => s.setFavorite)
   const setWl = useUserStore((s) => s.setWatchlist)
@@ -138,29 +139,31 @@ export function CardActions({ item, onPlay, showWatchlist = true }: Props) {
       )}
 
       {/* Play — center */}
-      <button
-        onClick={handlePlay}
-        title="Play"
-        style={{
-          width: 36,
-          height: 36,
-          borderRadius: '50%',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: 'var(--accent-interactive)',
-          border: 'none',
-          cursor: 'pointer',
-          padding: 0,
-          flexShrink: 0,
-          boxShadow: '0 2px 12px rgba(139,92,246,0.5)',
-        }}
-      >
-        {/* Triangle offset slightly right for optical centering */}
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="white" style={{ marginLeft: 2 }}>
-          <polygon points="5,3 19,12 5,21" />
-        </svg>
-      </button>
+      {showPlay && (
+        <button
+          onClick={handlePlay}
+          title="Play"
+          style={{
+            width: 36,
+            height: 36,
+            borderRadius: '50%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'var(--accent-interactive)',
+            border: 'none',
+            cursor: 'pointer',
+            padding: 0,
+            flexShrink: 0,
+            boxShadow: '0 2px 12px rgba(139,92,246,0.5)',
+          }}
+        >
+          {/* Triangle offset slightly right for optical centering */}
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="white" style={{ marginLeft: 2 }}>
+            <polygon points="5,3 19,12 5,21" />
+          </svg>
+        </button>
+      )}
     </div>
   )
 }

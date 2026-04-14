@@ -13,8 +13,8 @@ interface AppState {
   showSettings: boolean
   showSources: boolean
 
-  // Live TV — split view + channel surf context
-  splitViewChannel: ContentItem | null
+  // Channels — Live View mode + channel surf context
+  liveViewChannel: ContentItem | null
   channelSurfList: ContentItem[]
   channelSurfIndex: number
   surfSearchQuery: string | null
@@ -24,7 +24,7 @@ interface AppState {
   categoryFilters: Record<string, string | null>
   selectedSourceIds: string[]
 
-  // View mode (grid vs list — live TV only)
+  // View mode (grid vs list — Channels only)
   viewMode: 'grid' | 'list'
 
   // Browse page size
@@ -57,7 +57,7 @@ interface AppState {
   setSelectedContent: (item: ContentItem | null) => void
   setPlayingContent: (item: ContentItem | null) => void
   setShowSettings: (v: boolean) => void
-  setSplitViewChannel: (item: ContentItem | null) => void
+  setLiveViewChannel: (item: ContentItem | null) => void
   surfContextAction: 'home-discover' | 'home-channels' | 'browse-favorites' | 'search' | null
   setChannelSurfContext: (list: ContentItem[], index: number, action?: 'home-discover' | 'home-channels' | 'browse-favorites' | 'search' | null, searchQuery?: string | null) => void
   surfChannel: (dir: 1 | -1) => ContentItem | null
@@ -85,7 +85,7 @@ export const useAppStore = create<AppState>()(
       playingContent: null,
       showSettings: false,
       showSources: false,
-      splitViewChannel: null,
+      liveViewChannel: null,
       channelSurfList: [],
       channelSurfIndex: -1,
       surfContextAction: null,
@@ -112,13 +112,13 @@ export const useAppStore = create<AppState>()(
       setSelectedContent: (selectedContent) => set({ selectedContent }),
       setPlayingContent: (playingContent) => set({ playingContent }),
       setShowSettings: (showSettings) => set({ showSettings }),
-      setSplitViewChannel: (splitViewChannel) => set({ splitViewChannel }),
+      setLiveViewChannel: (liveViewChannel) => set({ liveViewChannel }),
       setChannelSurfContext: (channelSurfList, channelSurfIndex, action, searchQuery) => set({ channelSurfList, channelSurfIndex, surfContextAction: action ?? null, surfSearchQuery: searchQuery ?? null }),
       surfChannel: (dir) => {
         let result: ContentItem | null = null
         set((s) => {
           if (s.channelSurfList.length === 0) return s
-          const currentId = (s.playingContent ?? s.splitViewChannel)?.id
+          const currentId = (s.playingContent ?? s.liveViewChannel)?.id
           let idx = s.channelSurfList.findIndex((c) => c.id === currentId)
           if (idx === -1) idx = s.channelSurfIndex
           const next = (idx + dir + s.channelSurfList.length) % s.channelSurfList.length

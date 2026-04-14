@@ -3,7 +3,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { ContentItem } from '@/lib/types'
 import { useUserStore } from '@/stores/user.store'
-import { PosterCard } from '@/components/cards/PosterCard'
+import { MoviePosterCard } from '@/components/cards/MoviePosterCard'
+import { SeriesPosterCard } from '@/components/cards/SeriesPosterCard'
 import { ChannelCard } from '@/components/cards/ChannelCard'
 
 type TypeFilter = 'all' | 'live' | 'movie' | 'series'
@@ -100,7 +101,9 @@ function HistoryCardRow({
           >
             {isLive
               ? <ChannelCard item={item} onClick={onSelect} />
-              : <PosterCard item={item} onClick={onSelect} />
+              : item.type === 'series'
+                ? <SeriesPosterCard item={item} onClick={onSelect} />
+                : <MoviePosterCard item={item} onClick={onSelect} />
             }
             {/* Remove strip — below the card, outside poster area */}
             <div style={{
@@ -174,8 +177,10 @@ function ContinueWatchingRow({
             onMouseEnter={() => setHoveredId(item.id)}
             onMouseLeave={() => setHoveredId(null)}
           >
-            {/* Poster — PosterCard handles progress bar for movies via useUserStore */}
-            <PosterCard item={item} onClick={onSelect} />
+            {/* Poster — handles progress bar for movies via useUserStore */}
+            {item.type === 'series'
+              ? <SeriesPosterCard item={item} onClick={onSelect} />
+              : <MoviePosterCard item={item} onClick={onSelect} />}
 
             {/* Episode info — series only */}
             {episodeLabel && (

@@ -4,7 +4,8 @@ import { api } from '@/lib/api'
 import { ContentItem } from '@/lib/types'
 import { useUserStore } from '@/stores/user.store'
 import { HorizontalScroller } from './HorizontalScroller'
-import { PosterCard } from '@/components/cards/PosterCard'
+import { MoviePosterCard } from '@/components/cards/MoviePosterCard'
+import { SeriesPosterCard } from '@/components/cards/SeriesPosterCard'
 import { ChannelCard } from '@/components/cards/ChannelCard'
 import { ContinueCard } from '@/components/cards/ContinueCard'
 
@@ -80,7 +81,9 @@ export function PersonalizedSection({ onSelect }: Props) {
               <div key={item.id} style={{ width: isLive ? 168 : 130, flexShrink: 0 }}>
                 {isLive
                   ? <ChannelCard item={item} onClick={onSelect} />
-                  : <PosterCard item={item} onClick={onSelect} />
+                  : item.type === 'series'
+                    ? <SeriesPosterCard item={item} onClick={onSelect} />
+                    : <MoviePosterCard item={item} onClick={onSelect} />
                 }
               </div>
             )

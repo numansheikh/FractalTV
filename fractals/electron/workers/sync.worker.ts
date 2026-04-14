@@ -16,7 +16,6 @@
 
 import { parentPort, workerData } from 'worker_threads'
 import Database from 'better-sqlite3'
-import { normalize as normalizeTitle } from '../services/title-normalizer'
 import { normalizeForSearch } from '../lib/normalize'
 
 interface WorkerData {
@@ -152,15 +151,15 @@ async function run() {
     const insertMovie = db.prepare(`
       INSERT INTO movies (
         id, source_id, category_id, external_id, title, search_title,
-        thumbnail_url, container_extension, md_year
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        thumbnail_url, container_extension
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `)
 
     const insertSeries = db.prepare(`
       INSERT INTO series (
         id, source_id, category_id, external_id, title, search_title,
-        thumbnail_url, md_year
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        thumbnail_url
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
     `)
 
     // ── Live channels ──────────────────────────────────────────────────────
@@ -206,16 +205,12 @@ async function run() {
       for (const s of items) {
         const cid = `${sourceId}:movie:${s.stream_id}`
         const rawTitle: string = s.name || `Movie ${s.stream_id}`
-        const normalized = normalizeTitle(rawTitle)
-        const providerYearRaw = s.year ? parseInt(String(s.year), 10) : null
-        const providerYear = Number.isFinite(providerYearRaw as number) ? (providerYearRaw as number) : null
-        const year = normalized.year ?? providerYear
         const rawCatId = s.category_id ? `${sourceId}:moviecat:${s.category_id}` : null
         const catId = rawCatId && movieCatIds.has(rawCatId) ? rawCatId : null
 
         insertMovie.run(
           cid, sourceId, catId, String(s.stream_id), rawTitle, normalizeForSearch(rawTitle),
-          s.stream_icon || null, s.container_extension || null, year || null
+          s.stream_icon || null, s.container_extension || null
         )
       }
     })
@@ -237,16 +232,12 @@ async function run() {
       for (const s of items) {
         const sid = `${sourceId}:series:${s.series_id}`
         const rawTitle: string = s.name || `Series ${s.series_id}`
-        const normalized = normalizeTitle(rawTitle)
-        const providerYearRaw = s.year ? parseInt(String(s.year), 10) : null
-        const providerYear = Number.isFinite(providerYearRaw as number) ? (providerYearRaw as number) : null
-        const year = normalized.year ?? providerYear
         const rawCatId = s.category_id ? `${sourceId}:seriescat:${s.category_id}` : null
         const catId = rawCatId && seriesCatIds.has(rawCatId) ? rawCatId : null
 
         insertSeries.run(
           sid, sourceId, catId, String(s.series_id), rawTitle, normalizeForSearch(rawTitle),
-          s.cover || null, year || null
+          s.cover || null
         )
       }
     })

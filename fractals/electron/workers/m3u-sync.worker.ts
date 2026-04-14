@@ -17,7 +17,6 @@ import { parentPort, workerData } from 'worker_threads'
 import Database from 'better-sqlite3'
 import { createHash } from 'crypto'
 import { readFileSync } from 'fs'
-import { normalize as normalizeTitle } from '../services/title-normalizer'
 import { normalizeForSearch } from '../lib/normalize'
 
 interface WorkerData {
@@ -186,8 +185,8 @@ async function run() {
     const insertMovie = db.prepare(`
       INSERT INTO movies (
         id, source_id, category_id, external_id, title, search_title,
-        thumbnail_url, stream_url, md_year
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        thumbnail_url, stream_url
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `)
 
     // ── Content ──────────────────────────────────────────────────────────
@@ -198,7 +197,6 @@ async function run() {
         const urlHash = hashUrl(entry.url)
         const cid = `${sourceId}:${entry.type}:${urlHash}`
         const rawTitle = entry.title || 'Unknown'
-        const normalized = normalizeTitle(rawTitle)
 
         if (entry.type === 'live') {
           const catExtId = hashUrl(`live:${entry.groupTitle}`)
@@ -213,7 +211,7 @@ async function run() {
           const catId = `${sourceId}:moviecat:${catExtId}`
           insertMovie.run(
             cid, sourceId, catId, urlHash, rawTitle, normalizeForSearch(rawTitle),
-            entry.tvgLogo || null, entry.url, normalized.year || null
+            entry.tvgLogo || null, entry.url
           )
         }
       }

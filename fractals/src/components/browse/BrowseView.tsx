@@ -4,7 +4,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { api } from '@/lib/api'
 import { ContentItem } from './ContentCard'
 import { PosterCard } from './PosterCard'
-import { ChannelCard } from './ChannelCard'
+import { ChannelCard } from '@/components/cards/ChannelCard'
 import { Pagination } from './Pagination'
 import { useSearchStore, ContentType } from '@/stores/search.store'
 import { useAppStore } from '@/stores/app.store'
@@ -17,7 +17,7 @@ import { PersonalizedRows } from './PersonalizedRows'
 
 const TYPE_TABS: { label: string; value: ContentType }[] = [
   { label: 'All',     value: 'all'    },
-  { label: 'Live TV', value: 'live'   },
+  { label: 'Channels', value: 'live'   },
   { label: 'Movies',  value: 'movie'  },
   { label: 'Series',  value: 'series' },
 ]
@@ -494,7 +494,7 @@ function BrowsePane({ items, fetching, onSelect, type, hasCategory }: {
 
       {liveItems.length > 0 && (
         <div style={{ marginBottom: 20 }}>
-          {type === 'all' && <SectionLabel>Live TV</SectionLabel>}
+          {type === 'all' && <SectionLabel>Channels</SectionLabel>}
           <ChannelGrid items={liveItems} onSelect={onSelect} />
         </div>
       )}

@@ -18,7 +18,7 @@ interface Props {
   onClose: () => void
 }
 
-export function LiveSplitView({ channel, onFullscreen, onSwitchChannel, onClose }: Props) {
+export function LiveView({ channel, onFullscreen, onSwitchChannel, onClose }: Props) {
   const { channelSurfList, surfContextAction, surfSearchQuery, selectedSourceIds, toggleSourceFilter, setView, setCategoryFilter, setHomeMode } = useAppStore()
   const { sources } = useSourcesStore()
   const colorMap = buildColorMapFromSources(sources)
@@ -60,7 +60,7 @@ export function LiveSplitView({ channel, onFullscreen, onSwitchChannel, onClose 
   // Keyboard shortcuts (capture phase, before App.tsx bubble handler)
   const { surfChannel } = useAppStore()
   // Track mount time — ignore Escape for a brief window so a held/repeated Escape
-  // from closing the player doesn't immediately close the split view too.
+  // from closing the player doesn't immediately close the Live View too.
   const mountTimeRef = useRef(Date.now())
   useEffect(() => { mountTimeRef.current = Date.now() }, [])
 
@@ -70,7 +70,7 @@ export function LiveSplitView({ channel, onFullscreen, onSwitchChannel, onClose 
       return el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement
     }
     const handler = (e: KeyboardEvent) => {
-      // Escape works regardless of focus — closes guide or split view
+      // Escape works regardless of focus — closes guide or Live View
       // Guard: ignore for 300ms after mount (key-repeat from closing player)
       if (e.key === 'Escape') {
         e.stopImmediatePropagation()
@@ -140,10 +140,10 @@ export function LiveSplitView({ channel, onFullscreen, onSwitchChannel, onClose 
         <button onClick={onClose} style={backBtnStyle}>
           <ChevronLeftIcon />
         </button>
-        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-0)' }}>Live TV</span>
+        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-0)' }}>Live View</span>
         {(() => {
           const pillLabel = surfContextAction === 'home-discover' ? 'Favorites'
-            : surfContextAction === 'home-channels' ? 'Live TV'
+            : surfContextAction === 'home-channels' ? 'Channels'
             : surfContextAction === 'browse-favorites' ? 'Favorites'
             : surfContextAction === 'search' ? `Search "${(surfSearchQuery ?? '').replace(/^@/, '').trim()}"`
             : categoryName ?? null

@@ -5,7 +5,7 @@ import { useTheme } from '@/hooks/useTheme'
 
 const NAV_ITEMS: { id: ActiveView; label: string; shortcut: string }[] = [
   { id: 'home',    label: 'Home',    shortcut: '⌘1' },
-  { id: 'live',    label: 'Live TV', shortcut: '⌘2' },
+  { id: 'live',    label: 'Channels', shortcut: '⌘2' },
   { id: 'films',   label: 'Films',   shortcut: '⌘3' },
   { id: 'series',  label: 'Series',  shortcut: '⌘4' },
   { id: 'library', label: 'Library', shortcut: '⌘5' },
@@ -59,7 +59,7 @@ export function NavRail({ onOpenSources, onOpenSettings }: Props) {
             inactiveColor={accent}
             onClick={() => {
               setView(item.id)
-              if (item.id !== 'live') useAppStore.getState().setSplitViewChannel(null)
+              if (item.id !== 'live') useAppStore.getState().setLiveViewChannel(null)
             }}
           >
             <NavIcon id={item.id} />

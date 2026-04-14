@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { ContentItem } from './ContentCard'
 import { PosterCard } from './PosterCard'
-import { ChannelCard } from './ChannelCard'
+import { ChannelCard } from '@/components/cards/ChannelCard'
 import { useUserStore } from '@/stores/user.store'
 
 interface Props {

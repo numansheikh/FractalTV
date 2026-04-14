@@ -27,7 +27,7 @@ export function FilterBar({ itemCount }: { itemCount?: number }) {
     }}>
       {typeFilter !== 'all' && (
         <FilterPill
-          label={typeFilter === 'live' ? 'Live TV' : typeFilter === 'movie' ? 'Films' : 'Series'}
+          label={typeFilter === 'live' ? 'Channels' : typeFilter === 'movie' ? 'Films' : 'Series'}
           color={TYPE_COLOR[typeFilter]}
           onRemove={() => setTypeFilter('all')}
         />

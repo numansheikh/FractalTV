@@ -1,23 +1,19 @@
 /**
- * Sync worker — V3 cutover (Phase D1).
+ * Sync worker — g1c per-type split.
  *
- * Fetches Xtream catalog for a single source and writes the V3 shape:
- *   - `streams` rows with L14 normalizer outputs (year_hint, language_hint, …)
- *     and provider-raw fields; polymorphic FK is left NULL pending oracle.
- *   - `canonical_vod`, `canonical_series`, `canonical_live` identity rows,
- *     deduped via `content_hash` (sha1(normalized_title + year + type)) for
- *     VOD/series, sha1(tvg_id or normalized_name + country) for live.
- *   - Per-type FTS mirrors populated inline (light cols only — normalized_title
- *     / canonical_name).
- *   - New canonicals start `oracle_status='pending'`; the enrichment worker
- *     drains the queue after sync completes.
+ * Fetches Xtream catalog for a single source and writes to the per-type tables:
+ *   - `channels` (Live) with `search_title` populated inline (any-ascii + lowercase)
+ *   - `movies` (VOD) with `search_title` populated inline
+ *   - `series` parents with `search_title` populated inline
+ *   - Per-type categories: `channel_categories`, `movie_categories`, `series_categories`
+ *   - Episodes are lazy-fetched via `get_series_info` on first detail open, not here.
  *
- * Wipe semantics (user Q6): a re-sync of the same source wipes all streams
- * belonging to it before re-inserting. Categories are upserted (positions
- * matter). Empty canonicals (no streams pointing at them) are swept at the
- * end of the sync.
+ * EPG auto-chains after the catalog sync for Xtream sources (M3U stops at `synced`).
  *
- * This worker only talks to SQLite and the Xtream HTTP API. It never touches
- * metadata providers, iptv-org, or TMDB — enrichment is a separate worker.
+ * Wipe semantics: a re-sync of the same source wipes per-type content rows for it.
+ * CASCADE drops per-source user_data rows too (g1c hard cut — users re-sync from
+ * providers). Categories are upserted (positions matter).
+ *
+ * This worker only talks to SQLite and the Xtream HTTP API. No metadata providers.
  */
 export {};

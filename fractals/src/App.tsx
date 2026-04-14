@@ -18,7 +18,7 @@ const MovieDetail = lazy(() => import('@/components/detail/MovieDetail').then((m
 const SeriesDetail = lazy(() => import('@/components/detail/SeriesDetail').then((m) => ({ default: m.SeriesDetail })))
 const SettingsPanel = lazy(() => import('@/components/settings/SettingsPanel').then((m) => ({ default: m.SettingsPanel })))
 const SourcesPanel = lazy(() => import('@/components/sources/SourcesPanel').then((m) => ({ default: m.SourcesPanel })))
-const LiveSplitView = lazy(() => import('@/components/live/LiveSplitView').then((m) => ({ default: m.LiveSplitView })))
+const LiveView = lazy(() => import('@/components/live/LiveView').then((m) => ({ default: m.LiveView })))
 const AddSourceModal = lazy(() => import('@/components/sources/AddSourceForm').then((m) => ({ default: m.AddSourceModal })))
 
 export function App() {
@@ -39,7 +39,7 @@ function AppShell() {
   const { setSources, updateSource, setSyncProgress } = useSourcesStore()
   const {
     selectedContent, playingContent, showSettings, showSources,
-    splitViewChannel, setSplitViewChannel,
+    liveViewChannel, setLiveViewChannel,
     setSelectedContent, setPlayingContent, setShowSettings, setShowSources,
     setView, setCategoryFilter, clearSourceFilter, toggleSourceFilter,
     sort, setSort, surfChannel,
@@ -175,7 +175,7 @@ function AppShell() {
 
   const handleSelectContent = (item: ContentItem) => {
     if (item.type === 'live') {
-      setSplitViewChannel(item)
+      setLiveViewChannel(item)
     } else {
       setSelectedContent(item)
     }
@@ -294,13 +294,13 @@ function AppShell() {
             isPlaying={!!playingContent}
           />
         )}
-        {/* Live split view */}
-        {splitViewChannel && playerMode === 'hidden' && (
-          <LiveSplitView
-            channel={splitViewChannel}
+        {/* Live View */}
+        {liveViewChannel && playerMode === 'hidden' && (
+          <LiveView
+            channel={liveViewChannel}
             onFullscreen={(ch) => handlePlay(ch)}
-            onSwitchChannel={(ch) => setSplitViewChannel(ch)}
-            onClose={() => setSplitViewChannel(null)}
+            onSwitchChannel={(ch) => setLiveViewChannel(ch)}
+            onClose={() => setLiveViewChannel(null)}
           />
         )}
         {/* Settings — suppressScrim: shared scrim above handles it */}

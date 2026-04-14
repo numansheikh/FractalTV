@@ -32,6 +32,10 @@
   --accent-danger: #ff3355;
   --accent-success: #00dd77;
 
+  /* Caption tint % — how strongly the M/S type color washes the card caption.
+     Dark theme needs more saturation to read; light theme stays gentle. */
+  --caption-tint-pct: 35%;
+
   /* Typography */
   --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", sans-serif;
   --font-mono: "SF Mono", "JetBrains Mono", "Cascadia Code", "Fira Code", monospace;
@@ -180,6 +184,8 @@
   --border-subtle: rgba(0,0,0,0.08);
   --border-default: rgba(0,0,0,0.14);
   --border-strong: rgba(0,0,0,0.24);
+  /* Caption tint stays gentle on white paper */
+  --caption-tint-pct: 16%;
 }
 
 /* ════════════════════════════════════════════════════════════════

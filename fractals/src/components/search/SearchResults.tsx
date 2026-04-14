@@ -1,6 +1,7 @@
 import React from 'react'
 import { ContentItem } from '@/lib/types'
-import { PosterCard } from '@/components/cards/PosterCard'
+import { MoviePosterCard } from '@/components/cards/MoviePosterCard'
+import { SeriesPosterCard } from '@/components/cards/SeriesPosterCard'
 import { ChannelCard } from '@/components/cards/ChannelCard'
 
 interface TypeBucket {
@@ -118,8 +119,10 @@ export function SearchResults({ live, movies, series, onSelect }: Props) {
               {visible.map((item) =>
                 isChannel ? (
                   <ChannelCard key={item.id} item={item} onClick={onSelect} />
+                ) : item.type === 'series' ? (
+                  <SeriesPosterCard key={item.id} item={item} onClick={onSelect} />
                 ) : (
-                  <PosterCard key={item.id} item={item} onClick={onSelect} />
+                  <MoviePosterCard key={item.id} item={item} onClick={onSelect} />
                 )
               )}
             </div>

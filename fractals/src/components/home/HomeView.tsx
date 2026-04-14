@@ -15,7 +15,8 @@ import { useSourcesStore, type Source, type SyncProgress } from '@/stores/source
 import { buildColorMapFromSources } from '@/lib/sourceColors'
 import { api } from '@/lib/api'
 import { ContentItem } from '@/lib/types'
-import { PosterCard as RichPosterCard } from '@/components/cards/PosterCard'
+import { MoviePosterCard } from '@/components/cards/MoviePosterCard'
+import { SeriesPosterCard } from '@/components/cards/SeriesPosterCard'
 import { ChannelCard as RichChannelCard } from '@/components/cards/ChannelCard'
 import { useTheme } from '@/hooks/useTheme'
 
@@ -284,7 +285,7 @@ export function HomeView({ onSelectContent }: Props) {
     onSelectContent(item)
   }, [favChannels, effectiveMode, onSelectContent, setChannelSurfContext])
 
-  // No auto-fallback — let My Channels show an empty state instead
+  // No auto-fallback — let TV mode show an empty state instead
 
   // Focus search on /
   useEffect(() => {
@@ -405,13 +406,13 @@ export function HomeView({ onSelectContent }: Props) {
                   </svg>
                   <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-1)', margin: 0 }}>No favorite channels yet</p>
                   <p style={{ fontSize: 12, color: 'var(--text-2)', margin: 0, textAlign: 'center', maxWidth: 260, lineHeight: 1.6 }}>
-                    Heart a channel from Live TV to add it here. Your list will be saved and reorderable.
+                    Heart a channel from Channels to add it here. Your list will be saved and reorderable.
                   </p>
                   <button
                     onClick={() => setView('live')}
                     style={{ marginTop: 4, padding: '7px 18px', borderRadius: 7, fontSize: 12, fontWeight: 600, background: 'var(--accent-interactive)', border: 'none', color: '#fff', cursor: 'pointer' }}
                   >
-                    Browse Live TV
+                    Browse Channels
                   </button>
                 </div>
               )
@@ -591,9 +592,11 @@ function DiscoverStrip({ title, accent, type, items, hasMore, isLoading, onMore,
               type === 'live' ? <ChannelSkeleton key={i} /> : <PosterSkeleton key={i} />
             )
           : visible.map((item) =>
-              type === 'live'
+              item.type === 'live'
                 ? <RichChannelCard key={item.id} item={item} onClick={onSelectContent} />
-                : <RichPosterCard key={item.id} item={item} onClick={onSelectContent} />
+                : item.type === 'series'
+                  ? <SeriesPosterCard key={item.id} item={item} onClick={onSelectContent} />
+                  : <MoviePosterCard key={item.id} item={item} onClick={onSelectContent} />
             )
         }
       </div>

@@ -10,7 +10,7 @@ import { buildColorMapFromSources } from '@/lib/sourceColors'
 const HOUR_PX = 200       // pixels per hour
 const ROW_H = 50          // row height in px
 const CH_COL_W = 300      // channel list column width
-const DETAIL_W = 240      // detail panel width
+const DETAIL_W = 240      // Program Detail width
 const TOTAL_HOURS = 24    // 24h window fetched
 const EPG_PAGE_SIZE = 100 // channels per EPG fetch batch
 
@@ -134,7 +134,7 @@ export function EpgGuide({ channels, activeChannel, onSwitchChannel, onFullscree
     progScrollRef.current?.scrollTo({ left: target, behavior: 'smooth' })
   }
 
-  // Escape is handled by LiveSplitView (registered first, owns the chain)
+  // Escape is handled by LiveView (registered first, owns the chain)
 
   // ── Helpers ───────────────────────────────────────────────────────────────
   const fmtDur = (startTime: number, endTime: number) => {
@@ -185,7 +185,7 @@ export function EpgGuide({ channels, activeChannel, onSwitchChannel, onFullscree
         onClose()
       }
     } else if (isNow || !isPast) {
-      // Live or future — switch to channel in split view
+      // Live or future — switch to channel in Live View
       onSwitchChannel(contentItem)
       onClose()
     }
@@ -358,7 +358,7 @@ export function EpgGuide({ channels, activeChannel, onSwitchChannel, onFullscree
             </div>
           </div>
 
-          {/* Timeline + detail panel */}
+          {/* Timeline + Program Detail */}
           <div style={{ flex: 1, display: 'flex', overflow: 'hidden', minWidth: 0 }}>
 
             {/* Timeline column */}

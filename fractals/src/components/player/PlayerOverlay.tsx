@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo, type CSSProperties } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import Hls from 'hls.js'
 import Artplayer from 'artplayer'
@@ -77,13 +77,16 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
     controlsTimerRef.current = setTimeout(() => setShowControls(false), ms)
   }, [controlsMode])
 
-  // Category name — fetched for VOD on content change
+  // Category name — fetched for VOD on content change.
+  // For episodes, look up via parent series id (episodes don't carry category_name).
   const [categoryName, setCategoryName] = useState<string | null>(null)
   useEffect(() => {
     setCategoryName(null)
     if (!content) return
     if (content.category_name) { setCategoryName(content.category_name.split(',')[0]); return }
-    api.content.get(content.id).then((item: any) => {
+    const parent = (content as any)._parent
+    const lookupId = parent?.id ?? content.id
+    api.content.get(lookupId).then((item: any) => {
       if (item?.category_name) setCategoryName(item.category_name.split(',')[0])
     })
   }, [content?.id, content?.type])
@@ -838,43 +841,80 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
         />
       )}
 
-      {/* ── Category / series chip (fullscreen only) ── */}
+      {/* ── Series-episode + category chips (fullscreen only).
+           Episode playback gets two pills: left = series·S/E (opens series detail for episode picker),
+           right = category (navigates to series view filtered by category). ── */}
       {mode === 'fullscreen' && localContent && onChipClick && (() => {
         const isEpisode = !!(localContent as any)._parent
         const seInfo = isEpisode ? localContent.title.split(' · ')[0] : null
-        const typeFallback = localContent.type === 'live' ? 'Live TV'
+        const typeFallback = localContent.type === 'live' ? 'Channels'
           : localContent.type === 'movie' ? 'Films'
           : localContent.type === 'series' ? 'Series'
           : null
-        const label = isEpisode
+        const seriesLabel = isEpisode
           ? `${(localContent as any)._parent.title} · ${seInfo}`
-          : (categoryName ?? typeFallback)
-        if (!label) return null
+          : null
+        const categoryLabel = categoryName ?? typeFallback
+        if (!seriesLabel && !categoryLabel) return null
+
+        const pillStyle: CSSProperties = {
+          display: 'flex', alignItems: 'center', gap: 6,
+          padding: '4px 10px', borderRadius: 12,
+          background: 'rgba(255,255,255,0.12)',
+          border: '1px solid rgba(255,255,255,0.18)',
+          color: 'rgba(255,255,255,0.8)', fontSize: 11, fontWeight: 500,
+          cursor: 'pointer', fontFamily: 'var(--font-ui)',
+          transition: 'background 0.15s',
+        }
+        const handleHoverIn = (e: any) => { e.currentTarget.style.background = 'rgba(255,255,255,0.22)' }
+        const handleHoverOut = (e: any) => { e.currentTarget.style.background = 'rgba(255,255,255,0.12)' }
+
         return (
-          <button
-            onClick={() => onChipClick({ ...localContent, category_name: categoryName ?? undefined })}
-            style={{
-              position: 'absolute', bottom: 15, right: 15, zIndex: 100,
-              display: 'flex', alignItems: 'center', gap: 6,
-              padding: '4px 10px', borderRadius: 12,
-              background: 'rgba(255,255,255,0.12)',
-              border: '1px solid rgba(255,255,255,0.18)',
-              color: 'rgba(255,255,255,0.8)', fontSize: 11, fontWeight: 500,
-              cursor: 'pointer', fontFamily: 'var(--font-ui)',
-              transition: 'opacity 0.2s, background 0.15s',
-              opacity: showControls ? 1 : 0,
-              pointerEvents: showControls ? 'all' : 'none',
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.22)' }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.12)' }}
-          >
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              {isEpisode
-                ? <><rect x="2" y="7" width="20" height="15" rx="2"/><path d="M16 3H8l-2 4h12l-2-4z"/></>
-                : <><path d="M4 6h16M4 12h16M4 18h10"/></>}
-            </svg>
-            {label}
-          </button>
+          <div style={{
+            position: 'absolute', bottom: 15, right: 15, zIndex: 100,
+            display: 'flex', gap: 6, alignItems: 'center',
+            opacity: showControls ? 1 : 0,
+            pointerEvents: showControls ? 'all' : 'none',
+            transition: 'opacity 0.2s',
+          }}>
+            {seriesLabel && (
+              <button
+                onClick={() => onChipClick({ ...localContent, category_name: categoryName ?? undefined })}
+                style={pillStyle}
+                onMouseEnter={handleHoverIn}
+                onMouseLeave={handleHoverOut}
+              >
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="2" y="7" width="20" height="15" rx="2"/><path d="M16 3H8l-2 4h12l-2-4z"/>
+                </svg>
+                {seriesLabel}
+              </button>
+            )}
+            {categoryLabel && (
+              <button
+                onClick={() => {
+                  // Synthesize a non-episode item so App.handlePlayerChipClick takes the
+                  // category-navigation branch (not the open-series-detail branch).
+                  const parent = (localContent as any)._parent
+                  onChipClick({
+                    ...localContent,
+                    id: parent?.id ?? localContent.id,
+                    type: (parent?.type ?? localContent.type) as ContentItem['type'],
+                    _parent: undefined,
+                    category_name: categoryName ?? undefined,
+                  } as any)
+                }}
+                style={pillStyle}
+                onMouseEnter={handleHoverIn}
+                onMouseLeave={handleHoverOut}
+              >
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M4 6h16M4 12h16M4 18h10"/>
+                </svg>
+                {categoryLabel}
+              </button>
+            )}
+          </div>
         )
       })()}
 
