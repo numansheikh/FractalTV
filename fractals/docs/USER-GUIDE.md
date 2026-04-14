@@ -18,14 +18,9 @@
 
 Add as many Xtream accounts as you want. Content from all sources appears in one unified library. Each source gets a distinct color dot on cards for identification.
 
-### TMDB Enrichment
+### Metadata / Enrichment
 
-To get posters, ratings, plots, and cast information:
-
-1. Open **Settings** > **Enrichment** tab.
-2. Enter your TMDB API key (get one free at themoviedb.org).
-3. Click **Start Enrichment** — metadata is fetched in the background.
-4. Content also enriches on-demand when you open a detail panel.
+g1c ships without TMDB / enrichment. Posters, plots, cast, and ratings come from whatever the provider gives you. Canonical-identity and enrichment layers are on the g2+ roadmap.
 
 ---
 
@@ -100,7 +95,6 @@ Click a movie card to open the detail panel (slides in from the right). You'll s
 - Plot overview
 - Director and cast
 - Your star rating (1-5 stars)
-- "Wrong match? Search TMDB manually" link (if enriched)
 
 ### Series
 
@@ -173,11 +167,6 @@ Open with the gear icon or `Cmd+,`.
 - Choose between ArtPlayer (built-in), MPV, or VLC
 - Set custom paths for external players
 
-### Enrichment Tab
-- Enter/update TMDB API key
-- View enrichment status (total / enriched / pending)
-- Start batch enrichment
-
 ### Info Tab
 - App version and system information
 - DevTools toggle
@@ -192,8 +181,6 @@ Open with the gear icon or `Cmd+,`.
 
 3. **Source colors** — each source has a unique color. The small dot on card corners tells you which source provides that content.
 
-4. **On-demand enrichment** — if a movie/series has no metadata, opening its detail panel automatically triggers a TMDB lookup. If it picks the wrong match, use "Wrong match? Search TMDB manually" to fix it.
+4. **Star ratings** — click a star to rate, click the same star again to clear your rating.
 
-5. **Star ratings** — click a star to rate, click the same star again to clear your rating.
-
-6. **Series episodes** — the panel stays open when you play an episode, so you can easily pick the next one when the player closes.
+5. **Series episodes** — the panel stays open when you play an episode, so you can easily pick the next one when the player closes.

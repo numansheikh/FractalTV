@@ -18,7 +18,7 @@ function createWindow() {
       preload: join(__dirname, '../preload/preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
       // IPTV streams are cross-origin — disable web security so HLS.js can fetch them
       webSecurity: false,
     },

@@ -234,7 +234,7 @@ export function LiveView({ channel, onFullscreen, onSwitchChannel, onClose }: Pr
           {/* Channel rows */}
           <div style={{ flex: 1, overflowY: 'auto' }}>
             {filtered.map((ch) => (
-              <ChannelRow
+              <LiveChannelListCard
                 key={ch.id}
                 ch={ch}
                 isActive={ch.id === channel.id}
@@ -631,7 +631,7 @@ function EpgStrip({ channel, expanded, onToggle, onOpenGuide }: { channel: Conte
 
 // ── Channel row ───────────────────────────────────────────────────────────────
 
-function ChannelRow({ ch, isActive, activeRef, colorMap, isFav, onToggleFav, onClick }: {
+function LiveChannelListCard({ ch, isActive, activeRef, colorMap, isFav, onToggleFav, onClick }: {
   ch: ContentItem; isActive: boolean; activeRef?: React.RefObject<HTMLDivElement | null>; colorMap: Record<string, any>
   isFav: boolean; onToggleFav: (ch: ContentItem) => void; onClick: () => void
 }) {

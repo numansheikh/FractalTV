@@ -2,7 +2,7 @@
 
 ## What is Fractals?
 
-A cross-platform IPTV client that treats content as the primary abstraction, not playlists or protocols. You add your IPTV sources (Xtream Codes accounts, M3U URLs) once, and the app merges everything into a single unified library — enriched with metadata from TMDB, searchable by actor, director, genre, language, similarity, or free text.
+A cross-platform IPTV client that treats content as the primary abstraction, not playlists or protocols. You add your IPTV sources (Xtream Codes accounts, M3U URLs) once, and the app merges everything into a single unified library — searchable by title. (TMDB / enrichment / canonical-identity layers are deferred past g1c; see g2 in PLAN.md.)
 
 **One sentence:** "Plex-quality browsing and search for IPTV content, running locally on every platform."
 
@@ -102,11 +102,11 @@ A cross-platform IPTV client that treats content as the primary abstraction, not
 
 The Electron backend doesn't exist. Instead:
 - **CapacitorService** replaces IPC calls with direct HTTP to Xtream APIs + local storage (Capacitor Preferences or IndexedDB)
-- TMDB enrichment happens client-side via fetch
-- Embeddings: either skip (use keyword search only) or use a lightweight WASM build of transformers.js in the browser
 - SQLite on mobile via `@capacitor-community/sqlite`
 
 A `DataService` interface abstracts this — Electron and Capacitor implementations are swapped at runtime via a factory, same pattern as the legacy app but cleaner.
+
+Phase 3 territory; not built yet.
 
 ## Database schema (g1c — 15 tables, per-type split)
 
@@ -210,14 +210,14 @@ fractals/
 │   │   ├── schema.ts              # Drizzle schema
 │   │   └── migrations/            # SQL migration files
 │   ├── services/
-│   │   ├── xtream-sync.service.ts # Xtream API + sync logic
-│   │   ├── m3u-sync.service.ts    # M3U import + parse
-│   │   ├── tmdb.service.ts        # TMDB API enrichment
-│   │   ├── search.service.ts      # FTS5 + vector search
-│   │   └── epg.service.ts         # EPG fetch + parse
+│   │   ├── xtream.service.ts      # Xtream API client
+│   │   ├── m3u.service.ts         # M3U import + parse
+│   │   ├── epg.service.ts         # EPG fetch + parse
+│   │   └── title-normalizer.ts    # any-ascii + lowercase (shared by sync + search)
 │   ├── workers/
-│   │   ├── enrichment.worker.ts   # TMDB enrichment background job
-│   │   └── embedding.worker.ts    # transformers.js embedding generation
+│   │   ├── sync.worker.ts         # Xtream sync (content + EPG auto-chain)
+│   │   ├── m3u-sync.worker.ts     # M3U sync
+│   │   └── delete.worker.ts       # Source delete / resync wipe
 │   └── ipc/
 │       └── handlers.ts            # All IPC handler registrations
 ├── src/
@@ -454,11 +454,11 @@ Canonical identity / deduplication is not on the roadmap — it's a permanent g1
 
 - **No FTS / enrichment / canonical (g1c)** — Search is LIKE only on `search_title`. No TMDB metadata. No deduplication across sources. FTS was tried and removed; canonical is a permanent g1c tradeoff.
 
-- **Black screen bug** — Occasional idle black screen requiring Cmd+R. Undiagnosed, needs DevTools console output. Deferred.
-
 - **International character search** — European diacritics + ligatures handled bidirectionally via any-ascii. Arabic, Hebrew, Cyrillic, CJK pass through any-ascii to their closest Latin form; effectiveness varies.
 
 - **Capacitor / mobile not yet implemented** — Phase 3.
+
+- **Residual `as any` casts** — ~143 across the IPC boundary. Triage is on the Tech Health backlog.
 
 ## Data quirks to be aware of
 

@@ -16,6 +16,7 @@ import { PlayerOverlay } from '@/components/player/PlayerOverlay'
 // Detail + overlay panels loaded lazily
 const MovieDetail = lazy(() => import('@/components/detail/MovieDetail').then((m) => ({ default: m.MovieDetail })))
 const SeriesDetail = lazy(() => import('@/components/detail/SeriesDetail').then((m) => ({ default: m.SeriesDetail })))
+const ChannelDetail = lazy(() => import('@/components/detail/ChannelDetail').then((m) => ({ default: m.ChannelDetail })))
 const SettingsPanel = lazy(() => import('@/components/settings/SettingsPanel').then((m) => ({ default: m.SettingsPanel })))
 const SourcesPanel = lazy(() => import('@/components/sources/SourcesPanel').then((m) => ({ default: m.SourcesPanel })))
 const LiveView = lazy(() => import('@/components/live/LiveView').then((m) => ({ default: m.LiveView })))
@@ -219,6 +220,7 @@ function AppShell() {
   }
 
   const isSeries = selectedContent?.type === 'series'
+  const isLive = selectedContent?.type === 'live'
 
   return (
     <div style={{
@@ -275,7 +277,7 @@ function AppShell() {
       {/* Overlay panels — rendered via Suspense/lazy */}
       <Suspense fallback={null}>
         {/* Movie detail */}
-        {selectedContent && !isSeries && (
+        {selectedContent && !isSeries && !isLive && (
           <MovieDetail
             item={selectedContent}
             onPlay={handlePlay}
@@ -287,6 +289,16 @@ function AppShell() {
         {/* Series detail */}
         {selectedContent && isSeries && (
           <SeriesDetail
+            item={selectedContent}
+            onPlay={handlePlay}
+            onClose={() => { setSelectedContent(null) }}
+            onNavigate={handleBreadcrumbNav}
+            isPlaying={!!playingContent}
+          />
+        )}
+        {/* Channel detail */}
+        {selectedContent && isLive && (
+          <ChannelDetail
             item={selectedContent}
             onPlay={handlePlay}
             onClose={() => { setSelectedContent(null) }}

@@ -15,7 +15,7 @@ Architecture, tech stack, schema, conventions, design language: see `fractals/CL
 | 2 | Complete | V2 data model cutover (canonical + streams, v1 dropped) |
 | 2.5 | Complete | V3 data model + search (canonical split, association layer, MetadataProvider, advanced search, two-phase sync) |
 | g1 | Complete | Strip to pure provider-data app. 12 tables. LIKE search + debounce. |
-| g1c | **Complete** | 15-table per-type split. LIKE on `search_title` (inline at sync). Test → Sync pipeline (EPG auto-chains). |
+| g1c | **Complete** | 15-table per-type split. LIKE on `search_title` (inline at sync). Test → Sync pipeline (EPG auto-chains). VoD card redesign, vocabulary sweep, Channel Detail panel + card Details buttons. Tech cleanup: `tsconfig.node.json` fixed, Electron sandbox enabled, profile_id / season sort already correct in g1c schema. |
 | g2 | Future | Search improvements (possibilities listed below; no commitments) |
 | 3 | Not started | Capacitor (Android/iOS/TV), Tizen |
 
@@ -70,26 +70,11 @@ FTS5 is **not** on this list — tried twice, rejected both times at this catalo
 
 ---
 
-## Known bugs (carry forward)
-
-- [ ] **Black screen** — occasional idle black screen requiring Cmd+R. Undiagnosed, deferred.
-
----
-
 ## Future / Parked Buckets
-
-### Bucket 2 — Experience Polish
-
-- [ ] **Series full-page view** — replace cramped SeriesDetail slide panel for long-running series
-- [ ] **Design system overhaul** (parked) — borders + washed-out lavender feel off; deferred
 
 ### Bucket 3 — Tech Health
 
-Top items:
-- [ ] Missing `profile_id` in user data writes
-- [ ] `tsconfig.node.json` broken
-- [ ] 130+ `as any` casts across IPC layer
-- [ ] Season sort is string-based (Season 10 sorts before Season 2)
+- [ ] 130+ `as any` casts across IPC layer — triage sprint (worst: `lib/api.ts`, `PlayerOverlay`, `ipc/handlers.ts`)
 
 ### Bucket 4 — Multi-Platform Reach (Phase 3)
 
@@ -117,8 +102,9 @@ Three-tier split (same React codebase, feature flags):
 
 ## Snapshot (2026-04-14)
 
-- Phase state: g1 locked; **g1c shipped** (simplified past the original design — FTS removed, Index step merged into sync, pipeline reduced to 2 buttons)
-- Active branch: `g1c`
+- Phase state: **g1c shipped** (simplified past the original design — FTS removed, Index step merged into sync, pipeline reduced to 2 buttons; VoD card redesign, vocabulary sweep, Channel Detail panel + Details buttons on all VoD/Channel cards)
+- Active branch: `g1c` (being promoted to `master`)
 - DB: 15 tables — per-type split for content/categories/user-data, no canonical, no FTS
 - Search: LIKE on `search_title` (populated inline at sync via any-ascii + lowercase). No ranking, no FTS.
 - Pipeline: Test → Sync. Ingest states `added → tested → synced → epg_fetched`. EPG auto-chains for Xtream sources.
+- Security: Electron sandbox enabled, contextIsolation on, nodeIntegration off.

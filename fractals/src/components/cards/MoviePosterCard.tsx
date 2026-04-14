@@ -252,8 +252,8 @@ export function MoviePosterCard({ item, onClick }: Props) {
           position: 'absolute',
           right: 8,
           bottom: 0,  // inside the OVERHANG zone; button is centered vertically on the visual card's bottom edge
-          height: 24,
-          padding: '0 14px',
+          height: 20,
+          padding: '0 7px',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           background: 'var(--accent-film)',
           color: '#fff',

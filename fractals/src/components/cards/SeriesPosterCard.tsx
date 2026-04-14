@@ -284,8 +284,8 @@ export function SeriesPosterCard({ item, onClick }: Props) {
               position: 'absolute',
               right: 8,
               bottom: 0,
-              height: 24,
-              padding: '0 14px',
+              height: 20,
+              padding: '0 7px',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               background: lit
                 ? 'color-mix(in srgb, var(--accent-series) 55%, white)'

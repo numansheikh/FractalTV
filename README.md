@@ -1,6 +1,6 @@
 # Fractals
 
-A cross-platform, local-first IPTV client that treats content as the primary abstraction, not playlists or provider accounts. Add your IPTV sources once, and everything merges into a unified library enriched with TMDB metadata — searchable by actor, director, genre, or free text.
+A cross-platform, local-first IPTV client that treats content as the primary abstraction, not playlists or provider accounts. Add your IPTV sources once, and everything merges into a unified library — searchable by title.
 
 **"Plex-quality browsing and search for IPTV content, running locally on every platform."**
 
@@ -17,17 +17,16 @@ For everything below — architecture, running locally, keyboard shortcuts, conv
 
 ## Current state
 
-Active branch: **`g1c`**. The g1c schema redesign is **design-locked but not yet implemented** — it sits on top of tag `g1-baseline` at commit `3cfac99c`. The redesign moves the database to a 15-table surface (split per-type content / categories / user-data, FTS5 baked in, no canonical layer) and introduces a `search_title` normalization stage. Full design and implementation task list live in [`PLAN.md`](PLAN.md).
+Active branch: **`g1c`** (shipped; being promoted to `master`). 15-table per-type schema (channels / movies / series / episodes + per-type categories + per-type user_data + sources / profiles / settings + epg). Search is plain LIKE on a persisted `search_title` column (any-ascii + lowercase), populated inline at sync. No canonical identity layer, no FTS, no TMDB enrichment. Pipeline: Test → Sync (EPG auto-chains for Xtream sources). Full phase map + future buckets in [`PLAN.md`](PLAN.md).
 
 ## Roadmap
 
-High-level work is tracked in **[`BACKLOG.md`](BACKLOG.md)**. Five active buckets:
+Tracked in **[`PLAN.md`](PLAN.md)**:
 
-1. **Data & Search** *(next pick)* — canonical data model + search redesign + TMDB enrichment
-2. **Product shape** — three-tier split (M3U Player / Xtream Lite / Fractals Pro) and M3U format work
-3. **Multi-platform reach** — Android, iOS, Android TV, Samsung Tizen via Capacitor
-4. **Experience polish** — Live TV nav, series full-page view, player fixes
-5. **Tech health** — QA cycle 2 follow-ups (type safety, security, hardening)
+1. **g2 — Search improvements** (future, no commitments) — denormalized corpus, trigram on CJK / Arabic, ranking signals, embeddings
+2. **Multi-platform reach** (Phase 3) — Android, iOS, Android TV, Samsung Tizen via Capacitor
+3. **Tech health** — remaining `as any` cast triage
+4. **Product shape** (discussion only) — three-tier split (M3U Player / Xtream Lite / Fractals Pro)
 
 ## Disclaimer
 

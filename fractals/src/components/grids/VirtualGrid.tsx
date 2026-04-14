@@ -7,6 +7,7 @@ import { SeriesPosterCard } from '@/components/cards/SeriesPosterCard'
 import { ChannelCard } from '@/components/cards/ChannelCard'
 import { useSourcesStore } from '@/stores/sources.store'
 import { useUserStore } from '@/stores/user.store'
+import { useAppStore } from '@/stores/app.store'
 import { buildColorMapFromSources } from '@/lib/sourceColors'
 import { api } from '@/lib/api'
 
@@ -36,12 +37,12 @@ function ensureMarqueeStyle() {
 
 // ─── Channel list row ────────────────────────────────────────────────────────
 
-interface ChannelListRowProps {
+interface ChannelListCardProps {
   item: ContentItem
   onClick: (item: ContentItem) => void
 }
 
-function ChannelListRow({ item, onClick }: ChannelListRowProps) {
+function ChannelListCard({ item, onClick }: ChannelListCardProps) {
   const [hovered, setHovered] = useState(false)
   const [imgError, setImgError] = useState(false)
   const [marqueeOffset, setMarqueeOffset] = useState(0)
@@ -53,6 +54,7 @@ function ChannelListRow({ item, onClick }: ChannelListRowProps) {
 
   // Favorite state
   const isFav = !!useUserStore((s) => s.data[item.id]?.favorite)
+  const setSelectedContent = useAppStore((s) => s.setSelectedContent)
   const qc = useQueryClient()
 
   const toggleFav = async (e: React.MouseEvent) => {
@@ -214,6 +216,28 @@ function ChannelListRow({ item, onClick }: ChannelListRowProps) {
             <polygon points="5,3 19,12 5,21" />
           </svg>
         )}
+        {/* Details pill on hover — outlined, far right */}
+        {hovered && (
+          <button
+            onClick={(e) => { e.stopPropagation(); setSelectedContent(item) }}
+            title="Details"
+            style={{
+              background: 'transparent',
+              color: 'var(--accent-live)',
+              border: '1px solid var(--accent-live)',
+              borderRadius: 4,
+              height: 18,
+              padding: '0 6px',
+              fontSize: 10, fontWeight: 600,
+              fontFamily: 'var(--font-ui)',
+              cursor: 'pointer',
+              display: 'flex', alignItems: 'center',
+              lineHeight: 1,
+            }}
+          >
+            Details
+          </button>
+        )}
       </div>
     </div>
   )
@@ -240,7 +264,7 @@ export function VirtualGrid({ items, onSelect, viewMode = 'grid', isLoading, con
 
   const isList = viewMode === 'list'
   const isLive = items[0]?.type === 'live'
-  const gap = isList ? 2 : 8
+  const gap = isList ? 2 : 10
   const colGap = isList ? 8 : gap
   const padding = 16
 
@@ -263,7 +287,7 @@ export function VirtualGrid({ items, onSelect, viewMode = 'grid', isLoading, con
   // Both poster types now share 76px; captionHeight stays as a single value.
   const captionHeight = 76
   const gridRowHeight = isLive
-    ? Math.ceil(actualCardWidth * 9 / 16) + 34              // 16:9 + name strip
+    ? Math.ceil(actualCardWidth * 9 / 16) + 60              // 16:9 + name strip (2-line title reserved) + 12px overhang for hanging Details button
     : Math.ceil(actualCardWidth * 3 / 2) + captionHeight    // 2:3 + metadata strip
   const rowHeight = isList ? listRowHeight : gridRowHeight
 
@@ -378,7 +402,7 @@ export function VirtualGrid({ items, onSelect, viewMode = 'grid', isLoading, con
                   }}
                 >
                   {isList
-                    ? <ChannelListRow item={item} onClick={onSelect} />
+                    ? <ChannelListCard item={item} onClick={onSelect} />
                     : item.type === 'live'
                       ? <ChannelCard item={item} onClick={onSelect} />
                       : item.type === 'series'

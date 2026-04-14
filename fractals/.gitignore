@@ -4,3 +4,6 @@ dist-electron/
 dist-release/
 *.local
 .DS_Store
+
+# tsc build info (composite project artifact; not used since drop to noEmit)
+tsconfig*.tsbuildinfo
