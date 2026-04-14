@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Source, SyncProgress, useSourcesStore } from '@/stores/sources.store'
+import { useEffect, useState } from 'react'
+import { Source, useSourcesStore } from '@/stores/sources.store'
 import { useAppStore } from '@/stores/app.store'
 import { getSourceColor, PALETTE_HEX } from '@/lib/sourceColors'
 import { api } from '@/lib/api'
@@ -70,8 +70,31 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
   const [saveError, setSaveError] = useState('')
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null)
+  const [epgState, setEpgState] = useState<{ running: boolean; message?: string; result?: { ok: boolean; message: string } }>({ running: false })
 
-  const handleTest = async () => {
+  // Pipeline Test — tests the already-added source and advances ingest_state.
+  const handlePipelineTest = async () => {
+    setTesting(true)
+    setTestResult(null)
+    try {
+      const r: any = await api.sources.test(source.id)
+      const ok = r?.success ?? !r?.error
+      const msg = ok
+        ? (r?.itemCount != null ? `${Number(r.itemCount).toLocaleString()} items` : (r?.count != null ? `${Number(r.count).toLocaleString()} items` : 'Connected'))
+        : (r?.error ?? 'Connection failed')
+      setTestResult({ success: !!ok, message: msg })
+      if (ok && source.ingestState === 'added') {
+        useSourcesStore.getState().updateSource(source.id, { ingestState: 'tested' })
+      }
+    } catch (e) {
+      setTestResult({ success: false, message: String(e) })
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  // Edit-form Test — tests against form values while editing credentials.
+  const handleEditTest = async () => {
     setTesting(true)
     setTestResult(null)
     try {
@@ -92,6 +115,31 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
       setTesting(false)
     }
   }
+
+  // EPG fetch — advances ingest_state to 'epg_fetched' on success.
+  const handleEpg = async () => {
+    setEpgState({ running: true, message: 'Starting EPG fetch…' })
+    try {
+      const r: any = await api.epg.sync(source.id)
+      if (r?.success) {
+        const inserted = r?.inserted ?? 0
+        setEpgState({ running: false, result: { ok: true, message: `${Number(inserted).toLocaleString()} entries` } })
+        useSourcesStore.getState().updateSource(source.id, { ingestState: 'epg_fetched' })
+      } else {
+        setEpgState({ running: false, result: { ok: false, message: r?.error ?? 'EPG fetch failed' } })
+      }
+    } catch (e) {
+      setEpgState({ running: false, result: { ok: false, message: String(e) } })
+    }
+  }
+
+  useEffect(() => {
+    const off = api.epg.onProgress((data) => {
+      if (data.sourceId !== source.id) return
+      setEpgState((s) => (s.running ? { ...s, message: data.message } : s))
+    })
+    return () => { off() }
+  }, [source.id])
 
 
   const isSyncing = progress !== null && progress.phase !== 'done' && progress.phase !== 'error'
@@ -212,35 +260,21 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
         </span>
         {!editMode && (
           <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
-            <ActionButton
-              icon={isSyncing
-                ? <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ animation: 'spin 1s linear infinite' }}><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
-                : <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" /><path d="M8 16H3v5" /></svg>
+            <IconButton
+              title={source.disabled ? 'Enable' : 'Disable'}
+              onClick={handleToggleDisable}
+            >
+              {source.disabled
+                ? <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0" /><line x1="12" y1="2" x2="12" y2="12" /></svg>
+                : <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="4.93" y1="4.93" x2="19.07" y2="19.07" /></svg>
               }
-              onClick={() => onSync(source.id)} disabled={isSyncing}>
-              {isSyncing ? 'Syncing…' : 'Sync'}
-            </ActionButton>
-            <ActionButton
-              icon={<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>}
-              onClick={handleTest} disabled={testing}>
-              {testing ? 'Testing…' : 'Test'}
-            </ActionButton>
-            <ActionButton
-              icon={source.disabled
-                ? <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0" /><line x1="12" y1="2" x2="12" y2="12" /></svg>
-                : <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="4.93" y1="4.93" x2="19.07" y2="19.07" /></svg>
-              }
-              onClick={handleToggleDisable}>
-              {source.disabled ? 'Enable' : 'Disable'}
-            </ActionButton>
-            <ActionButton
-              icon={<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>}
-              onClick={() => setEditMode(true)}>Edit</ActionButton>
-            <ActionButton
-              icon={<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6" /><path d="M14 11v6" /><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /></svg>}
-              onClick={handleDelete}>
-              Delete
-            </ActionButton>
+            </IconButton>
+            <IconButton title="Edit" onClick={() => setEditMode(true)}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
+            </IconButton>
+            <IconButton title="Delete" onClick={handleDelete}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6" /><path d="M14 11v6" /><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /></svg>
+            </IconButton>
           </div>
         )}
       </div>
@@ -271,6 +305,50 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
               {source.maxConnections} conn
             </span>
           )}
+        </div>
+      )}
+
+      {/* Manual ingestion pipeline — forward-only gates, all past-unlocked steps stay clickable */}
+      {!editMode && (
+        <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
+          <PipelineButton
+            step={1}
+            label={testing ? 'Testing…' : 'Test'}
+            done={source.ingestState !== 'added'}
+            enabled={true}
+            loading={testing}
+            onClick={handlePipelineTest}
+          />
+          <PipelineButton
+            step={2}
+            label={isSyncing ? 'Syncing…' : 'Sync'}
+            done={source.ingestState === 'synced' || source.ingestState === 'epg_fetched'}
+            enabled={source.ingestState !== 'added' && !isSyncing}
+            loading={isSyncing}
+            onClick={() => onSync(source.id)}
+          />
+          <PipelineButton
+            step={3}
+            label={epgState.running ? 'Fetching…' : 'EPG'}
+            done={source.ingestState === 'epg_fetched'}
+            enabled={(source.ingestState === 'synced' || source.ingestState === 'epg_fetched') && !epgState.running}
+            loading={epgState.running}
+            onClick={handleEpg}
+          />
+        </div>
+      )}
+
+      {/* EPG progress / result */}
+      {(epgState.running || epgState.result) && (
+        <div style={{
+          fontSize: 10, color: epgState.result
+            ? (epgState.result.ok ? 'var(--accent-success)' : 'var(--accent-danger)')
+            : 'var(--text-1)',
+          fontFamily: 'var(--font-ui)',
+        }}>
+          {epgState.running
+            ? (epgState.message ?? 'Fetching EPG…')
+            : (epgState.result!.ok ? '✓ EPG — ' : '✗ EPG — ') + epgState.result!.message}
         </div>
       )}
 
@@ -386,7 +464,7 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
               Cancel
             </button>
             <button
-              onClick={handleTest}
+              onClick={handleEditTest}
               disabled={testing || saving}
               style={{
                 flex: 1, padding: '6px 0', borderRadius: 6, fontSize: 11,
@@ -434,29 +512,67 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
 }
 
 /* ── Inner helpers ──────────────────────────────────────────────── */
-function ActionButton({
-  children, icon, onClick, disabled,
+function IconButton({
+  children, title, onClick,
+}: { children: React.ReactNode; title: string; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      aria-label={title}
+      style={{
+        width: 26, height: 26, borderRadius: 6,
+        background: 'transparent', border: '1px solid var(--border-subtle)',
+        color: 'var(--text-1)', cursor: 'pointer',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        transition: 'background 0.1s, color 0.1s',
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-4)'; e.currentTarget.style.color = 'var(--text-0)' }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-1)' }}
+    >
+      {children}
+    </button>
+  )
+}
+
+function PipelineButton({
+  step, label, done, enabled, loading, onClick,
 }: {
-  children: React.ReactNode; icon?: React.ReactNode; onClick: () => void; disabled?: boolean
+  step: number; label: string; done: boolean; enabled: boolean; loading: boolean; onClick: () => void
 }) {
+  const disabled = !enabled
+  const accent = done ? 'var(--accent-success)' : 'var(--accent-interactive)'
   return (
     <button
       onClick={onClick}
       disabled={disabled}
-      title={typeof children === 'string' ? children : undefined}
+      title={label}
       style={{
-        padding: '4px 8px', borderRadius: 6, fontSize: 10, fontWeight: 500,
-        background: 'var(--bg-3)', border: '1px solid var(--border-subtle)',
-        color: 'var(--text-1)', cursor: disabled ? 'default' : 'pointer',
-        opacity: disabled ? 0.45 : 1, fontFamily: 'var(--font-ui)',
-        display: 'flex', alignItems: 'center', gap: 4,
-        transition: 'background 0.1s, color 0.1s, opacity 0.1s',
+        flex: 1, padding: '6px 8px', borderRadius: 6,
+        fontSize: 11, fontWeight: 600,
+        background: disabled ? 'var(--bg-3)' : accent,
+        border: 'none',
+        color: disabled ? 'var(--text-2)' : '#fff',
+        cursor: disabled ? 'default' : 'pointer',
+        opacity: disabled ? 0.5 : 1,
+        fontFamily: 'var(--font-ui)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+        transition: 'opacity 0.1s, background 0.1s',
       }}
-      onMouseEnter={(e) => { if (!disabled) { e.currentTarget.style.background = 'var(--bg-4)'; e.currentTarget.style.color = 'var(--text-0)' } }}
-      onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--bg-3)'; e.currentTarget.style.color = 'var(--text-1)' }}
     >
-      {icon && <span style={{ display: 'flex', alignItems: 'center' }}>{icon}</span>}
-      {children}
+      <span style={{
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        width: 14, height: 14, borderRadius: '50%',
+        fontSize: 9, fontWeight: 700,
+        background: disabled ? 'var(--bg-4)' : 'rgba(255,255,255,0.22)',
+        color: disabled ? 'var(--text-2)' : '#fff',
+      }}>
+        {done ? '✓' : step}
+      </span>
+      {loading && (
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ animation: 'spin 1s linear infinite' }}><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
+      )}
+      {label}
     </button>
   )
 }

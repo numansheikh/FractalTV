@@ -103,7 +103,7 @@ export function LiveSplitView({ channel, onFullscreen, onSwitchChannel, onClose 
     return true
   })
 
-  // Load favourite status for all visible channels
+  // Load favorite status for all visible channels
   useEffect(() => {
     const ids = filtered.map((c) => c.id)
     if (ids.length > 0) loadBulk(ids)
@@ -694,11 +694,11 @@ function ChannelRow({ ch, isActive, activeRef, colorMap, isFav, onToggleFav, onC
         </div>
       </div>
 
-      {/* Favourite toggle — always visible when fav, hover-only otherwise */}
+      {/* Favorite toggle — always visible when fav, hover-only otherwise */}
       {(isFav || hovered) && (
         <button
           onClick={(e) => { e.stopPropagation(); onToggleFav(ch) }}
-          title={isFav ? 'Remove from favourites' : 'Add to favourites'}
+          title={isFav ? 'Remove from favorites' : 'Add to favorites'}
           style={{
             flexShrink: 0,
             background: 'none', border: 'none', padding: '2px 3px',

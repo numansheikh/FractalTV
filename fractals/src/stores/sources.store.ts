@@ -20,6 +20,9 @@ export interface Source {
   m3uUrl?: string
   // UI color — index into the 16-color palette (user-assigned or auto by position)
   colorIndex?: number
+  // Manual ingestion pipeline state — gates the Test → Sync → EPG buttons on SourceCard.
+  // Forward-only unlock: once a step is reached, all earlier steps stay clickable.
+  ingestState: 'added' | 'tested' | 'synced' | 'epg_fetched'
 }
 
 export interface SyncProgress {

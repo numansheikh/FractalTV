@@ -310,7 +310,7 @@ function InterfaceTab() {
               const label = mode === 'discover' ? 'Discover' : 'TV'
               const desc = mode === 'discover'
                 ? 'Strips of channels, movies & series'
-                : 'Your favourite channels, drag to reorder'
+                : 'Your favorite channels, drag to reorder'
               return (
                 <button
                   key={mode}
@@ -738,7 +738,7 @@ function DataTab({ enrichStatus, enrichProgress, enrichMsg, pct, isPending, onSt
                   </label>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 11, color: 'var(--text-1)', cursor: 'pointer' }}>
                     <input type="checkbox" checked={includeUserData} onChange={(e) => setIncludeUserData(e.target.checked)} style={{ accentColor: 'var(--accent-interactive)', cursor: 'pointer' }} />
-                    User data (favourites, watchlist, history)
+                    User data (favorites, watchlist, history)
                   </label>
                 </div>
               </div>

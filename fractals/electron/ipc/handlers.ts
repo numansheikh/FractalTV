@@ -19,6 +19,7 @@ interface SourceRow {
   server_url: string; username: string; password: string
   m3u_url?: string; status?: string; disabled?: number
   color_index?: number; last_epg_sync?: number
+  ingest_state?: 'added' | 'tested' | 'synced' | 'epg_fetched'
 }
 
 interface StreamRow {
@@ -42,7 +43,6 @@ interface SeriesSourceRow {
 
 interface DisabledRow { disabled: number }
 
-const EPG_REFRESH_INTERVAL_HOURS = 24
 const DEFAULT_PROFILE = 'default'
 
 function dbPath(): string {
@@ -55,17 +55,6 @@ function dbPath(): string {
 
 // `activeSyncWorkers` allows cancel mid-flight.
 const activeSyncWorkers = new Map<string, Worker>()
-
-function runEpgSync(sqlite: ReturnType<typeof getSqlite>, win: BrowserWindow | null, sourceId: string, src: any) {
-  syncEpg(sourceId, src.server_url, src.username, src.password,
-    (msg) => win?.webContents.send('epg:progress', { sourceId, message: msg })
-  ).then((r) => {
-    if (r.inserted > 0) {
-      sqlite.prepare(`UPDATE sources SET last_epg_sync = unixepoch() WHERE id = ?`).run(sourceId)
-      win?.webContents.send('epg:progress', { sourceId, message: `EPG: ${r.inserted.toLocaleString()} entries loaded` })
-    }
-  }).catch(() => {}) // EPG failure is non-fatal
-}
 
 // ─── Content resolver ─────────────────────────────────────────────────────
 // A contentId can point at three different rows in V3:
@@ -389,6 +378,25 @@ export function registerHandlers() {
     serverUrl: string; username: string; password: string
   }) => xtreamService.testConnection(args.serverUrl, args.username, args.password))
 
+  // Test an already-added source by ID. Advances ingest_state to 'tested' on
+  // success. Idempotent: re-testing a 'synced' or 'epg_fetched' source does
+  // NOT regress the state (forward-only unlock).
+  ipcMain.handle('sources:test', async (_event, sourceId: string) => {
+    const sqlite = getSqlite()
+    const src = sqlite.prepare('SELECT * FROM sources WHERE id = ?').get(sourceId) as SourceRow | undefined
+    if (!src) return { success: false, error: 'Source not found' }
+
+    const result = src.type === 'm3u' && src.m3u_url
+      ? await m3uService.testConnection(src.m3u_url)
+      : await xtreamService.testConnection(src.server_url, src.username, src.password)
+
+    const ok = 'error' in result ? !result.error : (result as any).success
+    if (ok && src.ingest_state === 'added') {
+      sqlite.prepare(`UPDATE sources SET ingest_state = 'tested' WHERE id = ?`).run(sourceId)
+    }
+    return result
+  })
+
   ipcMain.handle('sources:test-m3u', async (_event, args: { m3uUrl: string }) => m3uService.testConnection(args.m3uUrl))
   ipcMain.handle('sources:add-m3u',  async (_event, args: { name: string; m3uUrl: string }) => m3uService.addSource(args.name, args.m3uUrl))
 
@@ -439,16 +447,8 @@ export function registerHandlers() {
       }
     }
 
-    // Refresh stale EPG in background.
-    const staleThreshold = Math.floor(Date.now() / 1000) - EPG_REFRESH_INTERVAL_HOURS * 3600
-    const staleSources = sqlite.prepare(`
-      SELECT * FROM sources
-      WHERE disabled = 0 AND server_url IS NOT NULL
-        AND (last_epg_sync IS NULL OR last_epg_sync < ?)
-    `).all(staleThreshold) as SourceRow[]
-
-    for (const src of staleSources) runEpgSync(sqlite, win, src.id, src)
-
+    // EPG refresh is manual in g1c — driven by the EPG button on SourceCard.
+    // No auto-kick on startup.
     return { done: true }
   })
 
@@ -504,14 +504,17 @@ export function registerHandlers() {
           })
         } else if (msg.type === 'done') {
           activeSyncWorkers.delete(sourceId)
+          // Advance ingest_state forward-only: added/tested → synced. If already
+          // epg_fetched, leave it (user re-syncing a fully-pipelined source).
+          sqlite.prepare(
+            `UPDATE sources SET ingest_state = 'synced'
+             WHERE id = ? AND ingest_state IN ('added','tested')`
+          ).run(sourceId)
           win?.webContents.send('sync:progress', {
             sourceId, phase: 'done', current: msg.totalItems, total: msg.totalItems,
             message: `Synced ${msg.catCount} categories, ${msg.totalItems.toLocaleString()} items`,
           })
           resolve({ success: true })
-          // Kick EPG sync in background after successful source sync.
-          const src = sqlite.prepare('SELECT * FROM sources WHERE id = ?').get(sourceId) as SourceRow | undefined
-          if (src?.server_url) runEpgSync(sqlite, win, sourceId, src)
         } else if (msg.type === 'warning') {
           win?.webContents.send('sync:progress', {
             sourceId, phase: 'warning', current: 0, total: 0, message: msg.message,
@@ -563,6 +566,9 @@ export function registerHandlers() {
       sourceId, source.server_url, source.username, source.password,
       (msg) => win?.webContents.send('epg:progress', { sourceId, message: msg })
     )
+    if (!result.error) {
+      sqlite.prepare(`UPDATE sources SET last_epg_sync = unixepoch(), ingest_state = 'epg_fetched' WHERE id = ?`).run(sourceId)
+    }
     return result.error ? { success: false, ...result } : { success: true, ...result }
   })
 

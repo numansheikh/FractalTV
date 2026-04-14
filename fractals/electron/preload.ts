@@ -11,6 +11,7 @@ export const api = {
       ipcRenderer.invoke('sources:add-xtream', args),
     testXtream: (args: { serverUrl: string; username: string; password: string }) =>
       ipcRenderer.invoke('sources:test-xtream', args),
+    test: (sourceId: string) => ipcRenderer.invoke('sources:test', sourceId),
     addM3u: (args: { name: string; m3uUrl: string }) =>
       ipcRenderer.invoke('sources:add-m3u', args),
     testM3u: (args: { m3uUrl: string }) =>

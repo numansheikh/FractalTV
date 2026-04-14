@@ -87,7 +87,7 @@ export function ContentArea({ sort, onSelectContent, onAddSource }: Props) {
   const showSidebar = isBrowseView
   const isFavoritesFilter = categoryFilter === '__favorites__'
 
-  // Favourites query — used when __favorites__ sentinel is active
+  // Favorites query — used when __favorites__ sentinel is active
   // Source filtering applied client-side (favorites API doesn't accept sourceIds)
   const { data: allFavData = [], isLoading: favLoading } = useQuery<ContentItem[]>({
     queryKey: ['browse-favorites', contentType],

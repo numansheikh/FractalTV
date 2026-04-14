@@ -23,6 +23,7 @@ export const sources = sqliteTable('sources', {
   itemCount: integer('item_count').notNull().default(0),
   expDate: text('exp_date'),
   maxConnections: integer('max_connections'),
+  ingestState: text('ingest_state', { enum: ['added', 'tested', 'synced', 'epg_fetched'] }).notNull().default('added'),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
 })
 

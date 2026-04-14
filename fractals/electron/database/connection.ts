@@ -95,6 +95,7 @@ function createTables(db: Database.Database) {
       subscription_type TEXT,
       last_epg_sync     INTEGER,
       color_index       INTEGER,
+      ingest_state      TEXT NOT NULL DEFAULT 'added' CHECK(ingest_state IN ('added','tested','synced','epg_fetched')),
       created_at        INTEGER NOT NULL DEFAULT (unixepoch())
     );
 
@@ -261,6 +262,16 @@ function createTables(db: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_series_ud_watchlist     ON series_user_data(profile_id, is_watchlisted);
     CREATE INDEX IF NOT EXISTS idx_channel_ud_favorites    ON channel_user_data(profile_id, is_favorite);
   `)
+
+  // Add ingest_state column to existing DBs (g1c migration).
+  // Existing sources are treated as 'synced' — they predate the manual pipeline
+  // gates, so EPG gets unlocked but the user can still click Test/Sync/EPG.
+  const hasIngestState = db.prepare(
+    `SELECT 1 FROM pragma_table_info('sources') WHERE name = 'ingest_state'`
+  ).get()
+  if (!hasIngestState) {
+    db.exec(`ALTER TABLE sources ADD COLUMN ingest_state TEXT NOT NULL DEFAULT 'synced' CHECK(ingest_state IN ('added','tested','synced','epg_fetched'))`)
+  }
 
   // Reset any sources stuck in 'syncing' from a previous crashed/killed run
   db.prepare(`UPDATE sources SET status = 'active' WHERE status = 'syncing'`).run()

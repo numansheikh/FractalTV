@@ -540,12 +540,17 @@ export function AddSourceModal({ onAdded, onCancel }: Props) {
                   onClick={handleTest}
                   disabled={!canTest || step === 'testing'}
                   style={{
-                    flex: 1, padding: '8px 0', borderRadius: 7, fontSize: 11, fontWeight: 500,
-                    background: 'var(--bg-3)', border: '1px solid var(--border-default)',
-                    color: 'var(--text-0)', cursor: 'pointer',
+                    flex: 1, padding: '8px 0', borderRadius: 7, fontSize: 11,
+                    fontWeight: canAdd ? 500 : 600,
+                    background: canAdd ? 'var(--bg-3)' : 'var(--accent-interactive)',
+                    border: canAdd ? '1px solid var(--border-default)' : 'none',
+                    color: canAdd ? 'var(--text-0)' : '#fff',
+                    cursor: 'pointer', transition: 'opacity 0.1s, background 0.12s',
                     fontFamily: 'var(--font-ui)',
                     opacity: (!canTest || step === 'testing') ? 0.4 : 1,
                   }}
+                  onMouseEnter={(e) => { if (canTest && step !== 'testing' && !canAdd) e.currentTarget.style.opacity = '0.88' }}
+                  onMouseLeave={(e) => { e.currentTarget.style.opacity = (!canTest || step === 'testing') ? '0.4' : '1' }}
                 >
                   {step === 'testing' ? 'Testing…' : 'Test'}
                 </button>
@@ -554,9 +559,13 @@ export function AddSourceModal({ onAdded, onCancel }: Props) {
                   onClick={handleAdd}
                   disabled={!canAdd}
                   style={{
-                    flex: 1, padding: '8px 0', borderRadius: 7, fontSize: 11, fontWeight: 600,
-                    background: 'var(--accent-interactive)', border: 'none',
-                    color: '#fff', cursor: 'pointer', transition: 'opacity 0.1s',
+                    flex: 1, padding: '8px 0', borderRadius: 7, fontSize: 11,
+                    fontWeight: canAdd ? 600 : 500,
+                    background: canAdd ? 'var(--accent-interactive)' : 'var(--bg-3)',
+                    border: canAdd ? 'none' : '1px solid var(--border-default)',
+                    color: canAdd ? '#fff' : 'var(--text-0)',
+                    cursor: canAdd ? 'pointer' : 'default',
+                    transition: 'opacity 0.1s, background 0.12s',
                     fontFamily: 'var(--font-ui)',
                     opacity: !canAdd ? 0.4 : 1,
                   }}

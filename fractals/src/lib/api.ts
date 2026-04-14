@@ -14,6 +14,9 @@ export const api = {
     testXtream: (args: { serverUrl: string; username: string; password: string }) =>
       isElectron ? window.api.sources.testXtream(args) : Promise.resolve({ success: false }),
 
+    test: (sourceId: string): Promise<any> =>
+      isElectron ? (window.api as any).sources.test(sourceId) : Promise.resolve({ success: false, error: 'Not in Electron' }),
+
     addM3u: (args: { name: string; m3uUrl: string }): Promise<{ id: string; error?: string }> =>
       isElectron ? (window.api as any).sources.addM3u(args) : Promise.resolve({ id: '', error: 'Not in Electron' }),
 
@@ -166,6 +169,8 @@ export const api = {
       windowEnd: number
     }> =>
       isElectron ? (window.api as any).epg.guide(args) : Promise.resolve({ channels: [], programmes: {}, windowStart: 0, windowEnd: 0 }),
+    onProgress: (cb: (data: { sourceId: string; message: string }) => void): (() => void) =>
+      isElectron ? (window.api as any).epg.onProgress(cb) : () => {},
   },
 
   series: {
