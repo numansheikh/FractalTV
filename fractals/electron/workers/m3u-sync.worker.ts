@@ -1,12 +1,16 @@
 /**
- * M3U sync worker — g1 tier.
+ * M3U sync worker — g1c tier.
  *
  * Fetches an M3U playlist, parses it, and writes:
- *   - `streams` rows with normalizer outputs
- *   - `categories` rows
+ *   - `channels`          — live entries
+ *   - `movies`            — VOD entries (M3U has no series hierarchy)
+ *   - `channel_categories`/`movie_categories` — per-type category tables
  *
- * No canonical tables, no FTS, no enrichment. Pure provider data.
- * Series-like URLs are classified as 'movie' (M3U has no series hierarchy).
+ * Sync populates `search_title` inline via `normalizeForSearch` (any-ascii +
+ * lowercase) so LIKE search matches diacritics / ligatures bidirectionally.
+ *
+ * Sync does NOT preserve user data — per the g1c hard cut, resyncs wipe
+ * user_data via CASCADE.
  */
 
 import { parentPort, workerData } from 'worker_threads'
@@ -14,6 +18,7 @@ import Database from 'better-sqlite3'
 import { createHash } from 'crypto'
 import { readFileSync } from 'fs'
 import { normalize as normalizeTitle } from '../services/title-normalizer'
+import { normalizeForSearch } from '../lib/normalize'
 
 interface WorkerData {
   sourceId: string
@@ -45,7 +50,7 @@ function sendDone(totalItems: number, catCount: number) {
   parentPort?.postMessage({ type: 'done', totalItems, catCount })
 }
 
-/** M3U URL guess: /series/ and episode-ish files stay as 'movie' in g1. */
+/** M3U URL guess: /series/ and episode-ish files stay as 'movie' in g1c. */
 function guessType(url: string): 'live' | 'movie' {
   if (url.match(/\/series\//i)) return 'movie'
   if (url.match(/\/movie\//i) || url.match(/\.(mp4|mkv|avi|mov)(\?|$)/i)) return 'movie'
@@ -134,65 +139,56 @@ async function run() {
     send('parsing', entries.length, entries.length, `Found ${entries.length.toLocaleString()} entries`)
 
     // ── Categories ───────────────────────────────────────────────────────
-    const catMap = new Map<string, { name: string; type: string }>()
+    // Collect unique groupTitle by type, then write into channel_categories
+    // and movie_categories respectively.
+    const chanCats = new Map<string, { name: string }>()   // key = groupTitle
+    const movieCats = new Map<string, { name: string }>()
     for (const entry of entries) {
-      const catKey = `${entry.type}:${entry.groupTitle}`
-      if (!catMap.has(catKey)) {
-        catMap.set(catKey, { name: entry.groupTitle, type: entry.type })
-      }
+      const target = entry.type === 'live' ? chanCats : movieCats
+      if (!target.has(entry.groupTitle)) target.set(entry.groupTitle, { name: entry.groupTitle })
     }
 
-    const insertCat = db.prepare(`
-      INSERT INTO categories (id, source_id, external_id, name, type, position)
-      VALUES (?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET name = excluded.name, position = excluded.position
-    `)
+    // Wipe existing per-source categories so positions match the new parse.
+    db.prepare(`DELETE FROM channel_categories WHERE source_id = ?`).run(sourceId)
+    db.prepare(`DELETE FROM movie_categories   WHERE source_id = ?`).run(sourceId)
 
-    let catPos = 0
-    const insertAllCats = db.transaction(() => {
-      for (const [catKey, cat] of catMap) {
-        const catId = `${sourceId}:${cat.type}:${hashUrl(catKey)}`
-        insertCat.run(catId, sourceId, hashUrl(catKey), cat.name, cat.type, catPos++)
+    const insertChanCat  = db.prepare(`INSERT INTO channel_categories (id, source_id, external_id, name, position) VALUES (?, ?, ?, ?, ?)`)
+    const insertMovieCat = db.prepare(`INSERT INTO movie_categories   (id, source_id, external_id, name, position) VALUES (?, ?, ?, ?, ?)`)
+
+    const writeCats = db.transaction(() => {
+      let pos = 0
+      for (const [name] of chanCats) {
+        const extId = hashUrl(`live:${name}`)
+        insertChanCat.run(`${sourceId}:chancat:${extId}`, sourceId, extId, name, pos++)
+      }
+      pos = 0
+      for (const [name] of movieCats) {
+        const extId = hashUrl(`movie:${name}`)
+        insertMovieCat.run(`${sourceId}:moviecat:${extId}`, sourceId, extId, name, pos++)
       }
     })
-    insertAllCats()
+    writeCats()
 
-    send('categories', catMap.size, catMap.size, `${catMap.size} categories`)
+    const catTotal = chanCats.size + movieCats.size
+    send('categories', catTotal, catTotal, `${catTotal} categories`)
 
-    // ── Backup user data before wipe (survives CASCADE) ─────────────────
-    db.prepare(`CREATE TEMP TABLE IF NOT EXISTS _bak_stream_ud AS SELECT * FROM stream_user_data WHERE 0`).run()
-    db.prepare(`CREATE TEMP TABLE IF NOT EXISTS _bak_channel_ud AS SELECT * FROM channel_user_data WHERE 0`).run()
-    db.prepare(`DELETE FROM _bak_stream_ud`).run()
-    db.prepare(`DELETE FROM _bak_channel_ud`).run()
-
-    db.prepare(`
-      INSERT INTO _bak_stream_ud SELECT sud.* FROM stream_user_data sud
-      JOIN streams s ON s.id = sud.stream_id WHERE s.source_id = ?
-    `).run(sourceId)
-    db.prepare(`
-      INSERT INTO _bak_channel_ud SELECT cud.* FROM channel_user_data cud
-      JOIN streams s ON s.id = cud.stream_id WHERE s.source_id = ?
-    `).run(sourceId)
-
-    // ── Wipe existing streams for this source ───────────────────────────
-    db.prepare(`DELETE FROM stream_categories WHERE stream_id IN (SELECT id FROM streams WHERE source_id = ?)`).run(sourceId)
-    db.prepare(`DELETE FROM streams WHERE source_id = ?`).run(sourceId)
+    // ── Wipe existing content rows for this source ──────────────────────
+    db.prepare(`DELETE FROM channels WHERE source_id = ?`).run(sourceId)
+    db.prepare(`DELETE FROM movies   WHERE source_id = ?`).run(sourceId)
 
     // ── Prepared statements ─────────────────────────────────────────────
-    const insertStreamLive = db.prepare(`
-      INSERT INTO streams (
-        id, source_id, type, stream_id, title, thumbnail_url, stream_url, category_id,
-        tvg_id, epg_channel_id,
-        language_hint, origin_hint, quality_hint, year_hint
-      ) VALUES (?, ?, 'live', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    const insertChannel = db.prepare(`
+      INSERT INTO channels (
+        id, source_id, category_id, external_id, title, search_title,
+        thumbnail_url, stream_url, tvg_id, epg_channel_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
-    const insertStreamMovie = db.prepare(`
-      INSERT INTO streams (
-        id, source_id, type, stream_id, title, thumbnail_url, stream_url, category_id,
-        language_hint, origin_hint, quality_hint, year_hint
-      ) VALUES (?, ?, 'movie', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    const insertMovie = db.prepare(`
+      INSERT INTO movies (
+        id, source_id, category_id, external_id, title, search_title,
+        thumbnail_url, stream_url, md_year
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
-    const insertSC = db.prepare(`INSERT OR IGNORE INTO stream_categories (stream_id, category_id) SELECT ?, ? WHERE EXISTS (SELECT 1 FROM categories WHERE id = ?)`)
 
     // ── Content ──────────────────────────────────────────────────────────
     send('content', 0, entries.length, `Saving ${entries.length.toLocaleString()} items…`)
@@ -200,35 +196,26 @@ async function run() {
     const batchInsert = db.transaction((items: M3uEntry[]) => {
       for (const entry of items) {
         const urlHash = hashUrl(entry.url)
-        const streamId = `${sourceId}:${entry.type}:${urlHash}`
-        const catKey = `${entry.type}:${entry.groupTitle}`
-        const catId = `${sourceId}:${entry.type}:${hashUrl(catKey)}`
-
+        const cid = `${sourceId}:${entry.type}:${urlHash}`
         const rawTitle = entry.title || 'Unknown'
         const normalized = normalizeTitle(rawTitle)
 
         if (entry.type === 'live') {
+          const catExtId = hashUrl(`live:${entry.groupTitle}`)
+          const catId = `${sourceId}:chancat:${catExtId}`
           const tvgId = entry.tvgId || null
-          insertStreamLive.run(
-            streamId, sourceId, urlHash, rawTitle,
-            entry.tvgLogo || null, entry.url, null,
-            tvgId, tvgId,
-            normalized.languageHint || null,
-            normalized.originHint || null,
-            normalized.qualityHint || null,
-            normalized.year || null
+          insertChannel.run(
+            cid, sourceId, catId, urlHash, rawTitle, normalizeForSearch(rawTitle),
+            entry.tvgLogo || null, entry.url, tvgId, tvgId
           )
         } else {
-          insertStreamMovie.run(
-            streamId, sourceId, urlHash, rawTitle,
-            entry.tvgLogo || null, entry.url, null,
-            normalized.languageHint || null,
-            normalized.originHint || null,
-            normalized.qualityHint || null,
-            normalized.year || null
+          const catExtId = hashUrl(`movie:${entry.groupTitle}`)
+          const catId = `${sourceId}:moviecat:${catExtId}`
+          insertMovie.run(
+            cid, sourceId, catId, urlHash, rawTitle, normalizeForSearch(rawTitle),
+            entry.tvgLogo || null, entry.url, normalized.year || null
           )
         }
-        insertSC.run(streamId, catId, catId)
       }
     })
 
@@ -238,28 +225,17 @@ async function run() {
       send('content', done, entries.length, `Items: ${done.toLocaleString()}/${entries.length.toLocaleString()}`)
     }
 
-    // ── Restore user data (only for streams that still exist) ────────────
-    db.prepare(`
-      INSERT OR IGNORE INTO stream_user_data SELECT b.* FROM _bak_stream_ud b
-      WHERE EXISTS (SELECT 1 FROM streams WHERE id = b.stream_id)
-    `).run()
-    db.prepare(`
-      INSERT OR IGNORE INTO channel_user_data SELECT b.* FROM _bak_channel_ud b
-      WHERE EXISTS (SELECT 1 FROM streams WHERE id = b.stream_id)
-    `).run()
-    db.prepare(`DROP TABLE IF EXISTS _bak_stream_ud`).run()
-    db.prepare(`DROP TABLE IF EXISTS _bak_channel_ud`).run()
-
     // ── Finalize ─────────────────────────────────────────────────────────
-    db.prepare('UPDATE categories SET content_synced = 1 WHERE source_id = ?').run(sourceId)
-    const totalItems = (db.prepare('SELECT COUNT(*) as n FROM streams WHERE source_id = ?').get(sourceId) as { n: number }).n
+    const chCount = (db.prepare('SELECT COUNT(*) as n FROM channels WHERE source_id = ?').get(sourceId) as { n: number }).n
+    const mvCount = (db.prepare('SELECT COUNT(*) as n FROM movies   WHERE source_id = ?').get(sourceId) as { n: number }).n
+    const totalItems = chCount + mvCount
 
     db.prepare(`
       UPDATE sources SET status = 'active', last_sync = unixepoch(), last_error = NULL, item_count = ?
       WHERE id = ?
     `).run(totalItems, sourceId)
 
-    sendDone(totalItems, catMap.size)
+    sendDone(totalItems, catTotal)
   } catch (err) {
     db.prepare(`UPDATE sources SET status = 'error', last_error = ? WHERE id = ?`).run(String(err), sourceId)
     sendError(String(err))

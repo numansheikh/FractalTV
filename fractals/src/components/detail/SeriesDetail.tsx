@@ -10,7 +10,6 @@ import { SlidePanel } from '@/components/layout/SlidePanel'
 import { EpisodeRow } from '@/components/cards/EpisodeRow'
 import { MetadataBlock } from './MetadataBlock'
 import { ActionButtons } from './ActionButtons'
-import { EnrichmentFallback } from './EnrichmentFallback'
 
 interface Props {
   item: ContentItem
@@ -29,7 +28,7 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
   const userStore = useUserStore()
   const setQuery = useSearchStore((s) => s.setQuery)
 
-  const { data: enrichedItem, refetch } = useQuery({
+  const { data: enrichedItem } = useQuery({
     queryKey: ['content', item.id],
     queryFn: () => api.content.get(item.id),
     staleTime: 5 * 60_000,
@@ -53,7 +52,6 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
   const resumeEntry = continueData[0] ?? null
 
   const c = (enrichedItem as ContentItem | null) ?? item
-  const isEnriched = !!(c.enriched)
   const primarySourceId = c.primarySourceId ?? c.primary_source_id ?? item.primarySourceId ?? item.primary_source_id ?? (item as any).source_ids ?? item.id?.split(':')[0]
   const sourceColor = primarySourceId ? colorMap[primarySourceId] : undefined
   const primarySource = primarySourceId ? sources.find((s) => s.id === primarySourceId) : undefined
@@ -132,8 +130,6 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
   const playButtonLabel = resumeEntry && resumeEntry.resume_season_number != null && resumeEntry.resume_episode_number != null
     ? `▶ Resume S${resumeEntry.resume_season_number}·E${resumeEntry.resume_episode_number}`
     : firstEpisode ? '▶ Play from S1·E1' : '▶ Play'
-
-  const handleRefetch = () => { refetch() }
 
   return (
     <SlidePanel open={true} onClose={onClose} width={Math.min(720, window.innerWidth * 0.92)} suppressClose={isPlaying}>
@@ -448,7 +444,7 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
             flexDirection: 'column',
             gap: 16,
           }}>
-            <MetadataBlock item={c} isEnriched={isEnriched} isSeries />
+            <MetadataBlock item={c} isSeries />
 
             <ActionButtons
               item={c}

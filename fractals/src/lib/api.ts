@@ -66,7 +66,7 @@ export const api = {
   },
 
   search: {
-    query: (args: { query: string; type?: 'live' | 'movie' | 'series'; categoryName?: string; sourceIds?: string[]; limit?: number; offset?: number }): Promise<{ items: any[], total: number }> =>
+    query: (args: { query: string; type?: 'live' | 'movie' | 'series'; categoryName?: string; sourceIds?: string[]; limit?: number; offset?: number; skipCount?: boolean }): Promise<{ items: any[], total: number }> =>
       isElectron ? window.api.search.query(args) : Promise.resolve({ items: [], total: 0 }),
   },
 
@@ -158,8 +158,6 @@ export const api = {
   },
 
   epg: {
-    sync: (sourceId: string) =>
-      isElectron ? (window.api as any).epg.sync(sourceId) : Promise.resolve({ success: false }),
     nowNext: (contentId: string): Promise<{ now: any; next: any }> =>
       isElectron ? (window.api as any).epg.nowNext(contentId) : Promise.resolve({ now: null, next: null }),
     guide: (args: { contentIds: string[]; startTime?: number; endTime?: number }): Promise<{
@@ -169,8 +167,6 @@ export const api = {
       windowEnd: number
     }> =>
       isElectron ? (window.api as any).epg.guide(args) : Promise.resolve({ channels: [], programmes: {}, windowStart: 0, windowEnd: 0 }),
-    onProgress: (cb: (data: { sourceId: string; message: string }) => void): (() => void) =>
-      isElectron ? (window.api as any).epg.onProgress(cb) : () => {},
   },
 
   series: {

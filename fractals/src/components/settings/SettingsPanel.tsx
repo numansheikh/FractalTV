@@ -3,7 +3,7 @@ import { useAppStore } from '@/stores/app.store'
 import { useUserStore } from '@/stores/user.store'
 import { useSourcesStore } from '@/stores/sources.store'
 import { motion, AnimatePresence } from 'framer-motion'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQueryClient } from '@tanstack/react-query'
 import { SlidePanel } from '@/components/layout/SlidePanel'
 import { api } from '@/lib/api'
 import {
@@ -32,7 +32,6 @@ const TABS: { id: Tab; label: string }[] = [
 ]
 
 export function SettingsPanel({ onClose, suppressScrim }: Props) {
-  const qc = useQueryClient()
   const { theme, font, setTheme, setFont } = useTheme()
   const [activeTab, setActiveTab] = useState<Tab>('appearance')
 
@@ -41,38 +40,6 @@ export function SettingsPanel({ onClose, suppressScrim }: Props) {
   )
   const [mpvPath, setMpvPath] = useState(() => localStorage.getItem('fractals-player-mpv-path') ?? '')
   const [vlcPath, setVlcPath] = useState(() => localStorage.getItem('fractals-player-vlc-path') ?? '')
-  const [enrichMsg, setEnrichMsg] = useState<string | null>(null)
-  const [enrichProgress, setEnrichProgress] = useState<{ done: number; total: number } | null>(null)
-
-  const { data: enrichStatus } = useQuery({
-    queryKey: ['enrichment:status'],
-    queryFn: () => api.enrichment.status(),
-    refetchInterval: enrichProgress ? 3000 : false,
-  })
-
-  useEffect(() => {
-    const unsub = api.on('enrichment:progress', (p: any) => {
-      if (p.error) { setEnrichMsg(`Error: ${p.error}`); setEnrichProgress(null); return }
-      setEnrichProgress({ done: p.done, total: p.total })
-      if (p.complete) {
-        setEnrichMsg(`Done! ${p.done} items enriched.`)
-        setEnrichProgress(null)
-        qc.invalidateQueries({ queryKey: ['search'] })
-        qc.invalidateQueries({ queryKey: ['browse'] })
-        qc.invalidateQueries({ queryKey: ['enrichment:status'] })
-      }
-    })
-    return unsub
-  }, [qc])
-
-  const startEnrichment = useMutation({
-    mutationFn: () => api.enrichment.start(),
-    onSuccess: (res: any) => setEnrichMsg(res?.message ?? 'Started'),
-    onError: (err) => setEnrichMsg(`Error: ${String(err)}`),
-  })
-
-  const pct = enrichProgress ? Math.round((enrichProgress.done / enrichProgress.total) * 100) : null
-
   return (
     <SlidePanel open={true} onClose={onClose} width={480} suppressScrim={suppressScrim}>
       {/* Header */}
@@ -129,14 +96,7 @@ export function SettingsPanel({ onClose, suppressScrim }: Props) {
           )}
           {activeTab === 'data' && (
             <TabPane key="data">
-              <DataTab
-                enrichStatus={enrichStatus}
-                enrichProgress={enrichProgress}
-                enrichMsg={enrichMsg}
-                pct={pct}
-                isPending={startEnrichment.isPending}
-                onStart={() => { setEnrichMsg(null); setEnrichProgress(null); startEnrichment.mutate() }}
-              />
+              <DataTab />
             </TabPane>
           )}
           {activeTab === 'about' && (
@@ -284,20 +244,10 @@ function InterfaceTab() {
   const snap = (v: number, opts: number[]) => opts.reduce((a, b) => Math.abs(b - v) < Math.abs(a - v) ? b : a)
   const pageOpts = [25, 50, 100, 200, 500]
   const stripOpts = [5, 6, 7, 8, 9, 10, 12, 15]
-  const searchOpts = [10, 20, 50, 100, 200]
   useEffect(() => {
     if (!pageOpts.includes(pageSize)) setPageSize(snap(pageSize, pageOpts))
     if (!stripOpts.includes(homeStripSize)) setHomeStripSize(snap(homeStripSize, stripOpts))
   }, [])
-  const [searchLive, setSearchLive] = useState(() => snap(Number(localStorage.getItem('fractals-search-live-limit')) || 20, searchOpts))
-  const [searchMovies, setSearchMovies] = useState(() => snap(Number(localStorage.getItem('fractals-search-movie-limit')) || 20, searchOpts))
-  const [searchSeries, setSearchSeries] = useState(() => snap(Number(localStorage.getItem('fractals-search-series-limit')) || 20, searchOpts))
-
-  const saveSearchLimit = (key: string, val: number, setter: (v: number) => void) => {
-    const clamped = Math.max(10, Math.min(200, val))
-    setter(clamped)
-    localStorage.setItem(key, String(clamped))
-  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
@@ -598,11 +548,7 @@ function PlayerNote({ title, color, children }: { title: string; color: string; 
 }
 
 /* ── Data tab ──────────────────────────────────────────────────── */
-function DataTab({ enrichStatus, enrichProgress, enrichMsg, pct, isPending, onStart }: {
-  enrichStatus: any; enrichProgress: { done: number; total: number } | null
-  enrichMsg: string | null; pct: number | null; isPending: boolean
-  onStart: () => void
-}) {
+function DataTab() {
   const qc = useQueryClient()
   const setSources = useSourcesStore((s) => s.setSources)
   const [confirm, setConfirm] = useState<'history' | 'favorites' | 'all' | 'prefs' | 'factory' | null>(null)
@@ -723,59 +669,6 @@ function DataTab({ enrichStatus, enrichProgress, enrichMsg, pct, isPending, onSt
     <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
       {/* ── Enrichment — hidden until TMDB integration (g2+) ── */}
 
-      {/* ── Backup/Import ── */}
-      <section>
-        <SectionLabel>Sources backup</SectionLabel>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <div style={{ padding: '12px 14px', borderRadius: 8, background: 'var(--bg-2)', border: '1px solid var(--border-subtle)' }}>
-            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-0)', marginBottom: 6 }}>Export backup</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 11, color: 'var(--text-2)', cursor: 'default' }}>
-                    <input type="checkbox" checked disabled style={{ accentColor: 'var(--accent-interactive)' }} />
-                    Sources &amp; Settings (source list, colors, preferences)
-                  </label>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 11, color: 'var(--text-1)', cursor: 'pointer' }}>
-                    <input type="checkbox" checked={includeUserData} onChange={(e) => setIncludeUserData(e.target.checked)} style={{ accentColor: 'var(--accent-interactive)', cursor: 'pointer' }} />
-                    User data (favorites, watchlist, history)
-                  </label>
-                </div>
-              </div>
-              <button
-                onClick={handleExport}
-                disabled={busy}
-                style={{ padding: '5px 12px', borderRadius: 6, fontSize: 11, cursor: 'pointer', flexShrink: 0, background: 'var(--bg-3)', color: 'var(--text-1)', border: '1px solid var(--border-default)', opacity: busy ? 0.6 : 1 }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-4)' }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--bg-3)' }}
-              >
-                Export
-              </button>
-            </div>
-          </div>
-          <div style={{ padding: '12px 14px', borderRadius: 8, background: 'var(--bg-2)', border: '1px solid var(--border-subtle)' }}>
-            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-0)', marginBottom: 3 }}>Import sources</div>
-                <div style={{ fontSize: 11, color: 'var(--text-1)', lineHeight: 1.45 }}>Restore sources from a previously exported JSON file. Existing sources with the same ID will be updated.</div>
-              </div>
-              <button
-                onClick={handleImport}
-                disabled={busy}
-                style={{ padding: '5px 12px', borderRadius: 6, fontSize: 11, cursor: 'pointer', flexShrink: 0, background: 'var(--bg-3)', color: 'var(--text-1)', border: '1px solid var(--border-default)', opacity: busy ? 0.6 : 1 }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-4)' }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--bg-3)' }}
-              >
-                Import
-              </button>
-            </div>
-          </div>
-        </div>
-        {importMsg && (
-          <p style={{ fontSize: 11, color: importMsg.includes('failed') ? 'var(--accent-danger)' : 'var(--accent-success)', marginTop: 8 }}>{importMsg}</p>
-        )}
-      </section>
-
       {/* ── User data ── */}
       <section>
         <SectionLabel>User data</SectionLabel>
@@ -837,6 +730,59 @@ function DataTab({ enrichStatus, enrichProgress, enrichMsg, pct, isPending, onSt
         </div>
         {msg && (
           <p style={{ fontSize: 11, color: 'var(--accent-success)', marginTop: 8 }}>{msg}</p>
+        )}
+      </section>
+
+      {/* ── Backup/Import ── */}
+      <section>
+        <SectionLabel>Sources backup</SectionLabel>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ padding: '12px 14px', borderRadius: 8, background: 'var(--bg-2)', border: '1px solid var(--border-subtle)' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-0)', marginBottom: 6 }}>Export backup</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 11, color: 'var(--text-2)', cursor: 'default' }}>
+                    <input type="checkbox" checked disabled style={{ accentColor: 'var(--accent-interactive)' }} />
+                    Sources &amp; Settings (source list, colors, preferences)
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 11, color: 'var(--text-1)', cursor: 'pointer' }}>
+                    <input type="checkbox" checked={includeUserData} onChange={(e) => setIncludeUserData(e.target.checked)} style={{ accentColor: 'var(--accent-interactive)', cursor: 'pointer' }} />
+                    User data (favorites, watchlist, history)
+                  </label>
+                </div>
+              </div>
+              <button
+                onClick={handleExport}
+                disabled={busy}
+                style={{ padding: '5px 12px', borderRadius: 6, fontSize: 11, cursor: 'pointer', flexShrink: 0, background: 'var(--bg-3)', color: 'var(--text-1)', border: '1px solid var(--border-default)', opacity: busy ? 0.6 : 1 }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-4)' }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--bg-3)' }}
+              >
+                Export
+              </button>
+            </div>
+          </div>
+          <div style={{ padding: '12px 14px', borderRadius: 8, background: 'var(--bg-2)', border: '1px solid var(--border-subtle)' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-0)', marginBottom: 3 }}>Import sources</div>
+                <div style={{ fontSize: 11, color: 'var(--text-1)', lineHeight: 1.45 }}>Restore sources from a previously exported JSON file. Existing sources with the same ID will be updated.</div>
+              </div>
+              <button
+                onClick={handleImport}
+                disabled={busy}
+                style={{ padding: '5px 12px', borderRadius: 6, fontSize: 11, cursor: 'pointer', flexShrink: 0, background: 'var(--bg-3)', color: 'var(--text-1)', border: '1px solid var(--border-default)', opacity: busy ? 0.6 : 1 }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-4)' }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--bg-3)' }}
+              >
+                Import
+              </button>
+            </div>
+          </div>
+        </div>
+        {importMsg && (
+          <p style={{ fontSize: 11, color: importMsg.includes('failed') ? 'var(--accent-danger)' : 'var(--accent-success)', marginTop: 8 }}>{importMsg}</p>
         )}
       </section>
 

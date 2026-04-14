@@ -16,10 +16,10 @@
  *                  series_categories, series, episodes
  *   User data (4): channel_user_data, movie_user_data,
  *                  series_user_data, episode_user_data
- *   FTS (3):       channel_fts, movie_fts, series_fts
  *
  * Normalizer (`search_title`) is populated by the Index pipeline button,
- * NOT at INSERT time. Episodes do not carry `search_title`.
+ * NOT at INSERT time. Search uses LIKE on `search_title` — no FTS.
+ * Episodes do not carry `search_title`.
  */
 export const G1C_SCHEMA_SQL = `
   -- ─── Core ─────────────────────────────────────────────────────────
@@ -42,7 +42,7 @@ export const G1C_SCHEMA_SQL = `
     subscription_type TEXT,
     last_epg_sync     INTEGER,
     color_index       INTEGER,
-    ingest_state      TEXT NOT NULL DEFAULT 'added' CHECK(ingest_state IN ('added','tested','synced','epg_fetched','indexed')),
+    ingest_state      TEXT NOT NULL DEFAULT 'added' CHECK(ingest_state IN ('added','tested','synced','epg_fetched')),
     created_at        INTEGER NOT NULL DEFAULT (unixepoch())
   );
 
@@ -240,26 +240,6 @@ export const G1C_SCHEMA_SQL = `
     created_at        INTEGER NOT NULL DEFAULT (unixepoch()),
     updated_at        INTEGER NOT NULL DEFAULT (unixepoch()),
     PRIMARY KEY (profile_id, episode_id)
-  );
-
-  -- ─── FTS (baked in from the start) ────────────────────────────────
-  -- Tokenizer: unicode61 remove_diacritics 0. The normalizer has already
-  -- folded diacritics + ligatures into search_title upstream — single
-  -- source of truth. The same normalizer runs on query strings before MATCH.
-
-  CREATE VIRTUAL TABLE IF NOT EXISTS channel_fts USING fts5(
-    search_title,
-    tokenize = 'unicode61 remove_diacritics 0'
-  );
-
-  CREATE VIRTUAL TABLE IF NOT EXISTS movie_fts USING fts5(
-    search_title,
-    tokenize = 'unicode61 remove_diacritics 0'
-  );
-
-  CREATE VIRTUAL TABLE IF NOT EXISTS series_fts USING fts5(
-    search_title,
-    tokenize = 'unicode61 remove_diacritics 0'
   );
 
   -- ─── Indexes ──────────────────────────────────────────────────────

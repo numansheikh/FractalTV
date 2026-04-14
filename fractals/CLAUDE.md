@@ -65,9 +65,9 @@ A cross-platform IPTV client that treats content as the primary abstraction, not
 │                  ▼                                              │
 │  ┌─────────────────────────────────────────────────────────┐  │
 │  │              SQLite (better-sqlite3, WAL mode)           │  │
-│  │  • streams, series_sources (provider data)              │  │
-│  │  • categories, stream_categories                        │  │
-│  │  • stream/series/channel_user_data (favorites, etc.)    │  │
+│  │  • channels, movies, series, episodes (content, split)  │  │
+│  │  • channel_categories, movie_categories, series_cats    │  │
+│  │  • *_user_data (one per content type)                   │  │
 │  │  • epg (programme schedules)                            │  │
 │  │  • sources, profiles, settings                          │  │
 │  └─────────────────────────────────────────────────────────┘  │
@@ -108,74 +108,87 @@ The Electron backend doesn't exist. Instead:
 
 A `DataService` interface abstracts this — Electron and Capacitor implementations are swapped at runtime via a factory, same pattern as the legacy app but cleaner.
 
-## Database schema (g1 — 12 tables, no canonical layer)
+## Database schema (g1c — 15 tables, per-type split)
+
+DDL source of truth: `fractals/electron/database/schema.g1c.sql.ts`.
 
 ```
+── Core (3) ────────────────────────────────────────────────
 sources
-  id, type (xtream|m3u), name, server_url, username, password, status, last_sync, item_count, disabled
-
-streams
-  id ({sourceId}:{type}:{streamId}), source_id (FK), type (live|movie|episode),
-  stream_id, title, thumbnail_url, container_extension, category_id,
-  tvg_id, epg_channel_id, catchup_supported, catchup_days,
-  stream_url (M3U only), parent_series_id (episodes → series_sources),
-  language_hint, origin_hint, quality_hint, year_hint, added_at
-
-stream_categories
-  stream_id (FK), category_id (FK)
-
-series_sources
-  id ({sourceId}:series:{seriesId}), source_id (FK), series_external_id, title,
-  thumbnail_url, category_id, language_hint, origin_hint, year_hint, added_at
-
-series_source_categories
-  series_source_id (FK), category_id (FK)
-
-categories
-  id, source_id (FK), external_id, name, type (live|movie|series), sort_order
-
-epg
-  id, source_id (FK), channel_external_id, title, description, start_time, end_time
-
-stream_user_data
-  profile_id (FK), stream_id (FK → streams ON DELETE CASCADE),
-  is_favorite, is_watchlisted, rating, fav_sort_order,
-  watch_position, watch_duration, last_watched_at, completed
-
-series_user_data
-  profile_id (FK), series_source_id (FK → series_sources ON DELETE CASCADE),
-  is_favorite, is_watchlisted, rating, fav_sort_order
-
-channel_user_data
-  profile_id (FK), stream_id (FK → streams ON DELETE CASCADE),
-  is_favorite, fav_sort_order
+  id, type (xtream|m3u), name, server_url, username, password,
+  status, last_sync, item_count, disabled, ingest_state, ...
 
 profiles
   id, name
 
 settings
   key, value
+
+── Channels ───────────────────────────────────────────────
+channel_categories
+  id, source_id (FK), external_id, name, position
+
+channels
+  id ({sourceId}:live:{streamId}), source_id (FK), category_id (FK, SET NULL),
+  external_id, title, search_title, thumbnail_url,
+  tvg_id, epg_channel_id, catchup_supported, catchup_days
+
+epg
+  id, source_id (FK), channel_external_id, title, description,
+  start_time, end_time
+
+── Movies ─────────────────────────────────────────────────
+movie_categories
+  id, source_id (FK), external_id, name, position
+
+movies
+  id ({sourceId}:movie:{streamId}), source_id (FK), category_id (FK, SET NULL),
+  external_id, title, search_title, thumbnail_url,
+  container_extension, md_year, md_country, md_language, md_origin, md_quality
+
+── Series ─────────────────────────────────────────────────
+series_categories
+  id, source_id (FK), external_id, name, position
+
+series
+  id ({sourceId}:series:{seriesId}), source_id (FK), category_id (FK, SET NULL),
+  external_id, title, search_title, thumbnail_url, md_year, …
+
+episodes
+  id, series_id (FK → series ON DELETE CASCADE), season, episode,
+  title, thumbnail_url, stream_url, container_extension
+  -- no search_title (found via parent series)
+
+── User data (4) ─────────────────────────────────────────
+channel_user_data  (profile_id, channel_id)      → is_favorite, fav_sort_order
+movie_user_data    (profile_id, movie_id)        → is_favorite, is_watchlisted, rating, watch_position, …
+series_user_data   (profile_id, series_id)       → is_favorite, is_watchlisted, rating
+episode_user_data  (profile_id, episode_id)      → watch_position, completed, last_watched_at
 ```
 
-**Sync user data preservation:** Sync workers backup user data rows into temp tables before deleting streams (CASCADE would wipe them), then restore after reinserting. Favorites, watchlist, ratings, watch positions all survive resync.
+**Sync / CASCADE:** Resync wipes per-source content rows and CASCADEs their user_data. Per the g1c hard cut, user data is expendable across resyncs (users re-sync from providers). This reverses the g1 backup-and-restore behaviour.
+
+**`search_title` column** is populated inline at sync INSERT by the workers, not a separate Index step. Value is `anyAscii(title).toLowerCase()`. The same normalizer (`electron/lib/normalize.ts`) is applied to the user's query before the LIKE comparison — bidirectional diacritic / ligature match (ae↔æ, e↔é, ss↔ß, oe↔œ).
+
+**Removed from g1:** the old `streams`, `series_sources`, `stream_categories`, `series_source_categories`, and shared `categories` tables. Also removed from the original g1c design: `channel_fts`, `movie_fts`, `series_fts` — FTS5 was tried and rejected (see Search architecture below).
 
 ## Key design decisions
 
-### Search architecture (g1 baseline)
-LIKE search on provider titles with 250ms debounce and min 2 character threshold. Three parallel queries (live, movie, series) via IPC. Results displayed per-type with independent pagination.
+### Search architecture (g1c)
+Plain `LIKE '%query%'` on a persisted `search_title` column (any-ascii + lowercase). B-tree index on `search_title` + `LIMIT` short-circuits per-type at IPTV catalog scale. No FTS, no ranking.
 
-**Tiered search roadmap:**
-- g1: LIKE on provider titles (current)
-- g2: FTS5 on streams table
-- g3: FTS5 on canonical + bridge to streams
-- g4: embeddings / semantic (sqlite-vec in place, worker not built)
-- g5: cross-language resolution
+- **Normalizer (`electron/lib/normalize.ts`)** — lowercase + any-ascii folding (diacritics + ligatures). One function, two callers: sync workers populate `search_title`; search handler normalizes the user's query before LIKE.
+- **Three parallel queries on Browse** (live, movie, series) with independent pagination.
+- **Home** runs them sequentially with `skipCount: true` (channels → movies → series) so each section lands on screen as soon as its own query resolves, without SQLite running concurrent COUNT scans.
+- **Debounce** 250ms, min 2 char threshold in the search store.
 
-### Multi-source deduplication (g2+)
-Not yet implemented. Same movie from two sources appears as two items. Will resolve via canonical identity layer keyed by TMDB ID.
+**Why not FTS5:** Tried trigram and unicode61 tokenizers at this catalog scale (10k–100k rows per source). Posting lists were large, SQLite couldn't push `source_id` / `category` filters into FTS, and COUNT enumerated full match sets. LIKE + B-tree index + LIMIT was faster. Revisit only if catalog grows past ~1M rows or there's a concrete use case LIKE can't serve. See `PLAN.md` "g2 — future search improvements" for possibilities.
 
-### Enrichment (g2+)
-Hidden in g1 UI. Will return as TMDB enrichment writing to canonical tables.
+### Multi-source deduplication (not planned in g1c)
+Same movie from two sources appears as two items. This is a permanent g1c tradeoff — canonical identity is not on the roadmap (it was the biggest complexity source in the discarded g2-flat branch).
+
+### Enrichment (not in g1c)
+Hidden in the UI. The enrichment IPC surface is stubbed (returns zeros) so renderer status pollers don't crash. TMDB / iptv-org / Wikidata / IMDb-suggest providers were deleted as part of the g1c simplification.
 
 ### Catchup / Timeshift
 For live TV channels with catchup support:
@@ -327,36 +340,31 @@ These are defined in `:root` as dark defaults, then **bridged** via `[data-theme
 - Not a social app — no sharing, no public profiles, no cloud sync (for now)
 - Not a content provider — ships with zero content, user brings their own sources
 
-## Data model — vocabulary (locked 2026-04-12)
+## Data model — vocabulary
 
-### g1 — Provider data only (current)
+### g1c — Provider data, per-type split (current)
 
-Single layer. What M3U/Xtream APIs return, stored directly.
+Single layer. What M3U/Xtream APIs return, stored directly into per-type tables:
 
-- Three content types: **Live** (channels), **Movie** (VOD), **Series** (parent only; episodes fetched on demand as streams with `parent_series_id`)
-- Radio = Live variant (same structure, different category)
-- Tied to subscription — goes away when source is removed/expired
-- User data (favorites, watchlist, ratings, positions) keyed by stream/series_source ID
-- User data survives resync via backup/restore pattern in sync workers
-- No deduplication — same content from two sources = two items
-- Title normalizer extracts `year_hint`, `language_hint`, `origin_hint`, `quality_hint` at sync time
+- **Three content types, one table each:** `channels` (Live), `movies` (VOD), `series` (Series parent). `episodes` is a sub-part of `series`, not a top-level content type — episodes are lazy-fetched via `get_series_info` on first detail open.
+- **Per-type user data:** `channel_user_data`, `movie_user_data`, `series_user_data`, `episode_user_data`. Each carries only the columns it needs (movies get watch_position; channels get favorites only; episodes get only playback state).
+- **Radio = Live variant** (same structure, different category).
+- **Tied to subscription** — content goes away when source is removed / expired. Resync wipes user_data via CASCADE (g1c hard cut).
+- **No deduplication** — same content from two sources = two items.
+- **Search target** is `search_title` (persisted normalized column), not `title`. Populated inline at sync INSERT.
+- **Metadata columns** use the `md_` prefix on each content table (`md_country`, `md_language`, `md_year`, `md_origin`, `md_quality`). Shape locked; enrichment population deferred.
 
-### g2+ — Canonical identity layer (planned)
+Canonical identity / deduplication is not on the roadmap — it's a permanent g1c tradeoff.
 
-Will add a second layer:
-- TMDB-sourced canonical identity (English title, year, genres, poster, etc.)
-- Bridge: multiple provider streams → one canonical identity
-- Search target shifts from provider titles to canonical titles
-- Deduplication across sources via `tmdb_id`
-
-## Implementation status (as of 2026-04-12)
+## Implementation status (as of 2026-04-14)
 
 **Phase 0–2.5 — Complete.** Core through V3 data model.
-**g1 — Complete (2026-04-12).** Pure provider-data app. Stripped canonical tables, FTS, enrichment. 12 tables. LIKE search with debounce. User data survives resync.
-**g2–g5 — Not started.** Will build back: g2 (FTS→streams), g3 (FTS→canonical), g4+.
+**g1 — Complete (2026-04-12).** Pure provider-data app on 12 tables. LIKE search with debounce. User data survived resync.
+**g1c — Complete (2026-04-14).** Per-type 15-table split. LIKE on `search_title` (any-ascii + lowercase, inline at sync). Two-button pipeline (Test → Sync; EPG auto-chains inside Sync for Xtream). FTS5 tried and removed. Enrichment pipeline (iptv-org / Wikidata / IMDb-suggest / indexing worker) deleted.
+**g2+ — Future.** Search improvements (see `PLAN.md`). No commitments.
 **Phase 3 — Not started.** Capacitor for Android/iOS/TV, Tizen.
 
-### g1 features (current state)
+### g1c features (current state)
 
 **Layout**
 - Three-zone layout: NavRail (48px, left) + content area + right-side slide panels
@@ -369,9 +377,12 @@ Will add a second layer:
 - Info strip shows live sync progress during sync, greeting + stats otherwise
 - Inline search results (debounced, min 2 chars)
 
-**Search (g1 baseline)**
-- LIKE on provider titles, 250ms debounce, min 2 character threshold
-- Three parallel queries (live, movie, series) via IPC
+**Search (g1c)**
+- LIKE on `search_title` (any-ascii + lowercase, populated inline at sync INSERT)
+- Same normalizer applied to query string — bidirectional diacritic / ligature match
+- 250ms debounce, min 2 character threshold
+- Browse: three parallel per-type queries via IPC
+- Home: sequential per-type queries with `skipCount: true` (channels → movies → series)
 - `debouncedQueries` in search store — raw query for input display, debounced for IPC
 
 **Browse**
@@ -389,10 +400,10 @@ Will add a second layer:
 
 **Favorites / watchlist**
 - `__favorites__` sentinel in BrowseSidebar
-- Three user data tables: stream_user_data, series_user_data, channel_user_data
+- Four user data tables: `channel_user_data`, `movie_user_data`, `series_user_data`, `episode_user_data`
 - Optimistic updates with rollback
 - Drag-to-reorder My Channels (@dnd-kit)
-- User data survives resync (backup/restore around CASCADE delete)
+- User data is wiped on resync (CASCADE) — g1c hard cut, users re-sync from providers
 
 **Player**
 - Position saved on pause, 10s interval, and close
@@ -404,7 +415,7 @@ Will add a second layer:
 - Movies: 380px slide panel, breadcrumbs pinned top, category link
 - Series: 720px double-width, season coins + episode list
 - Action buttons: play/resume, favorite, watchlist, star rating, clear history
-- External player + enrichment sections hidden (g2+)
+- External player + enrichment sections hidden (deferred)
 
 **Settings**
 - Appearance: theme picker, font picker
@@ -421,9 +432,11 @@ Will add a second layer:
 
 - **Worker threads for heavy operations** — Sync and delete run in `electron/workers/` via `worker_threads`, each opening its own better-sqlite3 connection (WAL mode allows concurrent access). Prevents main process blocking on 200k+ row operations.
 
-- **Sync user data preservation** — Sync workers backup stream_user_data, series_user_data, channel_user_data into temp tables before deleting streams (CASCADE would wipe them), then restore rows whose IDs still exist after reinserting. Clean sync + favorites survive.
+- **Resync wipes user data (g1c hard cut)** — CASCADE on source delete / resync wipes per-source user_data rows. Users re-sync from providers after the schema transition. This reverses the g1 backup-and-restore behaviour.
 
-- **LIKE search with debounce (g1)** — LIKE `%query%` on provider titles. 250ms debounce in search store (`debouncedQueries`), min 2 character threshold. g2+ will add FTS5.
+- **LIKE search on normalized `search_title` (g1c)** — `LIKE '%query%'` on a persisted `search_title` column, populated at sync INSERT via any-ascii folding. 250ms debounce, min 2 character threshold. FTS5 was tried at this scale and removed (posting lists too large, COUNT enumerated full match sets).
+
+- **Ingest pipeline is 2 buttons (Test → Sync)** — `ingest_state` enum `added → tested → synced → epg_fetched`. EPG auto-chains inside the sync worker for Xtream sources; M3U stops at `synced`. The Sync button shows "done" at both `synced` and `epg_fetched` so EPG-less sources aren't stuck purple.
 
 - **Source-scoped content IDs** — Format `{sourceId}:{type}:{streamId}` ensures correct credentials used for playback. Same stream_id on same server returns HTTP 405 with wrong account credentials.
 
@@ -439,16 +452,18 @@ Will add a second layer:
 
 ## Known limitations & open work
 
-- **No FTS / enrichment / canonical (g1)** — Search is LIKE only. No TMDB metadata. No deduplication across sources. All deferred to g2+.
+- **No FTS / enrichment / canonical (g1c)** — Search is LIKE only on `search_title`. No TMDB metadata. No deduplication across sources. FTS was tried and removed; canonical is a permanent g1c tradeoff.
 
 - **Black screen bug** — Occasional idle black screen requiring Cmd+R. Undiagnosed, needs DevTools console output. Deferred.
 
-- **International character search** — European diacritics partially handled. Arabic, Hebrew, Cyrillic, CJK not transliterated. Cross-language is g5.
+- **International character search** — European diacritics + ligatures handled bidirectionally via any-ascii. Arabic, Hebrew, Cyrillic, CJK pass through any-ascii to their closest Latin form; effectiveness varies.
 
 - **Capacitor / mobile not yet implemented** — Phase 3.
 
 ## Data quirks to be aware of
 
-- **Same series from two sources appears twice in Favorites** — Content rows are source-scoped (`{sourceId}:{type}:{streamId}`). No deduplication until g3 (canonical layer). Expected behavior for g1.
+- **Same series from two sources appears twice in Favorites** — Content rows are source-scoped (`{sourceId}:{type}:{streamId}`). Deduplication is not on the g1c roadmap. Expected behavior.
 
 - **Series appearing under Films** — Some IPTV providers store mini-series with `type = 'movie'`. The app stores whatever type the provider returns.
+
+- **Resync wipes user data** — Per the g1c hard cut, resync CASCADEs per-source user_data. Favorites, watch positions, ratings don't survive a resync of the same source. Expected behavior.

@@ -58,10 +58,9 @@ interface Props {
 }
 
 export function BrowseViewH({ onAddSource, onSyncSource, onRemoveSource, onSelectContent, sourcesCount }: Props) {
-  const { queries, debouncedQueries, type, setType, activeCategory, setActiveCategory } = useSearchStore()
+  const { debouncedQueries, type, setType, activeCategory, setActiveCategory } = useSearchStore()
   const { activeView } = useAppStore()
   const query = debouncedQueries[activeView] ?? ''
-  const rawQuery = queries[activeView] ?? ''
   const { sources, selectedSourceIds } = useSourcesStore()
   const colorMap = buildColorMapFromSources(sources)
 
@@ -549,7 +548,7 @@ function SearchPane({ query, live, movies, series, onSelect, scopedTo }: {
           : <>
               <span style={{ color: 'var(--color-text-secondary)' }}>{countLabel}</span>
               {' results for '}
-              <span style={{ color: 'var(--color-text-primary)' }}>"{rawQuery}"</span>
+              <span style={{ color: 'var(--color-text-primary)' }}>"{query}"</span>
               {scopedTo && <span style={{ color: 'var(--color-text-muted)' }}> in <span style={{ color: 'var(--color-text-secondary)' }}>{scopedTo}</span></span>}
             </>
         }
@@ -558,7 +557,7 @@ function SearchPane({ query, live, movies, series, onSelect, scopedTo }: {
       {total === 0 && !anyFetching && (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, paddingTop: 60 }}>
           <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ color: 'var(--color-text-muted)' }}><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" /></svg>
-          <p style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>No results for "{rawQuery.startsWith('@') ? rawQuery.slice(1).trim() : rawQuery}"</p>
+          <p style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>No results for "{query.startsWith('@') ? query.slice(1).trim() : query}"</p>
         </div>
       )}
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Source, useSourcesStore } from '@/stores/sources.store'
 import { useAppStore } from '@/stores/app.store'
 import { getSourceColor, PALETTE_HEX } from '@/lib/sourceColors'
@@ -44,6 +44,7 @@ const PHASE_LABELS: Record<string, string> = {
   fetching: 'Downloading playlist…',
   parsing: 'Parsing playlist…',
   content: 'Saving items…',
+  epg: 'Fetching EPG…',
   done: 'Done',
   error: 'Error',
 }
@@ -70,7 +71,6 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
   const [saveError, setSaveError] = useState('')
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null)
-  const [epgState, setEpgState] = useState<{ running: boolean; message?: string; result?: { ok: boolean; message: string } }>({ running: false })
 
   // Pipeline Test — tests the already-added source and advances ingest_state.
   const handlePipelineTest = async () => {
@@ -116,32 +116,6 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
     }
   }
 
-  // EPG fetch — advances ingest_state to 'epg_fetched' on success.
-  const handleEpg = async () => {
-    setEpgState({ running: true, message: 'Starting EPG fetch…' })
-    try {
-      const r: any = await api.epg.sync(source.id)
-      if (r?.success) {
-        const inserted = r?.inserted ?? 0
-        setEpgState({ running: false, result: { ok: true, message: `${Number(inserted).toLocaleString()} entries` } })
-        useSourcesStore.getState().updateSource(source.id, { ingestState: 'epg_fetched' })
-      } else {
-        setEpgState({ running: false, result: { ok: false, message: r?.error ?? 'EPG fetch failed' } })
-      }
-    } catch (e) {
-      setEpgState({ running: false, result: { ok: false, message: String(e) } })
-    }
-  }
-
-  useEffect(() => {
-    const off = api.epg.onProgress((data) => {
-      if (data.sourceId !== source.id) return
-      setEpgState((s) => (s.running ? { ...s, message: data.message } : s))
-    })
-    return () => { off() }
-  }, [source.id])
-
-
   const isSyncing = progress !== null && progress.phase !== 'done' && progress.phase !== 'error'
   const syncPct = progress && progress.total > 0
     ? Math.min(100, Math.round((progress.current / progress.total) * 100))
@@ -173,6 +147,19 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
       if ((result as any).success === false) {
         setSaveError((result as any).error ?? 'Failed to save')
       } else {
+        // Mirror DB write into the store so the card re-renders with the
+        // edited values (otherwise it falls back to the stale prop).
+        useSourcesStore.getState().updateSource(source.id, {
+          name: editForm.name || source.name,
+          ...(isM3u
+            ? { m3uUrl: editForm.m3uUrl || undefined }
+            : {
+                serverUrl: editForm.serverUrl || undefined,
+                username: editForm.username || undefined,
+                password: editForm.password || undefined,
+              }
+          ),
+        })
         setEditMode(false)
       }
     } catch (e) {
@@ -327,28 +314,6 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
             loading={isSyncing}
             onClick={() => onSync(source.id)}
           />
-          <PipelineButton
-            step={3}
-            label={epgState.running ? 'Fetching…' : 'EPG'}
-            done={source.ingestState === 'epg_fetched'}
-            enabled={(source.ingestState === 'synced' || source.ingestState === 'epg_fetched') && !epgState.running}
-            loading={epgState.running}
-            onClick={handleEpg}
-          />
-        </div>
-      )}
-
-      {/* EPG progress / result */}
-      {(epgState.running || epgState.result) && (
-        <div style={{
-          fontSize: 10, color: epgState.result
-            ? (epgState.result.ok ? 'var(--accent-success)' : 'var(--accent-danger)')
-            : 'var(--text-1)',
-          fontFamily: 'var(--font-ui)',
-        }}>
-          {epgState.running
-            ? (epgState.message ?? 'Fetching EPG…')
-            : (epgState.result!.ok ? '✓ EPG — ' : '✗ EPG — ') + epgState.result!.message}
         </div>
       )}
 

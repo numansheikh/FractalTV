@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { api } from '@/lib/api'
 import { ColorPicker } from './SourceCard'
 import { useSourcesStore } from '@/stores/sources.store'

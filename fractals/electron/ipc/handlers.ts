@@ -3,12 +3,13 @@ import { spawn } from 'child_process'
 import { existsSync, writeFileSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { Worker } from 'worker_threads'
-import { getDb, getSqlite, getSetting, rebuildFtsIfNeeded } from '../database/connection'
+import { getDb, getSqlite, getSetting } from '../database/connection'
 import { sources } from '../database/schema'
 import { eq } from 'drizzle-orm'
 import { xtreamService } from '../services/xtream.service'
 import { m3uService } from '../services/m3u.service'
 import { syncEpg, getNowNext } from '../services/epg.service'
+import { normalizeForSearch } from '../lib/normalize'
 
 // ─── Minimal row interfaces ─────────────────────────────────────────────────
 
@@ -22,23 +23,32 @@ interface SourceRow {
   ingest_state?: 'added' | 'tested' | 'synced' | 'epg_fetched'
 }
 
-interface StreamRow {
-  id: string; source_id: string; stream_id: string; type: 'live' | 'movie' | 'episode'
-  title: string; category_id?: string; thumbnail_url?: string
-  container_extension?: string; stream_url?: string
-  catchup_supported?: number; catchup_days?: number
+// g1c content rows. Channels, movies, and series each live in their own table.
+interface ChannelRow {
+  id: string; source_id: string; external_id: string; title: string
+  category_id?: string; thumbnail_url?: string; stream_url?: string
   tvg_id?: string; epg_channel_id?: string
-  parent_series_id?: string
-  language_hint?: string; origin_hint?: string
-  quality_hint?: string; year_hint?: number
+  catchup_supported?: number; catchup_days?: number
+  provider_metadata?: string
 }
 
-interface SeriesSourceRow {
-  id: string; source_id: string
-  series_external_id: string; title: string
-  thumbnail_url?: string; category_id?: string
-  language_hint?: string; origin_hint?: string
-  quality_hint?: string; year_hint?: number
+interface MovieRow {
+  id: string; source_id: string; external_id: string; title: string
+  category_id?: string; thumbnail_url?: string; stream_url?: string
+  container_extension?: string; provider_metadata?: string
+  md_year?: number
+}
+
+interface SeriesRow {
+  id: string; source_id: string; external_id: string; title: string
+  category_id?: string; thumbnail_url?: string; provider_metadata?: string
+  md_year?: number
+}
+
+interface EpisodeRow {
+  id: string; series_id: string; external_id: string; title: string
+  thumbnail_url?: string; stream_url?: string; container_extension?: string
+  season?: number; episode_num?: number
 }
 
 interface DisabledRow { disabled: number }
@@ -56,133 +66,128 @@ function dbPath(): string {
 // `activeSyncWorkers` allows cancel mid-flight.
 const activeSyncWorkers = new Map<string, Worker>()
 
-// ─── Content resolver ─────────────────────────────────────────────────────
-// A contentId can point at three different rows in V3:
-//   1. `streams`       — playable items (live / movie / episode) keyed by
-//                        `{sourceId}:{type}:{stream_id}`
-//   2. `series_sources` — series parents, keyed by `{sourceId}:series:{id}`
-//   3. (future) manual entries — out of scope
-// This helper normalizes that into a single result shape the handlers can
-// dispatch on.
+// ─── Content type detection ───────────────────────────────────────────────
+// Content IDs follow the format `{sourceId}:{kind}:{external_id}` where kind
+// is one of 'live' | 'movie' | 'series' | 'episode'.
+type ContentKind = 'channel' | 'movie' | 'series' | 'episode'
 
-type ContentKind = 'movie' | 'episode' | 'live' | 'series'
-interface ResolvedContent {
-  kind: ContentKind
-  /** The stream row for movie/episode/live. Null for series parents. */
-  stream?: StreamRow
-  /** The series_sources row for 'series' kind. */
-  seriesSource?: SeriesSourceRow
-  /** For episodes — the parent series_sources.id (via parent_series_id). */
-  parentSeriesId?: string
-}
-
-function resolveContent(sqlite: ReturnType<typeof getSqlite>, contentId: string): ResolvedContent | null {
-  const stream = sqlite.prepare('SELECT * FROM streams WHERE id = ?').get(contentId) as StreamRow | undefined
-  if (stream) {
-    if (stream.type === 'movie') {
-      return { kind: 'movie', stream }
-    }
-    if (stream.type === 'live') {
-      return { kind: 'live', stream }
-    }
-    if (stream.type === 'episode') {
-      return { kind: 'episode', stream, parentSeriesId: stream.parent_series_id ?? undefined }
-    }
-  }
-  const seriesRow = sqlite.prepare('SELECT * FROM series_sources WHERE id = ?').get(contentId) as SeriesSourceRow | undefined
-  if (seriesRow) {
-    return { kind: 'series', seriesSource: seriesRow }
-  }
+function idKind(contentId: string): ContentKind | null {
+  const parts = contentId.split(':')
+  if (parts.length < 3) return null
+  const k = parts[1]
+  if (k === 'live') return 'channel'
+  if (k === 'movie') return 'movie'
+  if (k === 'series') return 'series'
+  if (k === 'episode') return 'episode'
   return null
 }
 
-// ─── V3 SELECT fragments ──────────────────────────────────────────────────
-// The renderer expects a bag of fields carried over from the V2 TMDB era.
-// We return NULL for fields that no longer exist (plot, director, cast, etc.)
-// until a rich-enrichment tier is added. Fields sourced from V3 canonical:
-//   poster_url, year, multilingual title (future).
+// ─── g1c SELECT fragments ────────────────────────────────────────────────
+// The renderer expects a consistent bag of fields across types. NULL fields
+// are placeholders for metadata we don't have yet in g1c.
 
-// Max rows fetched internally for search to compute accurate totals.
-const SEARCH_TOTAL_CAP = 2000
-
-// ─── g1 SELECT fragments — streams-only, no canonical joins ──────────────
-const G1_STREAM_SELECT = `
-  s.id,
-  s.source_id         AS primary_source_id,
-  s.source_id         AS source_ids,
-  s.stream_id         AS external_id,
-  s.type,
-  s.title             AS title,
-  s.category_id,
-  s.thumbnail_url     AS poster_url,
-  s.container_extension,
-  s.catchup_supported,
-  s.catchup_days,
-  s.epg_channel_id,
-  s.tvg_id,
-  NULL                AS canonical_id,
-  NULL                AS original_title,
-  s.year_hint         AS year,
-  NULL                AS plot,
-  NULL                AS poster_path,
-  NULL                AS backdrop_url,
-  NULL                AS rating_tmdb,
-  NULL                AS rating_imdb,
-  NULL                AS genres,
-  NULL                AS director,
-  NULL                AS cast,
-  NULL                AS keywords,
-  NULL                AS runtime,
-  NULL                AS tmdb_id,
-  0                   AS enriched,
-  NULL                AS enriched_at,
-  EXISTS(SELECT 1 FROM epg WHERE epg.channel_external_id = s.epg_channel_id AND epg.source_id = s.source_id LIMIT 1) AS has_epg_data
+const CHANNEL_SELECT = `
+  c.id,
+  c.source_id                AS primary_source_id,
+  c.source_id                AS source_ids,
+  c.external_id              AS external_id,
+  'live'                     AS type,
+  c.title                    AS title,
+  c.category_id,
+  c.thumbnail_url            AS poster_url,
+  NULL                       AS container_extension,
+  c.catchup_supported,
+  c.catchup_days,
+  c.epg_channel_id,
+  c.tvg_id,
+  NULL                       AS canonical_id,
+  NULL                       AS original_title,
+  c.md_year                  AS year,
+  NULL                       AS plot,
+  NULL                       AS poster_path,
+  NULL                       AS backdrop_url,
+  NULL                       AS rating_tmdb,
+  NULL                       AS rating_imdb,
+  NULL                       AS genres,
+  NULL                       AS director,
+  NULL                       AS cast,
+  NULL                       AS keywords,
+  NULL                       AS runtime,
+  NULL                       AS tmdb_id,
+  0                          AS enriched,
+  NULL                       AS enriched_at,
+  EXISTS(SELECT 1 FROM epg WHERE epg.channel_external_id = c.epg_channel_id AND epg.source_id = c.source_id LIMIT 1) AS has_epg_data
 `
 
-const G1_SERIES_SELECT = `
-  ss.id,
-  ss.source_id                    AS primary_source_id,
-  ss.source_id                    AS source_ids,
-  ss.series_external_id           AS external_id,
-  'series'                        AS type,
-  ss.title                        AS title,
-  ss.category_id,
-  ss.thumbnail_url                AS poster_url,
-  NULL                            AS container_extension,
-  0                               AS catchup_supported,
-  0                               AS catchup_days,
-  NULL                            AS epg_channel_id,
-  NULL                            AS tvg_id,
-  NULL                            AS canonical_id,
-  NULL                            AS original_title,
-  ss.year_hint                    AS year,
-  NULL                            AS plot,
-  NULL                            AS poster_path,
-  NULL                            AS backdrop_url,
-  NULL                            AS rating_tmdb,
-  NULL                            AS rating_imdb,
-  NULL                            AS genres,
-  NULL                            AS director,
-  NULL                            AS cast,
-  NULL                            AS keywords,
-  NULL                            AS runtime,
-  NULL                            AS tmdb_id,
-  0                               AS enriched,
-  NULL                            AS enriched_at,
-  0                               AS has_epg_data
+const MOVIE_SELECT = `
+  m.id,
+  m.source_id                AS primary_source_id,
+  m.source_id                AS source_ids,
+  m.external_id              AS external_id,
+  'movie'                    AS type,
+  m.title                    AS title,
+  m.category_id,
+  m.thumbnail_url            AS poster_url,
+  m.container_extension,
+  0                          AS catchup_supported,
+  0                          AS catchup_days,
+  NULL                       AS epg_channel_id,
+  NULL                       AS tvg_id,
+  NULL                       AS canonical_id,
+  NULL                       AS original_title,
+  m.md_year                  AS year,
+  NULL                       AS plot,
+  NULL                       AS poster_path,
+  NULL                       AS backdrop_url,
+  NULL                       AS rating_tmdb,
+  NULL                       AS rating_imdb,
+  NULL                       AS genres,
+  NULL                       AS director,
+  NULL                       AS cast,
+  NULL                       AS keywords,
+  NULL                       AS runtime,
+  NULL                       AS tmdb_id,
+  0                          AS enriched,
+  NULL                       AS enriched_at,
+  0                          AS has_epg_data
 `
 
-// g1: G1_STREAM_SELECT and G1_SERIES_SELECT are now the primary constants.
-// Aliases for any remaining references:
-const STREAM_SELECT = G1_STREAM_SELECT
-const SERIES_SELECT = G1_SERIES_SELECT
+const SERIES_SELECT = `
+  sr.id,
+  sr.source_id               AS primary_source_id,
+  sr.source_id               AS source_ids,
+  sr.external_id             AS external_id,
+  'series'                   AS type,
+  sr.title                   AS title,
+  sr.category_id,
+  sr.thumbnail_url           AS poster_url,
+  NULL                       AS container_extension,
+  0                          AS catchup_supported,
+  0                          AS catchup_days,
+  NULL                       AS epg_channel_id,
+  NULL                       AS tvg_id,
+  NULL                       AS canonical_id,
+  NULL                       AS original_title,
+  sr.md_year                 AS year,
+  NULL                       AS plot,
+  NULL                       AS poster_path,
+  NULL                       AS backdrop_url,
+  NULL                       AS rating_tmdb,
+  NULL                       AS rating_imdb,
+  NULL                       AS genres,
+  NULL                       AS director,
+  NULL                       AS cast,
+  NULL                       AS keywords,
+  NULL                       AS runtime,
+  NULL                       AS tmdb_id,
+  0                          AS enriched,
+  NULL                       AS enriched_at,
+  0                          AS has_epg_data
+`
 
 // ─── Handler registration ─────────────────────────────────────────────────
 
 export function registerHandlers() {
-  // No-op stub — FTS rebuild deferred to g2 tier.
-  rebuildFtsIfNeeded().catch(console.error)
-
   // ── Ping ────────────────────────────────────────────────────────────────
   ipcMain.handle('ping', () => 'pong')
 
@@ -225,6 +230,10 @@ export function registerHandlers() {
     return { ok: true }
   })
 
+  // ── Export — g1c snapshot format (version 4) ─────────────────────────
+  // Dumps the 15 content/category tables plus optional user_data. Old
+  // version-3 exports (from g1) are rejected on import — schema diverged
+  // beyond clean mapping.
   ipcMain.handle('sources:export', async (event, opts: { includeUserData?: boolean } = {}) => {
     const sqlite = getSqlite()
 
@@ -233,20 +242,28 @@ export function registerHandlers() {
       FROM sources ORDER BY created_at ASC
     `).all()
 
-    // V3 user data is split across four tables. Exported as a union so
-    // import can restore exactly what it saw.
     const payload: any = {
-      version: 3,
+      version: 4, // bumped from 3 (g1) — schema changed beyond clean mapping
       exported_at: new Date().toISOString(),
       sources: srcs,
-      settings: {}, // no TMDB key in V3 — oracle is keyless
+      settings: {},
+      content: {
+        channel_categories: sqlite.prepare(`SELECT * FROM channel_categories`).all(),
+        movie_categories:   sqlite.prepare(`SELECT * FROM movie_categories`).all(),
+        series_categories:  sqlite.prepare(`SELECT * FROM series_categories`).all(),
+        channels:           sqlite.prepare(`SELECT * FROM channels`).all(),
+        movies:             sqlite.prepare(`SELECT * FROM movies`).all(),
+        series:             sqlite.prepare(`SELECT * FROM series`).all(),
+        episodes:           sqlite.prepare(`SELECT * FROM episodes`).all(),
+      },
     }
 
     if (opts.includeUserData) {
       payload.user_data = {
-        stream:           sqlite.prepare(`SELECT * FROM stream_user_data`).all(),
-        series:           sqlite.prepare(`SELECT * FROM series_user_data`).all(),
-        channel:          sqlite.prepare(`SELECT * FROM channel_user_data`).all(),
+        channel: sqlite.prepare(`SELECT * FROM channel_user_data`).all(),
+        movie:   sqlite.prepare(`SELECT * FROM movie_user_data`).all(),
+        series:  sqlite.prepare(`SELECT * FROM series_user_data`).all(),
+        episode: sqlite.prepare(`SELECT * FROM episode_user_data`).all(),
       }
     }
 
@@ -269,6 +286,9 @@ export function registerHandlers() {
       return { error: 'Invalid JSON file' }
     }
     if (!Array.isArray(parsed?.sources)) return { error: 'Invalid format — missing sources array' }
+    if (parsed.version && parsed.version < 4) {
+      return { error: 'Old export format (g1) — incompatible with g1c schema. Re-add sources and re-sync.' }
+    }
 
     const insertSource = sqlite.prepare(`
       INSERT INTO sources (id, type, name, server_url, username, password, m3u_url, status, disabled, color_index)
@@ -281,22 +301,27 @@ export function registerHandlers() {
         color_index = excluded.color_index
     `)
 
-    // g1 user-data imports are best-effort: only rows whose stream/series
-    // row still exists are restored (post-resync IDs may have shifted).
-    const insertStreamUd = sqlite.prepare(`
-      INSERT OR REPLACE INTO stream_user_data (profile_id, stream_id, is_favorite, is_watchlisted, rating, fav_sort_order, watch_position, watch_duration, last_watched_at, completed)
-      SELECT @profile_id, @stream_id, COALESCE(@is_favorite, 0), COALESCE(@is_watchlisted, 0), @rating, @fav_sort_order, COALESCE(@watch_position, 0), @watch_duration, @last_watched_at, COALESCE(@completed, 0)
-      WHERE EXISTS (SELECT 1 FROM streams WHERE id = @stream_id)
+    // Per-type user-data inserts are best-effort: only rows whose content
+    // row still exists are restored.
+    const insertChannelUd = sqlite.prepare(`
+      INSERT OR REPLACE INTO channel_user_data (profile_id, channel_id, is_favorite, fav_sort_order)
+      SELECT @profile_id, @channel_id, COALESCE(@is_favorite, 0), @fav_sort_order
+      WHERE EXISTS (SELECT 1 FROM channels WHERE id = @channel_id)
+    `)
+    const insertMovieUd = sqlite.prepare(`
+      INSERT OR REPLACE INTO movie_user_data (profile_id, movie_id, is_favorite, is_watchlisted, rating, fav_sort_order, watch_position, watch_duration, last_watched_at, completed)
+      SELECT @profile_id, @movie_id, COALESCE(@is_favorite, 0), COALESCE(@is_watchlisted, 0), @rating, @fav_sort_order, COALESCE(@watch_position, 0), @watch_duration, @last_watched_at, COALESCE(@completed, 0)
+      WHERE EXISTS (SELECT 1 FROM movies WHERE id = @movie_id)
     `)
     const insertSeriesUd = sqlite.prepare(`
-      INSERT OR REPLACE INTO series_user_data (profile_id, series_source_id, is_favorite, is_watchlisted, rating, fav_sort_order)
-      SELECT @profile_id, @series_source_id, COALESCE(@is_favorite, 0), COALESCE(@is_watchlisted, 0), @rating, @fav_sort_order
-      WHERE EXISTS (SELECT 1 FROM series_sources WHERE id = @series_source_id)
+      INSERT OR REPLACE INTO series_user_data (profile_id, series_id, is_favorite, is_watchlisted, rating, fav_sort_order)
+      SELECT @profile_id, @series_id, COALESCE(@is_favorite, 0), COALESCE(@is_watchlisted, 0), @rating, @fav_sort_order
+      WHERE EXISTS (SELECT 1 FROM series WHERE id = @series_id)
     `)
-    const insertChannelUd = sqlite.prepare(`
-      INSERT OR REPLACE INTO channel_user_data (profile_id, stream_id, is_favorite, fav_sort_order)
-      SELECT @profile_id, @stream_id, @is_favorite, @fav_sort_order
-      WHERE EXISTS (SELECT 1 FROM streams WHERE id = @stream_id)
+    const insertEpisodeUd = sqlite.prepare(`
+      INSERT OR REPLACE INTO episode_user_data (profile_id, episode_id, watch_position, watch_duration, last_watched_at, completed)
+      SELECT @profile_id, @episode_id, COALESCE(@watch_position, 0), @watch_duration, @last_watched_at, COALESCE(@completed, 0)
+      WHERE EXISTS (SELECT 1 FROM episodes WHERE id = @episode_id)
     `)
 
     try {
@@ -317,9 +342,10 @@ export function registerHandlers() {
         }
         const ud = parsed.user_data
         if (ud) {
-          if (Array.isArray(ud.stream))  for (const r of ud.stream)  insertStreamUd.run({ profile_id: DEFAULT_PROFILE, ...r })
-          if (Array.isArray(ud.series))  for (const r of ud.series)  insertSeriesUd.run({ profile_id: DEFAULT_PROFILE, ...r })
           if (Array.isArray(ud.channel)) for (const r of ud.channel) insertChannelUd.run({ profile_id: DEFAULT_PROFILE, ...r })
+          if (Array.isArray(ud.movie))   for (const r of ud.movie)   insertMovieUd.run({ profile_id: DEFAULT_PROFILE, ...r })
+          if (Array.isArray(ud.series))  for (const r of ud.series)  insertSeriesUd.run({ profile_id: DEFAULT_PROFILE, ...r })
+          if (Array.isArray(ud.episode)) for (const r of ud.episode) insertEpisodeUd.run({ profile_id: DEFAULT_PROFILE, ...r })
         }
       })()
     } catch (e) {
@@ -335,18 +361,22 @@ export function registerHandlers() {
     try {
       sqlite.transaction(() => {
         // User data
-        sqlite.prepare(`DELETE FROM stream_user_data`).run()
-        sqlite.prepare(`DELETE FROM series_user_data`).run()
         sqlite.prepare(`DELETE FROM channel_user_data`).run()
+        sqlite.prepare(`DELETE FROM movie_user_data`).run()
+        sqlite.prepare(`DELETE FROM series_user_data`).run()
+        sqlite.prepare(`DELETE FROM episode_user_data`).run()
         // EPG
         sqlite.prepare(`DELETE FROM epg`).run()
-        // Streams + series parents + joins
-        sqlite.prepare(`DELETE FROM stream_categories`).run()
-        sqlite.prepare(`DELETE FROM series_source_categories`).run()
-        sqlite.prepare(`DELETE FROM series_sources`).run()
-        sqlite.prepare(`DELETE FROM streams`).run()
-        // Catalog + sources + settings
-        sqlite.prepare(`DELETE FROM categories`).run()
+        // Content
+        sqlite.prepare(`DELETE FROM episodes`).run()
+        sqlite.prepare(`DELETE FROM series`).run()
+        sqlite.prepare(`DELETE FROM movies`).run()
+        sqlite.prepare(`DELETE FROM channels`).run()
+        // Categories
+        sqlite.prepare(`DELETE FROM series_categories`).run()
+        sqlite.prepare(`DELETE FROM movie_categories`).run()
+        sqlite.prepare(`DELETE FROM channel_categories`).run()
+        // Sources + settings
         sqlite.prepare(`DELETE FROM sources`).run()
         sqlite.prepare(`DELETE FROM settings WHERE key NOT LIKE 'migration_%'`).run()
       })()
@@ -358,16 +388,15 @@ export function registerHandlers() {
 
   ipcMain.handle('sources:total-count', () => {
     const sqlite = getSqlite()
-    // Count streams + series parents across enabled sources.
-    const streamRow = sqlite.prepare(`
-      SELECT COUNT(*) as n FROM streams s
-      JOIN sources src ON src.id = s.source_id AND src.disabled = 0
+    // Count channels + movies + series across enabled sources.
+    const row = sqlite.prepare(`
+      SELECT
+        (SELECT COUNT(*) FROM channels c JOIN sources src ON src.id = c.source_id AND src.disabled = 0) +
+        (SELECT COUNT(*) FROM movies   m JOIN sources src ON src.id = m.source_id AND src.disabled = 0) +
+        (SELECT COUNT(*) FROM series  sr JOIN sources src ON src.id = sr.source_id AND src.disabled = 0)
+      AS n
     `).get() as CountRow | undefined
-    const seriesRow = sqlite.prepare(`
-      SELECT COUNT(*) as n FROM series_sources ss
-      JOIN sources src ON src.id = ss.source_id AND src.disabled = 0
-    `).get() as CountRow | undefined
-    return (streamRow?.n ?? 0) + (seriesRow?.n ?? 0)
+    return row?.n ?? 0
   })
 
   ipcMain.handle('sources:add-xtream', async (_event, args: {
@@ -379,8 +408,8 @@ export function registerHandlers() {
   }) => xtreamService.testConnection(args.serverUrl, args.username, args.password))
 
   // Test an already-added source by ID. Advances ingest_state to 'tested' on
-  // success. Idempotent: re-testing a 'synced' or 'epg_fetched' source does
-  // NOT regress the state (forward-only unlock).
+  // success. Idempotent: re-testing a 'synced'+ source does NOT regress the
+  // state (forward-only unlock).
   ipcMain.handle('sources:test', async (_event, sourceId: string) => {
     const sqlite = getSqlite()
     const src = sqlite.prepare('SELECT * FROM sources WHERE id = ?').get(sourceId) as SourceRow | undefined
@@ -447,8 +476,7 @@ export function registerHandlers() {
       }
     }
 
-    // EPG refresh is manual in g1c — driven by the EPG button on SourceCard.
-    // No auto-kick on startup.
+    // EPG/Index refresh is manual in g1c — driven by the pipeline buttons.
     return { done: true }
   })
 
@@ -504,17 +532,42 @@ export function registerHandlers() {
           })
         } else if (msg.type === 'done') {
           activeSyncWorkers.delete(sourceId)
-          // Advance ingest_state forward-only: added/tested → synced. If already
-          // epg_fetched, leave it (user re-syncing a fully-pipelined source).
-          sqlite.prepare(
-            `UPDATE sources SET ingest_state = 'synced'
-             WHERE id = ? AND ingest_state IN ('added','tested')`
-          ).run(sourceId)
-          win?.webContents.send('sync:progress', {
-            sourceId, phase: 'done', current: msg.totalItems, total: msg.totalItems,
-            message: `Synced ${msg.catCount} categories, ${msg.totalItems.toLocaleString()} items`,
+          sqlite.prepare(`UPDATE sources SET ingest_state = 'synced' WHERE id = ?`).run(sourceId)
+
+          // Chain EPG for Xtream sources (M3U has no EPG endpoint). EPG progress
+          // is piped through the same `sync:progress` channel with phase='epg'
+          // so the source card's message bar shows it inline.
+          const runEpgChain = async () => {
+            if (isM3u || !source.server_url) return null
+            win?.webContents.send('sync:progress', {
+              sourceId, phase: 'epg', current: 0, total: 0, message: 'Fetching EPG…',
+            })
+            const result = await syncEpg(
+              sourceId, source.server_url, source.username, source.password,
+              (m) => win?.webContents.send('sync:progress', {
+                sourceId, phase: 'epg', current: 0, total: 0, message: m,
+              })
+            )
+            if (!result.error) {
+              sqlite.prepare(
+                `UPDATE sources SET last_epg_sync = unixepoch(), ingest_state = 'epg_fetched'
+                 WHERE id = ? AND ingest_state IN ('synced','epg_fetched')`
+              ).run(sourceId)
+            }
+            return result
+          }
+
+          runEpgChain().then((epgResult) => {
+            const syncMsg = `Synced ${msg.catCount} categories, ${msg.totalItems.toLocaleString()} items`
+            const doneMsg = epgResult
+              ? (epgResult.error ? `${syncMsg} · EPG failed: ${epgResult.error}` : `${syncMsg} · EPG ${Number(epgResult.inserted ?? 0).toLocaleString()} entries`)
+              : syncMsg
+            win?.webContents.send('sync:progress', {
+              sourceId, phase: 'done', current: msg.totalItems, total: msg.totalItems,
+              message: doneMsg,
+            })
+            resolve({ success: true })
           })
-          resolve({ success: true })
         } else if (msg.type === 'warning') {
           win?.webContents.send('sync:progress', {
             sourceId, phase: 'warning', current: 0, total: 0, message: msg.message,
@@ -549,29 +602,15 @@ export function registerHandlers() {
     if (worker) {
       activeSyncWorkers.delete(sourceId)
       worker.terminate()
-      getSqlite().prepare('UPDATE sources SET status = ? WHERE id = ?').run('idle', sourceId)
+      getSqlite().prepare('UPDATE sources SET status = ? WHERE id = ?').run('active', sourceId)
       win?.webContents.send('sync:progress', { sourceId, phase: 'cancelled', current: 0, total: 0, message: '' })
     }
     return { ok: true }
   })
 
   // ── EPG ─────────────────────────────────────────────────────────────────
-  ipcMain.handle('epg:sync', async (event, sourceId: string) => {
-    const win = BrowserWindow.fromWebContents(event.sender)
-    const sqlite = getSqlite()
-    const source = sqlite.prepare('SELECT * FROM sources WHERE id = ?').get(sourceId) as SourceRow | undefined
-    if (!source?.server_url) return { success: false, error: 'Source not found' }
-
-    const result = await syncEpg(
-      sourceId, source.server_url, source.username, source.password,
-      (msg) => win?.webContents.send('epg:progress', { sourceId, message: msg })
-    )
-    if (!result.error) {
-      sqlite.prepare(`UPDATE sources SET last_epg_sync = unixepoch(), ingest_state = 'epg_fetched' WHERE id = ?`).run(sourceId)
-    }
-    return result.error ? { success: false, ...result } : { success: true, ...result }
-  })
-
+  // `epg:sync` IPC is gone — EPG is chained automatically inside the Sync
+  // handler's done branch. The remaining handlers below are read-only lookups.
   ipcMain.handle('epg:now-next', (_event, contentId: string) => getNowNext(contentId))
 
   ipcMain.handle('epg:guide', (_event, args: { contentIds: string[]; startTime?: number; endTime?: number }) => {
@@ -584,15 +623,15 @@ export function registerHandlers() {
 
     const placeholders = args.contentIds.map(() => '?').join(',')
     const rows = sqlite.prepare(`
-      SELECT s.id,
-             s.title AS title,
-             s.thumbnail_url AS poster_url,
-             s.epg_channel_id,
-             s.source_id AS primary_source_id,
-             s.catchup_supported, s.catchup_days,
-             s.stream_id AS external_id
-      FROM streams s
-      WHERE s.id IN (${placeholders}) AND s.type = 'live'
+      SELECT c.id,
+             c.title AS title,
+             c.thumbnail_url AS poster_url,
+             c.epg_channel_id,
+             c.source_id AS primary_source_id,
+             c.catchup_supported, c.catchup_days,
+             c.external_id AS external_id
+      FROM channels c
+      WHERE c.id IN (${placeholders})
     `).all(...args.contentIds) as any[]
 
     const programmes: Record<string, any[]> = {}
@@ -647,23 +686,23 @@ export function registerHandlers() {
 
   ipcMain.handle('content:get-catchup-url', async (_event, args: { contentId: string; startTime: number; duration: number }) => {
     const sqlite = getSqlite()
-    const stream = sqlite.prepare('SELECT * FROM streams WHERE id = ?').get(args.contentId) as StreamRow | undefined
-    if (!stream) return { error: 'Stream not found' }
+    const channel = sqlite.prepare('SELECT * FROM channels WHERE id = ?').get(args.contentId) as ChannelRow | undefined
+    if (!channel) return { error: 'Channel not found' }
 
     const db = getDb()
-    const [source] = await db.select().from(sources).where(eq(sources.id, stream.source_id))
+    const [source] = await db.select().from(sources).where(eq(sources.id, channel.source_id))
     if (!source?.serverUrl || !source.username || !source.password) return { error: 'Source credentials missing' }
 
     const url = xtreamService.buildCatchupUrl(
       source.serverUrl, source.username, source.password,
-      stream.stream_id, new Date(args.startTime * 1000), args.duration
+      channel.external_id, new Date(args.startTime * 1000), args.duration
     )
     return { url }
   })
 
   // ── Search ──────────────────────────────────────────────────────────────
-  // g1 tier: LIKE search on provider titles (streams.title / series_sources.title).
-  // No FTS, no canonical joins. Simple and guaranteed not to freeze.
+  // LIKE `%query%` on `search_title` per content type. Query is normalized
+  // through the same any-ascii+lowercase pass as the stored column.
   ipcMain.handle('search:query', async (_event, args: {
     query: string
     type?: 'live' | 'movie' | 'series'
@@ -671,9 +710,10 @@ export function registerHandlers() {
     sourceIds?: string[]
     limit?: number
     offset?: number
+    skipCount?: boolean
   }) => {
     const sqlite = getSqlite()
-    const { categoryName, sourceIds, limit = 50, offset = 0 } = args
+    const { categoryName, sourceIds, limit = 50, offset = 0, skipCount = false } = args
     const rawQuery = (args.query ?? '').trim()
 
     const enabledSources = (sqlite.prepare(`SELECT id FROM sources WHERE disabled = 0`).all() as { id: string }[]).map(r => r.id)
@@ -689,101 +729,155 @@ export function registerHandlers() {
       return runBrowseSearch(effectiveType, categoryName, filterIds, limit, offset)
     }
 
-    // ── g1: LIKE search on provider titles ────────────────────────────────
-    const all: unknown[] = []
+    // Typed search: single table — one COUNT + one SELECT LIMIT/OFFSET.
+    // skipCount short-circuits the COUNT for callers that only need items
+    // (e.g. Home, which displays a fixed cap and never shows a total).
+    if (effectiveType === 'movie') {
+      return g1cSearchMovies(rawQuery, categoryName, filterIds, limit, offset, skipCount)
+    }
+    if (effectiveType === 'live') {
+      return g1cSearchChannels(rawQuery, categoryName, filterIds, limit, offset, skipCount)
+    }
+    if (effectiveType === 'series') {
+      return g1cSearchSeries(rawQuery, categoryName, filterIds, limit, offset, skipCount)
+    }
 
-    if (!effectiveType || effectiveType === 'movie') {
-      all.push(...g1SearchStreams(rawQuery, 'movie', categoryName, filterIds, SEARCH_TOTAL_CAP))
+    // All-types fan-out: concatenate live+movie+series, paginate across
+    // the merged sequence. We over-fetch (limit+offset) per type so we can
+    // pick a consistent slice; each type's total is summed for the grand total.
+    const cap = limit + offset
+    const live   = g1cSearchChannels(rawQuery, categoryName, filterIds, cap, 0, skipCount)
+    const movies = g1cSearchMovies  (rawQuery, categoryName, filterIds, cap, 0, skipCount)
+    const series = g1cSearchSeries  (rawQuery, categoryName, filterIds, cap, 0, skipCount)
+    const merged = [...live.items, ...movies.items, ...series.items]
+    return {
+      items: merged.slice(offset, offset + limit),
+      total: live.total + movies.total + series.total,
     }
-    if (!effectiveType || effectiveType === 'live') {
-      all.push(...g1SearchStreams(rawQuery, 'live', categoryName, filterIds, SEARCH_TOTAL_CAP))
-    }
-    if (!effectiveType || effectiveType === 'series') {
-      all.push(...g1SearchSeries(rawQuery, categoryName, filterIds, SEARCH_TOTAL_CAP))
-    }
-
-    return { items: all.slice(offset, offset + limit), total: all.length }
   })
 
   // ── Content ─────────────────────────────────────────────────────────────
   ipcMain.handle('content:get', async (_event, contentId: string) => {
     const sqlite = getSqlite()
-    // Try streams first (movie/live/episode), then series_sources.
-    const streamRow = sqlite.prepare(`
-      SELECT ${STREAM_SELECT},
-        GROUP_CONCAT(DISTINCT cat.name) AS category_name
-      FROM streams s
-      LEFT JOIN stream_categories sc ON sc.stream_id = s.id
-      LEFT JOIN categories cat ON cat.id = sc.category_id
-      WHERE s.id = ?
-      GROUP BY s.id
-    `).get(contentId)
-    if (streamRow) return streamRow
+    const kind = idKind(contentId)
 
-    const seriesRow = sqlite.prepare(`
-      SELECT ${SERIES_SELECT},
-        GROUP_CONCAT(DISTINCT cat.name) AS category_name
-      FROM series_sources ss
-      LEFT JOIN series_source_categories ssc ON ssc.series_source_id = ss.id
-      LEFT JOIN categories cat ON cat.id = ssc.category_id
-      WHERE ss.id = ?
-      GROUP BY ss.id
-    `).get(contentId)
-    return seriesRow ?? null
+    if (kind === 'channel') {
+      return sqlite.prepare(`
+        SELECT ${CHANNEL_SELECT}, cat.name AS category_name
+        FROM channels c
+        LEFT JOIN channel_categories cat ON cat.id = c.category_id
+        WHERE c.id = ?
+      `).get(contentId) ?? null
+    }
+    if (kind === 'movie') {
+      return sqlite.prepare(`
+        SELECT ${MOVIE_SELECT}, cat.name AS category_name
+        FROM movies m
+        LEFT JOIN movie_categories cat ON cat.id = m.category_id
+        WHERE m.id = ?
+      `).get(contentId) ?? null
+    }
+    if (kind === 'series') {
+      return sqlite.prepare(`
+        SELECT ${SERIES_SELECT}, cat.name AS category_name
+        FROM series sr
+        LEFT JOIN series_categories cat ON cat.id = sr.category_id
+        WHERE sr.id = ?
+      `).get(contentId) ?? null
+    }
+    if (kind === 'episode') {
+      // Return a minimal episode record. Callers typically want series info.
+      return sqlite.prepare(`SELECT * FROM episodes WHERE id = ?`).get(contentId) ?? null
+    }
+    return null
   })
 
   ipcMain.handle('content:get-stream-url', async (_event, args: { contentId: string; sourceId?: string }) => {
     const db = getDb()
     const sqlite = getSqlite()
+    const kind = idKind(args.contentId)
+    if (!kind) return { error: 'Invalid content ID' }
 
-    const stream = sqlite.prepare('SELECT * FROM streams WHERE id = ?').get(args.contentId) as StreamRow | undefined
-    if (!stream) return { error: 'Content not found' }
+    let sourceIdFromRow: string | null = null
+    let externalId: string | null = null
+    let containerExtension: string | null = null
+    let directStreamUrl: string | null = null
+    let xtreamType: 'live' | 'movie' | 'series' = 'movie'
 
-    const sourceId = args.sourceId ?? stream.source_id
+    if (kind === 'channel') {
+      const ch = sqlite.prepare('SELECT * FROM channels WHERE id = ?').get(args.contentId) as ChannelRow | undefined
+      if (!ch) return { error: 'Content not found' }
+      sourceIdFromRow = ch.source_id
+      externalId = ch.external_id
+      directStreamUrl = ch.stream_url ?? null
+      xtreamType = 'live'
+    } else if (kind === 'movie') {
+      const m = sqlite.prepare('SELECT * FROM movies WHERE id = ?').get(args.contentId) as MovieRow | undefined
+      if (!m) return { error: 'Content not found' }
+      sourceIdFromRow = m.source_id
+      externalId = m.external_id
+      containerExtension = m.container_extension ?? null
+      directStreamUrl = m.stream_url ?? null
+      xtreamType = 'movie'
+    } else if (kind === 'episode') {
+      const ep = sqlite.prepare('SELECT * FROM episodes WHERE id = ?').get(args.contentId) as EpisodeRow | undefined
+      if (!ep) return { error: 'Content not found' }
+      // Episodes link to series, which owns source_id.
+      const ser = sqlite.prepare('SELECT source_id FROM series WHERE id = ?').get(ep.series_id) as { source_id: string } | undefined
+      if (!ser) return { error: 'Parent series not found' }
+      sourceIdFromRow = ser.source_id
+      externalId = ep.external_id
+      containerExtension = ep.container_extension ?? null
+      directStreamUrl = ep.stream_url ?? null
+      xtreamType = 'series'
+    } else {
+      return { error: 'Series parents are not playable' }
+    }
+
+    const sourceId = args.sourceId ?? sourceIdFromRow!
     const [source] = await db.select().from(sources).where(eq(sources.id, sourceId))
     if (!source) return { error: 'No stream source found' }
 
-    // M3U sources: stream_url is stored directly on the streams row.
+    // M3U sources: stream_url is stored directly on the content row.
     if (source.type === 'm3u') {
-      if (!stream.stream_url) return { error: 'Stream URL missing for M3U content' }
-      return { url: stream.stream_url, sourceId: source.id }
+      if (!directStreamUrl) return { error: 'Stream URL missing for M3U content' }
+      return { url: directStreamUrl, sourceId: source.id }
     }
 
     if (!source.serverUrl || !source.username || !source.password) return { error: 'Source credentials missing' }
 
-    const streamType = stream.type === 'live' ? 'live' : stream.type === 'episode' ? 'series' : 'movie'
     const url = xtreamService.buildStreamUrl(
       source.serverUrl, source.username, source.password,
-      streamType, stream.stream_id, stream.container_extension
+      xtreamType, externalId!, containerExtension ?? undefined
     )
     return { url, sourceId: source.id }
   })
 
   // series:get-info — lazy-fetches season/episode list from Xtream and
-  // persists episodes as streams (type='episode') with parent_series_id link.
-  // Season/episode metadata stored in provider_metadata JSON.
+  // persists episodes into the episodes table with FK series_id.
   ipcMain.handle('series:get-info', async (_event, args: { contentId: string }) => {
     const db = getDb()
     const sqlite = getSqlite()
 
-    const seriesRow = sqlite.prepare('SELECT * FROM series_sources WHERE id = ?').get(args.contentId) as SeriesSourceRow | undefined
+    const seriesRow = sqlite.prepare('SELECT * FROM series WHERE id = ?').get(args.contentId) as SeriesRow | undefined
     if (!seriesRow) return { error: 'Content not found' }
 
     const [source] = await db.select().from(sources).where(eq(sources.id, seriesRow.source_id))
     if (!source?.serverUrl || !source.username || !source.password) return { error: 'Source credentials missing' }
 
     try {
-      const info = await xtreamService.getSeriesInfo(source.serverUrl, source.username, source.password, seriesRow.series_external_id)
+      const info = await xtreamService.getSeriesInfo(source.serverUrl, source.username, source.password, seriesRow.external_id)
 
-      const upsertEpisodeStream = sqlite.prepare(`
-        INSERT INTO streams (
-          id, source_id, type, stream_id, title, container_extension, parent_series_id, provider_metadata
-        ) VALUES (?, ?, 'episode', ?, ?, ?, ?, ?)
+      const upsertEpisode = sqlite.prepare(`
+        INSERT INTO episodes (
+          id, series_id, external_id, title,
+          container_extension, season, episode_num
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           title = excluded.title,
           container_extension = excluded.container_extension,
-          parent_series_id = excluded.parent_series_id,
-          provider_metadata = excluded.provider_metadata
+          season = excluded.season,
+          episode_num = excluded.episode_num
       `)
 
       const tx = sqlite.transaction((seasons: Record<string, any[]>) => {
@@ -792,12 +886,11 @@ export function registerHandlers() {
             const season  = Number(ep.season ?? ep.season_number ?? 0)
             const epNum   = Number(ep.episode_num ?? ep.episode ?? 0)
             const epTitle = ep.title ?? `S${season}E${epNum}`
-            const streamId = `${source.id}:episode:${ep.id}`
-            const metadata = JSON.stringify({ season, episode: epNum, air_date: ep.air_date ?? null })
+            const epId = `${source.id}:episode:${ep.id}`
 
-            upsertEpisodeStream.run(
-              streamId, source.id, String(ep.id), epTitle,
-              ep.container_extension ?? 'mkv', seriesRow.id, metadata
+            upsertEpisode.run(
+              epId, seriesRow.id, String(ep.id), epTitle,
+              ep.container_extension ?? 'mkv', season, epNum
             )
           }
         }
@@ -812,44 +905,52 @@ export function registerHandlers() {
 
   // ── User data ──────────────────────────────────────────────────────────
   // Routing by kind:
-  //   movie  → stream_user_data     (favorite/watchlist/rating/position)
-  //   series → series_user_data     (favorite/watchlist/rating)
-  //   episode→ stream_user_data     (position/completed) + parent series_user_data (fav/wl)
-  //   live   → channel_user_data    (favorite per-stream) + stream_user_data (position)
+  //   channel → channel_user_data  (favorite only — live channels don't track position)
+  //   movie   → movie_user_data    (favorite/watchlist/rating/position)
+  //   series  → series_user_data   (favorite/watchlist/rating — episode positions are per-episode)
+  //   episode → episode_user_data  (position/completed) + parent series_user_data for fav/wl
 
   ipcMain.handle('user:get-data', async (_event, contentId: string) => {
     const sqlite = getSqlite()
-    const ref = resolveContent(sqlite, contentId)
-    if (!ref) return null
-    return readUserData(sqlite, ref, contentId)
+    return readUserData(sqlite, contentId)
   })
 
   ipcMain.handle('user:set-position', async (_event, args: { contentId: string; position: number }) => {
     const sqlite = getSqlite()
-    const ref = resolveContent(sqlite, args.contentId)
-    if (!ref?.stream) return { success: false }
-    sqlite.prepare(`
-      INSERT INTO stream_user_data (profile_id, stream_id, watch_position, last_watched_at)
-      VALUES (?, ?, ?, unixepoch())
-      ON CONFLICT(profile_id, stream_id) DO UPDATE SET
-        watch_position  = excluded.watch_position,
-        last_watched_at = excluded.last_watched_at
-    `).run(DEFAULT_PROFILE, ref.stream.id, args.position)
-    return { success: true }
+    const kind = idKind(args.contentId)
+    if (kind === 'movie') {
+      sqlite.prepare(`
+        INSERT INTO movie_user_data (profile_id, movie_id, watch_position, last_watched_at)
+        VALUES (?, ?, ?, unixepoch())
+        ON CONFLICT(profile_id, movie_id) DO UPDATE SET
+          watch_position  = excluded.watch_position,
+          last_watched_at = excluded.last_watched_at
+      `).run(DEFAULT_PROFILE, args.contentId, args.position)
+      return { success: true }
+    }
+    if (kind === 'episode') {
+      sqlite.prepare(`
+        INSERT INTO episode_user_data (profile_id, episode_id, watch_position, last_watched_at)
+        VALUES (?, ?, ?, unixepoch())
+        ON CONFLICT(profile_id, episode_id) DO UPDATE SET
+          watch_position  = excluded.watch_position,
+          last_watched_at = excluded.last_watched_at
+      `).run(DEFAULT_PROFILE, args.contentId, args.position)
+      return { success: true }
+    }
+    // channel/series: no meaningful position state (channels are live, series
+    // is a parent not itself playable).
+    return { success: false }
   })
 
   ipcMain.handle('user:toggle-favorite', async (_event, contentId: string) => {
     const sqlite = getSqlite()
-    const ref = resolveContent(sqlite, contentId)
-    if (!ref) return { favorite: false }
-    return { favorite: toggleFavorite(sqlite, ref) }
+    return { favorite: toggleFavorite(sqlite, contentId) }
   })
 
   ipcMain.handle('user:toggle-watchlist', async (_event, contentId: string) => {
     const sqlite = getSqlite()
-    const ref = resolveContent(sqlite, contentId)
-    if (!ref) return { watchlist: false }
-    return { watchlist: toggleWatchlist(sqlite, ref) }
+    return { watchlist: toggleWatchlist(sqlite, contentId) }
   })
 
   ipcMain.handle('user:favorites', async (_event, args?: { type?: 'live' | 'movie' | 'series' }) => {
@@ -859,59 +960,54 @@ export function registerHandlers() {
 
   ipcMain.handle('user:reorder-favorites', async (_event, order: { contentId: string; sortOrder: number }[]) => {
     const sqlite = getSqlite()
-    const updateStream = sqlite.prepare(`UPDATE stream_user_data SET fav_sort_order = ? WHERE profile_id = ? AND stream_id = ?`)
-    const updateSeries = sqlite.prepare(`UPDATE series_user_data SET fav_sort_order = ? WHERE profile_id = ? AND series_source_id = ?`)
-    const updateChan   = sqlite.prepare(`UPDATE channel_user_data SET fav_sort_order = ? WHERE profile_id = ? AND stream_id = ?`)
+    const updCh = sqlite.prepare(`UPDATE channel_user_data SET fav_sort_order = ? WHERE profile_id = ? AND channel_id = ?`)
+    const updMv = sqlite.prepare(`UPDATE movie_user_data   SET fav_sort_order = ? WHERE profile_id = ? AND movie_id = ?`)
+    const updSr = sqlite.prepare(`UPDATE series_user_data  SET fav_sort_order = ? WHERE profile_id = ? AND series_id = ?`)
     const runAll = sqlite.transaction((items: typeof order) => {
       for (const { contentId, sortOrder } of items) {
-        const ref = resolveContent(sqlite, contentId)
-        if (!ref) continue
-        if (ref.kind === 'movie'  && ref.stream)        updateStream.run(sortOrder, DEFAULT_PROFILE, ref.stream.id)
-        else if (ref.kind === 'series' && ref.seriesSource) updateSeries.run(sortOrder, DEFAULT_PROFILE, ref.seriesSource.id)
-        else if (ref.kind === 'live'   && ref.stream)       updateChan.run(sortOrder, DEFAULT_PROFILE, ref.stream.id)
+        const kind = idKind(contentId)
+        if (kind === 'channel') updCh.run(sortOrder, DEFAULT_PROFILE, contentId)
+        else if (kind === 'movie')  updMv.run(sortOrder, DEFAULT_PROFILE, contentId)
+        else if (kind === 'series') updSr.run(sortOrder, DEFAULT_PROFILE, contentId)
       }
     })
     runAll(order)
     return { ok: true }
   })
 
-  // ── Channels (live-specific user data, keyed per stream) ──────────────
+  // ── Channels (live-specific user data) ──────────────────────────────
   ipcMain.handle('channels:favorites', async (_event, args?: { profileId?: string }) => {
     const sqlite = getSqlite()
     const profileId = args?.profileId ?? DEFAULT_PROFILE
     return sqlite.prepare(`
-      SELECT ${STREAM_SELECT},
+      SELECT ${CHANNEL_SELECT},
         cud.fav_sort_order                    AS fav_sort_order,
-        sud.last_watched_at                   AS last_watched_at,
+        NULL                                  AS last_watched_at,
         1                                      AS favorite
       FROM channel_user_data cud
-      JOIN streams s ON s.id = cud.stream_id
-      JOIN sources src ON src.id = s.source_id AND src.disabled = 0
-      LEFT JOIN stream_user_data sud ON sud.stream_id = s.id AND sud.profile_id = ?
-      WHERE cud.is_favorite = 1 AND cud.profile_id = ? AND s.type = 'live'
-      ORDER BY COALESCE(cud.fav_sort_order, 999999) ASC, sud.last_watched_at DESC
-    `).all(profileId, profileId)
+      JOIN channels c ON c.id = cud.channel_id
+      JOIN sources src ON src.id = c.source_id AND src.disabled = 0
+      WHERE cud.is_favorite = 1 AND cud.profile_id = ?
+      ORDER BY COALESCE(cud.fav_sort_order, 999999) ASC
+    `).all(profileId)
   })
 
-  ipcMain.handle('channels:toggle-favorite', async (_event, streamId: string) => {
+  ipcMain.handle('channels:toggle-favorite', async (_event, channelId: string) => {
     const sqlite = getSqlite()
-    // The renderer still calls this with item.id — which in V3 is a stream id
-    // for live channels. Keep parameter name as canonicalId in preload for
-    // backward compat, but treat it as a stream id here.
-    const stream = sqlite.prepare('SELECT id FROM streams WHERE id = ?').get(streamId) as { id?: string } | undefined
-    if (!stream?.id) return { favorite: false }
+    const row = sqlite.prepare('SELECT id FROM channels WHERE id = ?').get(channelId) as { id?: string } | undefined
+    if (!row?.id) return { favorite: false }
     sqlite.prepare(`
-      INSERT INTO channel_user_data (profile_id, stream_id, is_favorite)
+      INSERT INTO channel_user_data (profile_id, channel_id, is_favorite)
       VALUES (?, ?, 1)
-      ON CONFLICT(profile_id, stream_id) DO UPDATE SET is_favorite = NOT is_favorite
-    `).run(DEFAULT_PROFILE, stream.id)
-    const row = sqlite.prepare(`SELECT is_favorite FROM channel_user_data WHERE profile_id = ? AND stream_id = ?`).get(DEFAULT_PROFILE, stream.id) as { is_favorite?: number } | undefined
-    return { favorite: !!row?.is_favorite }
+      ON CONFLICT(profile_id, channel_id) DO UPDATE SET is_favorite = NOT is_favorite
+    `).run(DEFAULT_PROFILE, row.id)
+    const r = sqlite.prepare(`SELECT is_favorite FROM channel_user_data WHERE profile_id = ? AND channel_id = ?`).get(DEFAULT_PROFILE, row.id) as { is_favorite?: number } | undefined
+    return { favorite: !!r?.is_favorite }
   })
 
   ipcMain.handle('channels:reorder-favorites', async (_event, order: { canonicalId: string; sortOrder: number }[]) => {
     const sqlite = getSqlite()
-    const update = sqlite.prepare(`UPDATE channel_user_data SET fav_sort_order = ? WHERE profile_id = ? AND stream_id = ?`)
+    const update = sqlite.prepare(`UPDATE channel_user_data SET fav_sort_order = ? WHERE profile_id = ? AND channel_id = ?`)
     const runAll = sqlite.transaction((items: typeof order) => {
       for (const { canonicalId, sortOrder } of items) update.run(sortOrder, DEFAULT_PROFILE, canonicalId)
     })
@@ -919,16 +1015,15 @@ export function registerHandlers() {
     return { ok: true }
   })
 
-  ipcMain.handle('channels:get-data', async (_event, streamId: string) => {
+  ipcMain.handle('channels:get-data', async (_event, channelId: string) => {
     const sqlite = getSqlite()
-    const fav = sqlite.prepare(`SELECT is_favorite FROM channel_user_data WHERE profile_id = ? AND stream_id = ?`).get(DEFAULT_PROFILE, streamId) as { is_favorite?: number } | undefined
-    const sud = sqlite.prepare(`SELECT watch_position, completed FROM stream_user_data WHERE profile_id = ? AND stream_id = ?`).get(DEFAULT_PROFILE, streamId) as { watch_position?: number; completed?: number } | undefined
+    const fav = sqlite.prepare(`SELECT is_favorite FROM channel_user_data WHERE profile_id = ? AND channel_id = ?`).get(DEFAULT_PROFILE, channelId) as { is_favorite?: number } | undefined
     return {
       favorite:    !!fav?.is_favorite,
       watchlisted: false,
       rating:      null,
-      position:    sud?.watch_position ?? 0,
-      completed:   !!sud?.completed,
+      position:    0,
+      completed:   false,
     }
   })
 
@@ -952,9 +1047,7 @@ export function registerHandlers() {
     if (!contentIds.length) return {}
     const result: Record<string, any> = {}
     for (const id of contentIds) {
-      const ref = resolveContent(sqlite, id)
-      if (!ref) continue
-      const data = readUserData(sqlite, ref, id)
+      const data = readUserData(sqlite, id)
       if (data) result[id] = data
     }
     return result
@@ -962,35 +1055,45 @@ export function registerHandlers() {
 
   ipcMain.handle('user:set-completed', async (_event, contentId: string) => {
     const sqlite = getSqlite()
-    const ref = resolveContent(sqlite, contentId)
-    if (!ref?.stream) return { success: false }
-    sqlite.prepare(`
-      INSERT INTO stream_user_data (profile_id, stream_id, completed, watch_position, last_watched_at)
-      VALUES (?, ?, 1, 0, unixepoch())
-      ON CONFLICT(profile_id, stream_id) DO UPDATE SET
-        completed = 1, watch_position = 0, last_watched_at = unixepoch()
-    `).run(DEFAULT_PROFILE, ref.stream.id)
-    return { success: true }
+    const kind = idKind(contentId)
+    if (kind === 'movie') {
+      sqlite.prepare(`
+        INSERT INTO movie_user_data (profile_id, movie_id, completed, watch_position, last_watched_at)
+        VALUES (?, ?, 1, 0, unixepoch())
+        ON CONFLICT(profile_id, movie_id) DO UPDATE SET
+          completed = 1, watch_position = 0, last_watched_at = unixepoch()
+      `).run(DEFAULT_PROFILE, contentId)
+      return { success: true }
+    }
+    if (kind === 'episode') {
+      sqlite.prepare(`
+        INSERT INTO episode_user_data (profile_id, episode_id, completed, watch_position, last_watched_at)
+        VALUES (?, ?, 1, 0, unixepoch())
+        ON CONFLICT(profile_id, episode_id) DO UPDATE SET
+          completed = 1, watch_position = 0, last_watched_at = unixepoch()
+      `).run(DEFAULT_PROFILE, contentId)
+      return { success: true }
+    }
+    return { success: false }
   })
 
   ipcMain.handle('user:set-rating', async (_event, args: { contentId: string; rating: number | null }) => {
     const sqlite = getSqlite()
-    const ref = resolveContent(sqlite, args.contentId)
-    if (!ref) return { success: false }
-    if (ref.kind === 'movie' && ref.stream) {
+    const kind = idKind(args.contentId)
+    if (kind === 'movie') {
       sqlite.prepare(`
-        INSERT INTO stream_user_data (profile_id, stream_id, rating)
+        INSERT INTO movie_user_data (profile_id, movie_id, rating)
         VALUES (?, ?, ?)
-        ON CONFLICT(profile_id, stream_id) DO UPDATE SET rating = excluded.rating
-      `).run(DEFAULT_PROFILE, ref.stream.id, args.rating)
+        ON CONFLICT(profile_id, movie_id) DO UPDATE SET rating = excluded.rating
+      `).run(DEFAULT_PROFILE, args.contentId, args.rating)
       return { success: true }
     }
-    if (ref.kind === 'series' && ref.seriesSource) {
+    if (kind === 'series') {
       sqlite.prepare(`
-        INSERT INTO series_user_data (profile_id, series_source_id, rating)
+        INSERT INTO series_user_data (profile_id, series_id, rating)
         VALUES (?, ?, ?)
-        ON CONFLICT(profile_id, series_source_id) DO UPDATE SET rating = excluded.rating
-      `).run(DEFAULT_PROFILE, ref.seriesSource.id, args.rating)
+        ON CONFLICT(profile_id, series_id) DO UPDATE SET rating = excluded.rating
+      `).run(DEFAULT_PROFILE, args.contentId, args.rating)
       return { success: true }
     }
     return { success: false }
@@ -998,105 +1101,120 @@ export function registerHandlers() {
 
   ipcMain.handle('user:clear-continue', async (_event, contentId: string) => {
     const sqlite = getSqlite()
-    const ref = resolveContent(sqlite, contentId)
-    if (!ref?.stream) return { success: false }
-    sqlite.prepare(`
-      UPDATE stream_user_data SET watch_position = 0, completed = 1
-      WHERE profile_id = ? AND stream_id = ?
-    `).run(DEFAULT_PROFILE, ref.stream.id)
-    return { success: true }
+    const kind = idKind(contentId)
+    if (kind === 'movie') {
+      sqlite.prepare(`
+        UPDATE movie_user_data SET watch_position = 0, completed = 1
+        WHERE profile_id = ? AND movie_id = ?
+      `).run(DEFAULT_PROFILE, contentId)
+      return { success: true }
+    }
+    if (kind === 'episode') {
+      sqlite.prepare(`
+        UPDATE episode_user_data SET watch_position = 0, completed = 1
+        WHERE profile_id = ? AND episode_id = ?
+      `).run(DEFAULT_PROFILE, contentId)
+      return { success: true }
+    }
+    return { success: false }
   })
 
   ipcMain.handle('user:clear-item-history', async (_event, contentId: string) => {
     const sqlite = getSqlite()
-    const ref = resolveContent(sqlite, contentId)
-    if (!ref?.stream) return { success: false }
-    sqlite.prepare(`
-      UPDATE stream_user_data SET watch_position = 0, last_watched_at = NULL, completed = 0
-      WHERE profile_id = ? AND stream_id = ?
-    `).run(DEFAULT_PROFILE, ref.stream.id)
-    return { success: true }
+    const kind = idKind(contentId)
+    if (kind === 'movie') {
+      sqlite.prepare(`
+        UPDATE movie_user_data SET watch_position = 0, last_watched_at = NULL, completed = 0
+        WHERE profile_id = ? AND movie_id = ?
+      `).run(DEFAULT_PROFILE, contentId)
+      return { success: true }
+    }
+    if (kind === 'episode') {
+      sqlite.prepare(`
+        UPDATE episode_user_data SET watch_position = 0, last_watched_at = NULL, completed = 0
+        WHERE profile_id = ? AND episode_id = ?
+      `).run(DEFAULT_PROFILE, contentId)
+      return { success: true }
+    }
+    return { success: false }
   })
 
   ipcMain.handle('user:clear-history', async () => {
     const sqlite = getSqlite()
-    sqlite.prepare(`UPDATE stream_user_data SET watch_position = 0, last_watched_at = NULL, completed = 0`).run()
+    sqlite.prepare(`UPDATE movie_user_data   SET watch_position = 0, last_watched_at = NULL, completed = 0`).run()
+    sqlite.prepare(`UPDATE episode_user_data SET watch_position = 0, last_watched_at = NULL, completed = 0`).run()
     return { success: true }
   })
 
   ipcMain.handle('user:clear-favorites', async () => {
     const sqlite = getSqlite()
-    sqlite.prepare(`UPDATE stream_user_data  SET is_favorite = 0, is_watchlisted = 0`).run()
-    sqlite.prepare(`UPDATE series_user_data SET is_favorite = 0, is_watchlisted = 0`).run()
     sqlite.prepare(`UPDATE channel_user_data SET is_favorite = 0`).run()
+    sqlite.prepare(`UPDATE movie_user_data   SET is_favorite = 0, is_watchlisted = 0`).run()
+    sqlite.prepare(`UPDATE series_user_data  SET is_favorite = 0, is_watchlisted = 0`).run()
     return { success: true }
   })
 
   ipcMain.handle('user:clear-all-data', async () => {
     const sqlite = getSqlite()
-    sqlite.prepare(`DELETE FROM stream_user_data`).run()
-    sqlite.prepare(`DELETE FROM series_user_data`).run()
     sqlite.prepare(`DELETE FROM channel_user_data`).run()
+    sqlite.prepare(`DELETE FROM movie_user_data`).run()
+    sqlite.prepare(`DELETE FROM series_user_data`).run()
+    sqlite.prepare(`DELETE FROM episode_user_data`).run()
     return { success: true }
   })
 
   // ── Diagnostic ────────────────────────────────────────────────────────
   ipcMain.handle('debug:category-items', async (_event, categoryNameSearch: string) => {
     const sqlite = getSqlite()
-    const cats = sqlite.prepare(`
-      SELECT cat.*, s.name as source_name
-      FROM categories cat
-      JOIN sources s ON s.id = cat.source_id
-      WHERE cat.name LIKE ?
-      ORDER BY cat.name
-    `).all(`%${categoryNameSearch}%`) as any[]
-
     const results: any[] = []
-    for (const cat of cats) {
-      const catId = `${cat.source_id}:${cat.type}:${cat.external_id}`
-      const streamItems = sqlite.prepare(`
-        SELECT s.id, s.title, s.stream_id AS external_id, s.type, s.source_id AS primary_source_id
-        FROM stream_categories sc
-        JOIN streams s ON s.id = sc.stream_id
-        WHERE sc.category_id = ?
-      `).all(catId) as any[]
-      const seriesItems = sqlite.prepare(`
-        SELECT ss.id, ss.title, ss.series_external_id AS external_id, 'series' AS type, ss.source_id AS primary_source_id
-        FROM series_source_categories ssc
-        JOIN series_sources ss ON ss.id = ssc.series_source_id
-        WHERE ssc.category_id = ?
-      `).all(catId) as any[]
 
-      const items = [...streamItems, ...seriesItems]
-      results.push({
-        categoryName: cat.name,
-        categoryExternalId: cat.external_id,
-        sourceId: cat.source_id,
-        sourceName: cat.source_name,
-        type: cat.type,
-        actualItems: items.length,
-        items: items.map((i: any) => ({ id: i.id, title: i.title, externalId: i.external_id })),
-      })
+    const categoryTables = [
+      { table: 'channel_categories', contentTable: 'channels', type: 'live' },
+      { table: 'movie_categories',   contentTable: 'movies',   type: 'movie' },
+      { table: 'series_categories',  contentTable: 'series',   type: 'series' },
+    ]
+
+    for (const { table, contentTable, type } of categoryTables) {
+      const cats = sqlite.prepare(`
+        SELECT cat.*, s.name as source_name
+        FROM ${table} cat
+        JOIN sources s ON s.id = cat.source_id
+        WHERE cat.name LIKE ?
+        ORDER BY cat.name
+      `).all(`%${categoryNameSearch}%`) as any[]
+
+      for (const cat of cats) {
+        const items = sqlite.prepare(`
+          SELECT x.id, x.title, x.external_id AS external_id, '${type}' AS type, x.source_id AS primary_source_id
+          FROM ${contentTable} x
+          WHERE x.category_id = ?
+        `).all(cat.id) as any[]
+        results.push({
+          categoryName: cat.name,
+          categoryExternalId: cat.external_id,
+          sourceId: cat.source_id,
+          sourceName: cat.source_name,
+          type,
+          actualItems: items.length,
+          items: items.map((i: any) => ({ id: i.id, title: i.title, externalId: i.external_id })),
+        })
+      }
     }
+
     return results
   })
 
   // ── Settings (key-value) ─────────────────────────────────────────────
   ipcMain.handle('settings:get', (_event, key: string) => getSetting(key))
 
-  // ── Enrichment — V3 keyless pipeline stubs ───────────────────────────
-  // The TMDB-powered enrichment UI is deprecated in V3. The keyless
-  // enrichment worker runs automatically on boot and after every sync.
-  // These stubs keep the renderer's existing calls non-fatal until the
-  // Phase G UI rewrite replaces them.
+  // ── Enrichment — deprecated stubs (no canonical layer in g1c) ─────────
   const deprecatedEnrichment = (opName: string) => () => ({
     success: false,
-    error: `${opName} is deprecated in V3 — keyless enrichment runs automatically.`,
+    error: `${opName} is deprecated in g1c — no enrichment tier yet.`,
   })
 
   ipcMain.handle('enrichment:set-api-key',  () => ({ success: true })) // no-op
   ipcMain.handle('enrichment:status', () => {
-    // g1: no canonical tables, no enrichment. Return zeros.
     return { total: 0, enriched: 0, pending: 0 }
   })
   ipcMain.handle('enrichment:enrich-single', deprecatedEnrichment('enrich-single'))
@@ -1104,8 +1222,7 @@ export function registerHandlers() {
   ipcMain.handle('enrichment:search-tmdb',   deprecatedEnrichment('search-tmdb'))
   ipcMain.handle('enrichment:enrich-by-id',  deprecatedEnrichment('enrich-by-id'))
   ipcMain.handle('enrichment:start', async () => {
-    // g1: no enrichment worker. Stub for renderer compat.
-    return { success: true, message: 'No enrichment in g1 tier' }
+    return { success: true, message: 'No enrichment in g1c tier' }
   })
 
   // ── Categories ────────────────────────────────────────────────────────
@@ -1121,30 +1238,38 @@ export function registerHandlers() {
     if (!filterIds.length) return []
 
     const inList = filterIds.map(() => '?').join(',')
-    const typeFilter = args.type ? `AND cat.type = ?` : ''
-    const typeParam: unknown[] = args.type ? [args.type] : []
 
-    // Count items across both `stream_categories` and `series_source_categories`
-    // so series parents contribute to their categories.
-    const sql = `
-      SELECT
-        cat.name,
-        cat.type,
-        GROUP_CONCAT(DISTINCT cat.source_id) AS source_ids,
-        (
-          COALESCE((SELECT COUNT(DISTINCT sc.stream_id)        FROM stream_categories sc        WHERE sc.category_id = cat.id), 0) +
-          COALESCE((SELECT COUNT(DISTINCT ssc.series_source_id) FROM series_source_categories ssc WHERE ssc.category_id = cat.id), 0)
-        ) AS item_count,
-        MIN(cat.content_synced) AS needs_sync,
-        MIN(cat.position)       AS position
-      FROM categories cat
-      WHERE cat.source_id IN (${inList})
-      ${typeFilter}
-      GROUP BY cat.name, cat.type
-      HAVING item_count > 0 OR MIN(cat.content_synced) = 0
-      ORDER BY item_count DESC
-    `
-    return sqlite.prepare(sql).all(...filterIds, ...typeParam)
+    // Query each per-type table, count via the content-table category_id FK,
+    // and merge in JS so the shape matches the old `categories` join.
+    const queries = [
+      { table: 'channel_categories', content: 'channels', type: 'live' as const },
+      { table: 'movie_categories',   content: 'movies',   type: 'movie' as const },
+      { table: 'series_categories',  content: 'series',   type: 'series' as const },
+    ]
+
+    const rows: any[] = []
+    for (const q of queries) {
+      if (args.type && args.type !== q.type) continue
+      const partial = sqlite.prepare(`
+        SELECT
+          cat.name                                    AS name,
+          '${q.type}'                                 AS type,
+          GROUP_CONCAT(DISTINCT cat.source_id)        AS source_ids,
+          COUNT(DISTINCT x.id)                        AS item_count,
+          0                                           AS needs_sync,
+          MIN(cat.position)                           AS position
+        FROM ${q.table} cat
+        LEFT JOIN ${q.content} x ON x.category_id = cat.id
+        WHERE cat.source_id IN (${inList})
+        GROUP BY cat.name
+        HAVING item_count > 0
+        ORDER BY item_count DESC
+      `).all(...filterIds) as any[]
+      rows.push(...partial)
+    }
+    // Stable sort so larger buckets float up across types.
+    rows.sort((a, b) => (b.item_count ?? 0) - (a.item_count ?? 0))
+    return rows
   })
 
   // ── Browse ────────────────────────────────────────────────────────────
@@ -1203,62 +1328,111 @@ export function registerHandlers() {
   })
 }
 
-// ─── Helpers: browse + search ─────────────────────────────────────────────
+// ─── Search helpers ──────────────────────────────────────────────────────
+// LIKE `%query%` on `search_title`. Sync workers populate `search_title`
+// inline via `normalizeForSearch` (any-ascii + lowercase) so ligatures /
+// diacritics fold bidirectionally ("ae" ↔ "æ", "e" ↔ "é"). No FTS.
 
-// ─── g1 search: LIKE on provider titles, no FTS, no canonical joins ──────
-function g1SearchStreams(
-  query: string,
-  type: 'live' | 'movie' | undefined,
-  categoryName: string | undefined,
-  filterIds: string[],
-  limit: number
-): unknown[] {
+function g1cSearchChannels(
+  query: string, categoryName: string | undefined, filterIds: string[],
+  limit: number, offset: number, skipCount = false,
+): { items: unknown[]; total: number } {
   const sqlite = getSqlite()
   const sourceList = filterIds.map(() => '?').join(',')
-  const words = query.split(/\s+/).filter(Boolean)
-  if (!words.length) return []
-  const likeParams = words.map(w => `%${w}%`)
-  const likeConds = words.map(() => `s.title LIKE ?`).join(' AND ')
-  const typeConds = type ? `AND s.type = ?` : `AND s.type IN ('live','movie')`
-  const typeParams: unknown[] = type ? [type] : []
   const catJoin = categoryName
-    ? `JOIN stream_categories sc ON sc.stream_id = s.id JOIN categories cat ON cat.id = sc.category_id AND cat.name = ?`
+    ? `JOIN channel_categories cat ON cat.id = c.category_id AND cat.name = ?`
     : ''
   const catParams: unknown[] = categoryName ? [categoryName] : []
-  return sqlite.prepare(`
-    SELECT ${G1_STREAM_SELECT}
-    FROM streams s
+  const normalized = normalizeForSearch(query)
+  if (!normalized) return { items: [], total: 0 }
+  const like = `%${normalized}%`
+
+  const items = sqlite.prepare(`
+    SELECT ${CHANNEL_SELECT}
+    FROM channels c
     ${catJoin}
-    WHERE ${likeConds} ${typeConds} AND s.source_id IN (${sourceList})
-    ORDER BY s.added_at DESC
-    LIMIT ?
-  `).all(...catParams, ...likeParams, ...typeParams, ...filterIds, limit) as unknown[]
+    WHERE c.search_title LIKE ? AND c.source_id IN (${sourceList})
+    LIMIT ? OFFSET ?
+  `).all(...catParams, like, ...filterIds, limit, offset) as unknown[]
+
+  if (skipCount) return { items, total: items.length }
+  if (items.length === 0) return { items, total: 0 }
+
+  const total = (sqlite.prepare(`
+    SELECT COUNT(*) AS cnt
+    FROM channels c
+    ${catJoin}
+    WHERE c.search_title LIKE ? AND c.source_id IN (${sourceList})
+  `).get(...catParams, like, ...filterIds) as { cnt: number }).cnt
+  return { items, total }
 }
 
-function g1SearchSeries(
-  query: string,
-  categoryName: string | undefined,
-  filterIds: string[],
-  limit: number
-): unknown[] {
+function g1cSearchMovies(
+  query: string, categoryName: string | undefined, filterIds: string[],
+  limit: number, offset: number, skipCount = false,
+): { items: unknown[]; total: number } {
   const sqlite = getSqlite()
   const sourceList = filterIds.map(() => '?').join(',')
-  const words = query.split(/\s+/).filter(Boolean)
-  if (!words.length) return []
-  const likeParams = words.map(w => `%${w}%`)
-  const likeConds = words.map(() => `ss.title LIKE ?`).join(' AND ')
   const catJoin = categoryName
-    ? `JOIN series_source_categories ssc ON ssc.series_source_id = ss.id JOIN categories cat ON cat.id = ssc.category_id AND cat.name = ?`
+    ? `JOIN movie_categories cat ON cat.id = m.category_id AND cat.name = ?`
     : ''
   const catParams: unknown[] = categoryName ? [categoryName] : []
-  return sqlite.prepare(`
-    SELECT ${G1_SERIES_SELECT}
-    FROM series_sources ss
+  const normalized = normalizeForSearch(query)
+  if (!normalized) return { items: [], total: 0 }
+  const like = `%${normalized}%`
+
+  const items = sqlite.prepare(`
+    SELECT ${MOVIE_SELECT}
+    FROM movies m
     ${catJoin}
-    WHERE ${likeConds} AND ss.source_id IN (${sourceList})
-    ORDER BY ss.added_at DESC
-    LIMIT ?
-  `).all(...catParams, ...likeParams, ...filterIds, limit) as unknown[]
+    WHERE m.search_title LIKE ? AND m.source_id IN (${sourceList})
+    LIMIT ? OFFSET ?
+  `).all(...catParams, like, ...filterIds, limit, offset) as unknown[]
+
+  if (skipCount) return { items, total: items.length }
+  if (items.length === 0) return { items, total: 0 }
+
+  const total = (sqlite.prepare(`
+    SELECT COUNT(*) AS cnt
+    FROM movies m
+    ${catJoin}
+    WHERE m.search_title LIKE ? AND m.source_id IN (${sourceList})
+  `).get(...catParams, like, ...filterIds) as { cnt: number }).cnt
+  return { items, total }
+}
+
+function g1cSearchSeries(
+  query: string, categoryName: string | undefined, filterIds: string[],
+  limit: number, offset: number, skipCount = false,
+): { items: unknown[]; total: number } {
+  const sqlite = getSqlite()
+  const sourceList = filterIds.map(() => '?').join(',')
+  const catJoin = categoryName
+    ? `JOIN series_categories cat ON cat.id = sr.category_id AND cat.name = ?`
+    : ''
+  const catParams: unknown[] = categoryName ? [categoryName] : []
+  const normalized = normalizeForSearch(query)
+  if (!normalized) return { items: [], total: 0 }
+  const like = `%${normalized}%`
+
+  const items = sqlite.prepare(`
+    SELECT ${SERIES_SELECT}
+    FROM series sr
+    ${catJoin}
+    WHERE sr.search_title LIKE ? AND sr.source_id IN (${sourceList})
+    LIMIT ? OFFSET ?
+  `).all(...catParams, like, ...filterIds, limit, offset) as unknown[]
+
+  if (skipCount) return { items, total: items.length }
+  if (items.length === 0) return { items, total: 0 }
+
+  const total = (sqlite.prepare(`
+    SELECT COUNT(*) AS cnt
+    FROM series sr
+    ${catJoin}
+    WHERE sr.search_title LIKE ? AND sr.source_id IN (${sourceList})
+  `).get(...catParams, like, ...filterIds) as { cnt: number }).cnt
+  return { items, total }
 }
 
 function runBrowseSearch(
@@ -1274,92 +1448,116 @@ function runBrowseSearch(
   const sourceList = filterIds.map(() => '?').join(',')
   const dir = sortDir === 'asc' ? 'ASC' : 'DESC'
 
-  const streamSortCol: Record<string, string> = {
-    title:  's.title',
-    year:   's.year_hint',
-    rating: 's.added_at',
-    updated:'s.added_at',
-  }
-  const seriesSortCol: Record<string, string> = {
-    title:  'ss.title',
-    year:   'ss.year_hint',
-    rating: 'ss.added_at',
-    updated:'ss.added_at',
-  }
-
-  if (type === 'series') {
-    const catJoin = categoryName
-      ? `JOIN series_source_categories ssc ON ssc.series_source_id = ss.id JOIN categories cat ON cat.id = ssc.category_id AND cat.name = ?`
-      : ''
+  if (type === 'live') {
+    const sortCol: Record<string, string> = { title: 'c.title', year: 'c.md_year', rating: 'c.added_at', updated: 'c.added_at' }
+    const catJoin = categoryName ? `JOIN channel_categories cat ON cat.id = c.category_id AND cat.name = ?` : ''
     const catParams: unknown[] = categoryName ? [categoryName] : []
     const total = (sqlite.prepare(`
-      SELECT COUNT(*) as cnt
-      FROM series_sources ss
-      ${catJoin}
-      WHERE ss.source_id IN (${sourceList})
+      SELECT COUNT(*) as cnt FROM channels c ${catJoin} WHERE c.source_id IN (${sourceList})
     `).get(...catParams, ...filterIds) as { cnt: number }).cnt
     const items = sqlite.prepare(`
-      SELECT ${SERIES_SELECT}
-      FROM series_sources ss
+      SELECT ${CHANNEL_SELECT}
+      FROM channels c
       ${catJoin}
-      WHERE ss.source_id IN (${sourceList})
-      ORDER BY ${seriesSortCol[sortBy] ?? 'ss.added_at'} ${dir}
+      WHERE c.source_id IN (${sourceList})
+      ORDER BY ${sortCol[sortBy] ?? 'c.added_at'} ${dir}
       LIMIT ? OFFSET ?
     `).all(...catParams, ...filterIds, limit, offset) as unknown[]
     return { items, total }
   }
 
-  // Movies / Live / All (streams only).
-  const typeFilter = type ? `AND s.type = ?` : `AND s.type IN ('live','movie','episode')`
-  const typeParams: unknown[] = type ? [type] : []
-  const catJoin = categoryName
-    ? `JOIN stream_categories sc ON sc.stream_id = s.id JOIN categories cat ON cat.id = sc.category_id AND cat.name = ?`
-    : ''
-  const catParams: unknown[] = categoryName ? [categoryName] : []
-  const total = (sqlite.prepare(`
-    SELECT COUNT(*) as cnt
-    FROM streams s
-    ${catJoin}
-    WHERE s.source_id IN (${sourceList}) ${typeFilter}
-  `).get(...catParams, ...filterIds, ...typeParams) as { cnt: number }).cnt
-  const items = sqlite.prepare(`
-    SELECT ${STREAM_SELECT}
-    FROM streams s
-    ${catJoin}
-    WHERE s.source_id IN (${sourceList}) ${typeFilter}
-    ORDER BY ${streamSortCol[sortBy] ?? 's.added_at'} ${dir}
-    LIMIT ? OFFSET ?
-  `).all(...catParams, ...filterIds, ...typeParams, limit, offset) as unknown[]
-  return { items, total }
+  if (type === 'movie') {
+    const sortCol: Record<string, string> = { title: 'm.title', year: 'm.md_year', rating: 'm.added_at', updated: 'm.added_at' }
+    const catJoin = categoryName ? `JOIN movie_categories cat ON cat.id = m.category_id AND cat.name = ?` : ''
+    const catParams: unknown[] = categoryName ? [categoryName] : []
+    const total = (sqlite.prepare(`
+      SELECT COUNT(*) as cnt FROM movies m ${catJoin} WHERE m.source_id IN (${sourceList})
+    `).get(...catParams, ...filterIds) as { cnt: number }).cnt
+    const items = sqlite.prepare(`
+      SELECT ${MOVIE_SELECT}
+      FROM movies m
+      ${catJoin}
+      WHERE m.source_id IN (${sourceList})
+      ORDER BY ${sortCol[sortBy] ?? 'm.added_at'} ${dir}
+      LIMIT ? OFFSET ?
+    `).all(...catParams, ...filterIds, limit, offset) as unknown[]
+    return { items, total }
+  }
+
+  if (type === 'series') {
+    const sortCol: Record<string, string> = { title: 'sr.title', year: 'sr.md_year', rating: 'sr.added_at', updated: 'sr.added_at' }
+    const catJoin = categoryName ? `JOIN series_categories cat ON cat.id = sr.category_id AND cat.name = ?` : ''
+    const catParams: unknown[] = categoryName ? [categoryName] : []
+    const total = (sqlite.prepare(`
+      SELECT COUNT(*) as cnt FROM series sr ${catJoin} WHERE sr.source_id IN (${sourceList})
+    `).get(...catParams, ...filterIds) as { cnt: number }).cnt
+    const items = sqlite.prepare(`
+      SELECT ${SERIES_SELECT}
+      FROM series sr
+      ${catJoin}
+      WHERE sr.source_id IN (${sourceList})
+      ORDER BY ${sortCol[sortBy] ?? 'sr.added_at'} ${dir}
+      LIMIT ? OFFSET ?
+    `).all(...catParams, ...filterIds, limit, offset) as unknown[]
+    return { items, total }
+  }
+
+  // type undefined (All): concat live + movies + series. Category name filter
+  // is ambiguous across types here, so we ignore it when type is undefined.
+  // Each subquery is capped at (limit + offset) so we never load the whole DB.
+  const cap = limit + offset
+  const chans  = sqlite.prepare(`
+    SELECT ${CHANNEL_SELECT} FROM channels c
+    WHERE c.source_id IN (${sourceList})
+    ORDER BY c.added_at DESC LIMIT ?
+  `).all(...filterIds, cap) as unknown[]
+  const movies = sqlite.prepare(`
+    SELECT ${MOVIE_SELECT} FROM movies m
+    WHERE m.source_id IN (${sourceList})
+    ORDER BY m.added_at DESC LIMIT ?
+  `).all(...filterIds, cap) as unknown[]
+  const sers   = sqlite.prepare(`
+    SELECT ${SERIES_SELECT} FROM series sr
+    WHERE sr.source_id IN (${sourceList})
+    ORDER BY sr.added_at DESC LIMIT ?
+  `).all(...filterIds, cap) as unknown[]
+  const totalRow = sqlite.prepare(`
+    SELECT
+      (SELECT COUNT(*) FROM channels WHERE source_id IN (${sourceList})) +
+      (SELECT COUNT(*) FROM movies   WHERE source_id IN (${sourceList})) +
+      (SELECT COUNT(*) FROM series   WHERE source_id IN (${sourceList})) AS n
+  `).get(...filterIds, ...filterIds, ...filterIds) as { n: number }
+  const merged = [...chans, ...movies, ...sers]
+  return { items: merged.slice(offset, offset + limit), total: totalRow.n }
 }
 
 // ─── Helpers: user-data mutation + read ──────────────────────────────────
 
-function readUserData(sqlite: ReturnType<typeof getSqlite>, ref: ResolvedContent, contentId: string) {
+function readUserData(sqlite: ReturnType<typeof getSqlite>, contentId: string) {
+  const kind = idKind(contentId)
   let fav = 0, wl = 0, rating: number | null = null, favSort: number | null = null
   let position = 0, lastWatched: number | null = null, completed = 0
 
-  if (ref.kind === 'movie' && ref.stream) {
-    const row = sqlite.prepare(`SELECT * FROM stream_user_data WHERE profile_id = ? AND stream_id = ?`).get(DEFAULT_PROFILE, ref.stream.id) as any
+  if (kind === 'channel') {
+    const row = sqlite.prepare(`SELECT * FROM channel_user_data WHERE profile_id = ? AND channel_id = ?`).get(DEFAULT_PROFILE, contentId) as any
+    if (row) { fav = row.is_favorite ?? 0; favSort = row.fav_sort_order ?? null }
+  } else if (kind === 'movie') {
+    const row = sqlite.prepare(`SELECT * FROM movie_user_data WHERE profile_id = ? AND movie_id = ?`).get(DEFAULT_PROFILE, contentId) as any
     if (row) {
-      fav = row.is_favorite ?? 0; wl = row.is_watchlisted ?? 0; rating = row.rating ?? null; favSort = row.fav_sort_order ?? null
+      fav = row.is_favorite ?? 0; wl = row.is_watchlisted ?? 0
+      rating = row.rating ?? null; favSort = row.fav_sort_order ?? null
       position = row.watch_position ?? 0; lastWatched = row.last_watched_at ?? null; completed = row.completed ?? 0
     }
-  } else if (ref.kind === 'series' && ref.seriesSource) {
-    const row = sqlite.prepare(`SELECT * FROM series_user_data WHERE profile_id = ? AND series_source_id = ?`).get(DEFAULT_PROFILE, ref.seriesSource.id) as any
+  } else if (kind === 'series') {
+    const row = sqlite.prepare(`SELECT * FROM series_user_data WHERE profile_id = ? AND series_id = ?`).get(DEFAULT_PROFILE, contentId) as any
     if (row) { fav = row.is_favorite ?? 0; wl = row.is_watchlisted ?? 0; rating = row.rating ?? null; favSort = row.fav_sort_order ?? null }
-  } else if (ref.kind === 'live' && ref.stream) {
-    const row = sqlite.prepare(`SELECT * FROM channel_user_data WHERE profile_id = ? AND stream_id = ?`).get(DEFAULT_PROFILE, ref.stream.id) as any
-    if (row) { fav = row.is_favorite ?? 0; favSort = row.fav_sort_order ?? null }
-    const sud = sqlite.prepare(`SELECT watch_position, last_watched_at, completed FROM stream_user_data WHERE profile_id = ? AND stream_id = ?`).get(DEFAULT_PROFILE, ref.stream.id) as any
+  } else if (kind === 'episode') {
+    const ep = sqlite.prepare(`SELECT series_id FROM episodes WHERE id = ?`).get(contentId) as { series_id?: string } | undefined
+    const sud = sqlite.prepare(`SELECT * FROM episode_user_data WHERE profile_id = ? AND episode_id = ?`).get(DEFAULT_PROFILE, contentId) as any
     if (sud) { position = sud.watch_position ?? 0; lastWatched = sud.last_watched_at ?? null; completed = sud.completed ?? 0 }
-  } else if (ref.kind === 'episode' && ref.stream) {
-    // Episode position from stream_user_data; fav/wl inherited from parent series.
-    const sud = sqlite.prepare(`SELECT * FROM stream_user_data WHERE profile_id = ? AND stream_id = ?`).get(DEFAULT_PROFILE, ref.stream.id) as any
-    if (sud) { position = sud.watch_position ?? 0; lastWatched = sud.last_watched_at ?? null; completed = sud.completed ?? 0 }
-    if (ref.parentSeriesId) {
-      const row = sqlite.prepare(`SELECT * FROM series_user_data WHERE profile_id = ? AND series_source_id = ?`).get(DEFAULT_PROFILE, ref.parentSeriesId) as any
-      if (row) { fav = row.is_favorite ?? 0; wl = row.is_watchlisted ?? 0; rating = row.rating ?? null }
+    if (ep?.series_id) {
+      const srow = sqlite.prepare(`SELECT * FROM series_user_data WHERE profile_id = ? AND series_id = ?`).get(DEFAULT_PROFILE, ep.series_id) as any
+      if (srow) { fav = srow.is_favorite ?? 0; wl = srow.is_watchlisted ?? 0; rating = srow.rating ?? null }
     }
   }
 
@@ -1376,74 +1574,69 @@ function readUserData(sqlite: ReturnType<typeof getSqlite>, ref: ResolvedContent
   }
 }
 
-function toggleFavorite(sqlite: ReturnType<typeof getSqlite>, ref: ResolvedContent): boolean {
-  if (ref.kind === 'movie' && ref.stream) {
+function toggleFavorite(sqlite: ReturnType<typeof getSqlite>, contentId: string): boolean {
+  const kind = idKind(contentId)
+  if (kind === 'channel') {
     sqlite.prepare(`
-      INSERT INTO stream_user_data (profile_id, stream_id, is_favorite)
+      INSERT INTO channel_user_data (profile_id, channel_id, is_favorite)
       VALUES (?, ?, 1)
-      ON CONFLICT(profile_id, stream_id) DO UPDATE SET is_favorite = NOT is_favorite
-    `).run(DEFAULT_PROFILE, ref.stream.id)
-    const row = sqlite.prepare(`SELECT is_favorite FROM stream_user_data WHERE profile_id = ? AND stream_id = ?`).get(DEFAULT_PROFILE, ref.stream.id) as any
+      ON CONFLICT(profile_id, channel_id) DO UPDATE SET is_favorite = NOT is_favorite
+    `).run(DEFAULT_PROFILE, contentId)
+    const row = sqlite.prepare(`SELECT is_favorite FROM channel_user_data WHERE profile_id = ? AND channel_id = ?`).get(DEFAULT_PROFILE, contentId) as any
     return !!row?.is_favorite
   }
-  if (ref.kind === 'series' && ref.seriesSource) {
+  if (kind === 'movie') {
     sqlite.prepare(`
-      INSERT INTO series_user_data (profile_id, series_source_id, is_favorite)
+      INSERT INTO movie_user_data (profile_id, movie_id, is_favorite)
       VALUES (?, ?, 1)
-      ON CONFLICT(profile_id, series_source_id) DO UPDATE SET is_favorite = NOT is_favorite
-    `).run(DEFAULT_PROFILE, ref.seriesSource.id)
-    const row = sqlite.prepare(`SELECT is_favorite FROM series_user_data WHERE profile_id = ? AND series_source_id = ?`).get(DEFAULT_PROFILE, ref.seriesSource.id) as any
+      ON CONFLICT(profile_id, movie_id) DO UPDATE SET is_favorite = NOT is_favorite
+    `).run(DEFAULT_PROFILE, contentId)
+    const row = sqlite.prepare(`SELECT is_favorite FROM movie_user_data WHERE profile_id = ? AND movie_id = ?`).get(DEFAULT_PROFILE, contentId) as any
     return !!row?.is_favorite
   }
-  if (ref.kind === 'episode' && ref.parentSeriesId) {
+  if (kind === 'series') {
     sqlite.prepare(`
-      INSERT INTO series_user_data (profile_id, series_source_id, is_favorite)
+      INSERT INTO series_user_data (profile_id, series_id, is_favorite)
       VALUES (?, ?, 1)
-      ON CONFLICT(profile_id, series_source_id) DO UPDATE SET is_favorite = NOT is_favorite
-    `).run(DEFAULT_PROFILE, ref.parentSeriesId)
-    const row = sqlite.prepare(`SELECT is_favorite FROM series_user_data WHERE profile_id = ? AND series_source_id = ?`).get(DEFAULT_PROFILE, ref.parentSeriesId) as any
+      ON CONFLICT(profile_id, series_id) DO UPDATE SET is_favorite = NOT is_favorite
+    `).run(DEFAULT_PROFILE, contentId)
+    const row = sqlite.prepare(`SELECT is_favorite FROM series_user_data WHERE profile_id = ? AND series_id = ?`).get(DEFAULT_PROFILE, contentId) as any
     return !!row?.is_favorite
   }
-  if (ref.kind === 'live' && ref.stream) {
-    sqlite.prepare(`
-      INSERT INTO channel_user_data (profile_id, stream_id, is_favorite)
-      VALUES (?, ?, 1)
-      ON CONFLICT(profile_id, stream_id) DO UPDATE SET is_favorite = NOT is_favorite
-    `).run(DEFAULT_PROFILE, ref.stream.id)
-    const row = sqlite.prepare(`SELECT is_favorite FROM channel_user_data WHERE profile_id = ? AND stream_id = ?`).get(DEFAULT_PROFILE, ref.stream.id) as any
-    return !!row?.is_favorite
+  if (kind === 'episode') {
+    const ep = sqlite.prepare(`SELECT series_id FROM episodes WHERE id = ?`).get(contentId) as { series_id?: string } | undefined
+    if (!ep?.series_id) return false
+    return toggleFavorite(sqlite, ep.series_id)
   }
   return false
 }
 
-function toggleWatchlist(sqlite: ReturnType<typeof getSqlite>, ref: ResolvedContent): boolean {
-  if (ref.kind === 'movie' && ref.stream) {
+function toggleWatchlist(sqlite: ReturnType<typeof getSqlite>, contentId: string): boolean {
+  const kind = idKind(contentId)
+  if (kind === 'movie') {
     sqlite.prepare(`
-      INSERT INTO stream_user_data (profile_id, stream_id, is_watchlisted)
+      INSERT INTO movie_user_data (profile_id, movie_id, is_watchlisted)
       VALUES (?, ?, 1)
-      ON CONFLICT(profile_id, stream_id) DO UPDATE SET is_watchlisted = NOT is_watchlisted
-    `).run(DEFAULT_PROFILE, ref.stream.id)
-    const row = sqlite.prepare(`SELECT is_watchlisted FROM stream_user_data WHERE profile_id = ? AND stream_id = ?`).get(DEFAULT_PROFILE, ref.stream.id) as any
+      ON CONFLICT(profile_id, movie_id) DO UPDATE SET is_watchlisted = NOT is_watchlisted
+    `).run(DEFAULT_PROFILE, contentId)
+    const row = sqlite.prepare(`SELECT is_watchlisted FROM movie_user_data WHERE profile_id = ? AND movie_id = ?`).get(DEFAULT_PROFILE, contentId) as any
     return !!row?.is_watchlisted
   }
-  if (ref.kind === 'series' && ref.seriesSource) {
+  if (kind === 'series') {
     sqlite.prepare(`
-      INSERT INTO series_user_data (profile_id, series_source_id, is_watchlisted)
+      INSERT INTO series_user_data (profile_id, series_id, is_watchlisted)
       VALUES (?, ?, 1)
-      ON CONFLICT(profile_id, series_source_id) DO UPDATE SET is_watchlisted = NOT is_watchlisted
-    `).run(DEFAULT_PROFILE, ref.seriesSource.id)
-    const row = sqlite.prepare(`SELECT is_watchlisted FROM series_user_data WHERE profile_id = ? AND series_source_id = ?`).get(DEFAULT_PROFILE, ref.seriesSource.id) as any
+      ON CONFLICT(profile_id, series_id) DO UPDATE SET is_watchlisted = NOT is_watchlisted
+    `).run(DEFAULT_PROFILE, contentId)
+    const row = sqlite.prepare(`SELECT is_watchlisted FROM series_user_data WHERE profile_id = ? AND series_id = ?`).get(DEFAULT_PROFILE, contentId) as any
     return !!row?.is_watchlisted
   }
-  if (ref.kind === 'episode' && ref.parentSeriesId) {
-    sqlite.prepare(`
-      INSERT INTO series_user_data (profile_id, series_source_id, is_watchlisted)
-      VALUES (?, ?, 1)
-      ON CONFLICT(profile_id, series_source_id) DO UPDATE SET is_watchlisted = NOT is_watchlisted
-    `).run(DEFAULT_PROFILE, ref.parentSeriesId)
-    const row = sqlite.prepare(`SELECT is_watchlisted FROM series_user_data WHERE profile_id = ? AND series_source_id = ?`).get(DEFAULT_PROFILE, ref.parentSeriesId) as any
-    return !!row?.is_watchlisted
+  if (kind === 'episode') {
+    const ep = sqlite.prepare(`SELECT series_id FROM episodes WHERE id = ?`).get(contentId) as { series_id?: string } | undefined
+    if (!ep?.series_id) return false
+    return toggleWatchlist(sqlite, ep.series_id)
   }
+  // Channels do not have a watchlist.
   return false
 }
 
@@ -1452,45 +1645,44 @@ function listFavorites(sqlite: ReturnType<typeof getSqlite>, type?: 'live' | 'mo
 
   if (!type || type === 'movie') {
     const rows = sqlite.prepare(`
-      SELECT ${STREAM_SELECT},
-             sud.fav_sort_order            AS fav_sort_order,
-             sud.last_watched_at           AS last_watched_at,
-             1                              AS favorite
-      FROM stream_user_data sud
-      JOIN streams s ON s.id = sud.stream_id AND s.type = 'movie'
-      JOIN sources src ON src.id = s.source_id AND src.disabled = 0
-      WHERE sud.is_favorite = 1 AND sud.profile_id = ?
-      ORDER BY COALESCE(sud.fav_sort_order, 999999) ASC, sud.last_watched_at DESC
+      SELECT ${MOVIE_SELECT},
+             ud.fav_sort_order            AS fav_sort_order,
+             ud.last_watched_at           AS last_watched_at,
+             1                             AS favorite
+      FROM movie_user_data ud
+      JOIN movies m ON m.id = ud.movie_id
+      JOIN sources src ON src.id = m.source_id AND src.disabled = 0
+      WHERE ud.is_favorite = 1 AND ud.profile_id = ?
+      ORDER BY COALESCE(ud.fav_sort_order, 999999) ASC, ud.last_watched_at DESC
     `).all(DEFAULT_PROFILE) as unknown[]
     results.push(...rows)
   }
   if (!type || type === 'series') {
     const rows = sqlite.prepare(`
       SELECT ${SERIES_SELECT},
-             sud.fav_sort_order            AS fav_sort_order,
-             NULL                           AS last_watched_at,
-             1                              AS favorite
-      FROM series_user_data sud
-      JOIN series_sources ss ON ss.id = sud.series_source_id
-      JOIN sources src ON src.id = ss.source_id AND src.disabled = 0
-      WHERE sud.is_favorite = 1 AND sud.profile_id = ?
-      ORDER BY COALESCE(sud.fav_sort_order, 999999) ASC
+             ud.fav_sort_order            AS fav_sort_order,
+             NULL                          AS last_watched_at,
+             1                             AS favorite
+      FROM series_user_data ud
+      JOIN series sr ON sr.id = ud.series_id
+      JOIN sources src ON src.id = sr.source_id AND src.disabled = 0
+      WHERE ud.is_favorite = 1 AND ud.profile_id = ?
+      ORDER BY COALESCE(ud.fav_sort_order, 999999) ASC
     `).all(DEFAULT_PROFILE) as unknown[]
     results.push(...rows)
   }
   if (!type || type === 'live') {
     const rows = sqlite.prepare(`
-      SELECT ${STREAM_SELECT},
+      SELECT ${CHANNEL_SELECT},
              cud.fav_sort_order            AS fav_sort_order,
-             sud.last_watched_at           AS last_watched_at,
-             1                              AS favorite
+             NULL                           AS last_watched_at,
+             1                             AS favorite
       FROM channel_user_data cud
-      JOIN streams s ON s.id = cud.stream_id AND s.type = 'live'
-      JOIN sources src ON src.id = s.source_id AND src.disabled = 0
-      LEFT JOIN stream_user_data sud ON sud.stream_id = s.id AND sud.profile_id = ?
+      JOIN channels c ON c.id = cud.channel_id
+      JOIN sources src ON src.id = c.source_id AND src.disabled = 0
       WHERE cud.is_favorite = 1 AND cud.profile_id = ?
-      ORDER BY COALESCE(cud.fav_sort_order, 999999) ASC, sud.last_watched_at DESC
-    `).all(DEFAULT_PROFILE, DEFAULT_PROFILE) as unknown[]
+      ORDER BY COALESCE(cud.fav_sort_order, 999999) ASC
+    `).all(DEFAULT_PROFILE) as unknown[]
     results.push(...rows)
   }
   return results
@@ -1500,23 +1692,23 @@ function listWatchlist(sqlite: ReturnType<typeof getSqlite>, type?: 'live' | 'mo
   const results: unknown[] = []
   if (!type || type === 'movie') {
     const rows = sqlite.prepare(`
-      SELECT ${STREAM_SELECT},
-             sud.last_watched_at           AS last_watched_at
-      FROM stream_user_data sud
-      JOIN streams s ON s.id = sud.stream_id AND s.type = 'movie'
-      JOIN sources src ON src.id = s.source_id AND src.disabled = 0
-      WHERE sud.is_watchlisted = 1 AND sud.profile_id = ?
-      ORDER BY sud.last_watched_at DESC
+      SELECT ${MOVIE_SELECT},
+             ud.last_watched_at           AS last_watched_at
+      FROM movie_user_data ud
+      JOIN movies m ON m.id = ud.movie_id
+      JOIN sources src ON src.id = m.source_id AND src.disabled = 0
+      WHERE ud.is_watchlisted = 1 AND ud.profile_id = ?
+      ORDER BY ud.last_watched_at DESC
     `).all(DEFAULT_PROFILE) as unknown[]
     results.push(...rows)
   }
   if (!type || type === 'series') {
     const rows = sqlite.prepare(`
       SELECT ${SERIES_SELECT}
-      FROM series_user_data sud
-      JOIN series_sources ss ON ss.id = sud.series_source_id
-      JOIN sources src ON src.id = ss.source_id AND src.disabled = 0
-      WHERE sud.is_watchlisted = 1 AND sud.profile_id = ?
+      FROM series_user_data ud
+      JOIN series sr ON sr.id = ud.series_id
+      JOIN sources src ON src.id = sr.source_id AND src.disabled = 0
+      WHERE ud.is_watchlisted = 1 AND ud.profile_id = ?
     `).all(DEFAULT_PROFILE) as unknown[]
     results.push(...rows)
   }
@@ -1524,44 +1716,41 @@ function listWatchlist(sqlite: ReturnType<typeof getSqlite>, type?: 'live' | 'mo
 }
 
 function listContinueWatching(sqlite: ReturnType<typeof getSqlite>, type?: 'movie' | 'series'): unknown[] {
-  // Movies: any stream_user_data row with watch_position > 0 and not completed
-  // whose stream has type='movie'.
   const moviesSql = `
-    SELECT ${STREAM_SELECT},
-           sud.watch_position AS last_position,
-           sud.last_watched_at
-    FROM stream_user_data sud
-    JOIN streams s ON s.id = sud.stream_id AND s.type = 'movie'
-    JOIN sources src ON src.id = s.source_id AND src.disabled = 0
-    WHERE sud.watch_position > 0 AND sud.completed = 0 AND sud.profile_id = ?
-    ORDER BY sud.last_watched_at DESC
+    SELECT ${MOVIE_SELECT},
+           ud.watch_position AS last_position,
+           ud.last_watched_at
+    FROM movie_user_data ud
+    JOIN movies m ON m.id = ud.movie_id
+    JOIN sources src ON src.id = m.source_id AND src.disabled = 0
+    WHERE ud.watch_position > 0 AND ud.completed = 0 AND ud.profile_id = ?
+    ORDER BY ud.last_watched_at DESC
     LIMIT 20
   `
 
   // Series: most-recent in-progress episode per parent series.
-  // Uses parent_series_id + provider_metadata JSON for season/episode info.
+  // Keyed on episodes.series_id; episode_user_data holds position/last_watched.
   const seriesSql = `
     WITH ranked_episodes AS (
       SELECT
-        s.parent_series_id,
-        s.id                    AS resume_episode_id,
-        CAST(json_extract(s.provider_metadata, '$.season') AS INTEGER)  AS resume_season_number,
-        CAST(json_extract(s.provider_metadata, '$.episode') AS INTEGER) AS resume_episode_number,
-        s.title                 AS resume_episode_title,
-        sud.watch_position      AS last_position,
-        sud.last_watched_at,
-        ROW_NUMBER() OVER (PARTITION BY s.parent_series_id ORDER BY sud.last_watched_at DESC) AS rn
-      FROM stream_user_data sud
-      JOIN streams s ON s.id = sud.stream_id AND s.type = 'episode'
-      WHERE sud.watch_position > 0 AND sud.completed = 0 AND sud.profile_id = ?
-        AND s.parent_series_id IS NOT NULL
+        e.series_id,
+        e.id                    AS resume_episode_id,
+        e.season                AS resume_season_number,
+        e.episode_num           AS resume_episode_number,
+        e.title                 AS resume_episode_title,
+        ud.watch_position       AS last_position,
+        ud.last_watched_at,
+        ROW_NUMBER() OVER (PARTITION BY e.series_id ORDER BY ud.last_watched_at DESC) AS rn
+      FROM episode_user_data ud
+      JOIN episodes e ON e.id = ud.episode_id
+      WHERE ud.watch_position > 0 AND ud.completed = 0 AND ud.profile_id = ?
     )
     SELECT ${SERIES_SELECT},
            r.resume_episode_id, r.resume_season_number, r.resume_episode_number,
            r.resume_episode_title, r.last_position, r.last_watched_at
     FROM ranked_episodes r
-    JOIN series_sources ss ON ss.id = r.parent_series_id
-    JOIN sources src ON src.id = ss.source_id AND src.disabled = 0
+    JOIN series sr ON sr.id = r.series_id
+    JOIN sources src ON src.id = sr.source_id AND src.disabled = 0
     WHERE r.rn = 1
     ORDER BY r.last_watched_at DESC
     LIMIT 20
@@ -1578,16 +1767,16 @@ function listContinueWatching(sqlite: ReturnType<typeof getSqlite>, type?: 'movi
 }
 
 function listHistory(sqlite: ReturnType<typeof getSqlite>, limit: number): unknown[] {
-  // All non-episode stream history.
-  const directRows = sqlite.prepare(`
-    SELECT ${STREAM_SELECT},
-           sud.watch_position AS last_position,
-           sud.last_watched_at
-    FROM stream_user_data sud
-    JOIN streams s ON s.id = sud.stream_id AND s.type IN ('live','movie')
-    JOIN sources src ON src.id = s.source_id AND src.disabled = 0
-    WHERE sud.last_watched_at IS NOT NULL AND sud.profile_id = ?
-    ORDER BY sud.last_watched_at DESC
+  // Movie history.
+  const movieRows = sqlite.prepare(`
+    SELECT ${MOVIE_SELECT},
+           ud.watch_position AS last_position,
+           ud.last_watched_at
+    FROM movie_user_data ud
+    JOIN movies m ON m.id = ud.movie_id
+    JOIN sources src ON src.id = m.source_id AND src.disabled = 0
+    WHERE ud.last_watched_at IS NOT NULL AND ud.profile_id = ?
+    ORDER BY ud.last_watched_at DESC
     LIMIT ?
   `).all(DEFAULT_PROFILE, limit) as any[]
 
@@ -1595,32 +1784,31 @@ function listHistory(sqlite: ReturnType<typeof getSqlite>, limit: number): unkno
   const episodeRows = sqlite.prepare(`
     WITH ranked_episodes AS (
       SELECT
-        s.parent_series_id,
-        s.id                    AS resume_episode_id,
-        CAST(json_extract(s.provider_metadata, '$.season') AS INTEGER)  AS resume_season_number,
-        CAST(json_extract(s.provider_metadata, '$.episode') AS INTEGER) AS resume_episode_number,
-        s.title                 AS resume_episode_title,
-        sud.watch_position      AS last_position,
-        sud.last_watched_at,
-        ROW_NUMBER() OVER (PARTITION BY s.parent_series_id ORDER BY sud.last_watched_at DESC) AS rn
-      FROM stream_user_data sud
-      JOIN streams s ON s.id = sud.stream_id AND s.type = 'episode'
-      WHERE sud.last_watched_at IS NOT NULL AND sud.profile_id = ?
-        AND s.parent_series_id IS NOT NULL
+        e.series_id,
+        e.id                    AS resume_episode_id,
+        e.season                AS resume_season_number,
+        e.episode_num           AS resume_episode_number,
+        e.title                 AS resume_episode_title,
+        ud.watch_position       AS last_position,
+        ud.last_watched_at,
+        ROW_NUMBER() OVER (PARTITION BY e.series_id ORDER BY ud.last_watched_at DESC) AS rn
+      FROM episode_user_data ud
+      JOIN episodes e ON e.id = ud.episode_id
+      WHERE ud.last_watched_at IS NOT NULL AND ud.profile_id = ?
     )
     SELECT ${SERIES_SELECT},
            r.resume_episode_id, r.resume_season_number, r.resume_episode_number,
            r.resume_episode_title, r.last_position, r.last_watched_at
     FROM ranked_episodes r
-    JOIN series_sources ss ON ss.id = r.parent_series_id
-    JOIN sources src ON src.id = ss.source_id AND src.disabled = 0
+    JOIN series sr ON sr.id = r.series_id
+    JOIN sources src ON src.id = sr.source_id AND src.disabled = 0
     WHERE r.rn = 1
     ORDER BY r.last_watched_at DESC
     LIMIT ?
   `).all(DEFAULT_PROFILE, limit) as any[]
 
   const seen = new Set<string>()
-  return [...directRows, ...episodeRows]
+  return [...movieRows, ...episodeRows]
     .sort((a, b) => (b.last_watched_at ?? 0) - (a.last_watched_at ?? 0))
     .filter(r => { if (seen.has(r.id)) return false; seen.add(r.id); return true })
     .slice(0, limit)

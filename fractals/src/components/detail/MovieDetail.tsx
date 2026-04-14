@@ -8,7 +8,6 @@ import { buildColorMapFromSources } from '@/lib/sourceColors'
 import { SlidePanel } from '@/components/layout/SlidePanel'
 import { MetadataBlock } from './MetadataBlock'
 import { ActionButtons } from './ActionButtons'
-import { EnrichmentFallback } from './EnrichmentFallback'
 
 interface Props {
   item: ContentItem
@@ -25,14 +24,13 @@ export function MovieDetail({ item, onPlay, onClose, onNavigate, isPlaying }: Pr
   const colorMap = buildColorMapFromSources(sources)
   const setQuery = useSearchStore((s) => s.setQuery)
 
-  const { data: enrichedItem, refetch } = useQuery({
+  const { data: enrichedItem } = useQuery({
     queryKey: ['content', item.id],
     queryFn: () => api.content.get(item.id),
     staleTime: 5 * 60_000,
   })
 
   const c = (enrichedItem as ContentItem | null) ?? item
-  const isEnriched = !!(c.enriched)
   const primarySourceId = c.primarySourceId ?? c.primary_source_id ?? item.primarySourceId ?? item.primary_source_id ?? (item as any).source_ids ?? item.id?.split(':')[0]
   const sourceColor = primarySourceId ? colorMap[primarySourceId] : undefined
   const primarySource = primarySourceId ? sources.find((s) => s.id === primarySourceId) : undefined
@@ -52,10 +50,6 @@ export function MovieDetail({ item, onPlay, onClose, onNavigate, isPlaying }: Pr
   })()
 
   const categoryName = (c as any).categoryName ?? (c as any).category_name
-
-  const handleRefetch = () => {
-    refetch()
-  }
 
   return (
     <SlidePanel open={true} onClose={onClose} width={420} suppressClose={isPlaying}>
@@ -203,7 +197,7 @@ export function MovieDetail({ item, onPlay, onClose, onNavigate, isPlaying }: Pr
           flexDirection: 'column',
           gap: 16,
         }}>
-          <MetadataBlock item={c} isEnriched={isEnriched} />
+          <MetadataBlock item={c} />
 
           <ActionButtons item={c} onPlay={onPlay} />
 

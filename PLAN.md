@@ -14,22 +14,18 @@ Architecture, tech stack, schema, conventions, design language: see `fractals/CL
 | 1 | Complete | UX refinement (pagination nav, Escape behavior, library search) |
 | 2 | Complete | V2 data model cutover (canonical + streams, v1 dropped) |
 | 2.5 | Complete | V3 data model + search (canonical split, association layer, MetadataProvider, advanced search, two-phase sync) |
-| g1 | **Complete** | Strip to pure provider-data app. 12 tables. LIKE search + debounce. User data survives resync. UI polish. |
-| g2 | Not started | FTS5 on streams table |
-| g3 | Not started | FTS5 on canonical + bridge to streams |
-| g4 | Not started | Embeddings / semantic search |
-| g5 | Not started | Cross-language resolution |
+| g1 | Complete | Strip to pure provider-data app. 12 tables. LIKE search + debounce. |
+| g1c | **Complete** | 15-table per-type split. LIKE on `search_title` (inline at sync). Test → Sync pipeline (EPG auto-chains). |
+| g2 | Future | Search improvements (possibilities listed below; no commitments) |
 | 3 | Not started | Capacitor (Android/iOS/TV), Tizen |
 
 ---
 
-## g1c — schema redesign (DESIGN LOCKED, NOT YET IMPLEMENTED)
+## g1c — shipped
 
-Branch: `g1c` (currently checked out). Sits on top of tag `g1-baseline` at commit `3cfac99c`.
+Branch: `g1c`. Drops the old 12-table g1 schema and rebuilds on 15 per-type tables. Data is expendable at cutover — users re-sync from providers.
 
-This is the next implementation milestone. The design below is locked; no code has been written yet.
-
-**15-table surface:**
+**15 tables:**
 
 - **Core (3):** `sources`, `profiles`, `settings`
 - **Content (8):**
@@ -37,60 +33,44 @@ This is the next implementation milestone. The design below is locked; no code h
   - Movies: `movie_categories`, `movies`
   - Series: `series_categories`, `series`, `episodes`
 - **User data (4):** `channel_user_data`, `movie_user_data`, `series_user_data`, `episode_user_data`
-- **FTS (3, virtual):** `channel_fts`, `movie_fts`, `series_fts`
 
-**Locked design decisions:**
+No FTS tables. Search is plain `LIKE '%query%'` on a `search_title` column.
 
-1. **No canonical layer.** Multi-source dedup stays a permanent g1c tradeoff (same channel from two providers = two rows in favorites). Canonical was the biggest complexity source in the discarded g2-flat branch.
-2. **`streams` split into four content tables** — `channels`, `movies`, `series`, `episodes`. No `_titles` suffix. "Title" is the user-facing label; DB names stay bare. Episodes are sub-parts of series, not Titles themselves.
-3. **Categories split three ways** — `channel_categories`, `movie_categories`, `series_categories`. No shared `type` column. Episodes inherit category from parent series.
-4. **No join tables for categories.** Provider reality is 1:many (single `category_id` on Xtream streams, single `group-title` on M3U). `category_id` goes directly on each content table as an FK. Drops the old `stream_categories` and `series_source_categories`.
-5. **User data split four ways.** `movie_user_data` carries favorites/watchlist/rating/watch_position; `episode_user_data` carries only playback state (watch_position, completed, last_watched_at); `channel_user_data` carries favorites; `series_user_data` carries favorites/watchlist/rating.
-6. **FTS baked in from the start** — `channel_fts`, `movie_fts`, `series_fts`. No episode FTS; episodes are found via parent series. Each FTS table indexes only `search_title` for now. Multi-column FTS (cast/plot/genre for movies+series, tvg_id for channels) is a future expansion when enrichment lands. Tokenizer: `unicode61 remove_diacritics 0` (normalizer already folded upstream). Storage: standalone (FTS copies `search_title`). Populated during Sync in the same transaction as the content INSERT. No triggers. Query side normalizes the user's input with the same normalizer before MATCH.
-7. **EPG lives in the Content section**, not Core. EPG is channel metadata even though its FK is on `source_id` (intentional — EPG is re-fetched anyway, orphan-tolerant).
-8. **Normalization stage** between content tables and FTS. `channels`, `movies`, `series` each carry a persisted `search_title` column derived from `title` at sync time. Episodes do NOT get `search_title`. Normalizer is minimal: lowercase + diacritic strip + ligature fold (æ→ae, ß→ss, œ→oe). No punctuation strip, no whitespace collapse, no leading-article strip. Column name `search_title` chosen over `normalized_title` (role-based) and `name` (rejected — collides with "primary human label" convention).
-9. **Metadata columns** on each content table use the `md_` prefix (`md_country`, `md_language`, `md_year`, `md_origin`, `md_quality`). Replaces the current `language_hint` / `origin_hint` / `quality_hint` / `year_hint`. Column shape locked now; population deferred until enrichment lands.
+**What shipped on top of the original g1c design:**
 
-**Migration strategy:** drop old tables and rebuild fresh. Data is expendable — users re-sync from their providers. No in-place migration.
+1. **FTS removed.** The original design baked in `channel_fts` / `movie_fts` / `series_fts`. Tried trigram and unicode61 tokenizers — posting lists were large, SQLite couldn't push `source_id` / `category` filters into FTS, and COUNT enumerated full match sets. LIKE + B-tree index + LIMIT short-circuits better at this catalog scale (10k–100k rows per source).
+2. **`search_title` is populated inline at sync INSERT**, not via a separate Index button. `search_title = anyAscii(title).toLowerCase()` — gives bidirectional diacritic/ligature match (ae↔æ, e↔é, ss↔ß, oe↔œ). This reversed the earlier "manual button for transformational ops" preference for this specific column: it's microseconds per row, can't fail, and the Index button was blocking diacritic search from "just working" for new users.
+3. **EPG auto-chains after Sync** inside the sync-done handler. EPG progress streams through the same `sync:progress` IPC channel with `phase: 'epg'` so the source card's message bar shows it inline. M3U sources skip EPG (no endpoint).
+4. **Pipeline is 2 buttons: Test → Sync** (was Test → Sync → EPG → Index). The `'indexed'` ingest_state is removed from the enum; terminal state is `'epg_fetched'`. Sync button "done" shows at both `'synced'` and `'epg_fetched'` so EPG-less sources aren't stuck purple.
+5. **Deleted services/code:** `electron/services/enrichment/` (iptv-org cache + Wikidata + IMDb-suggest providers), `electron/services/indexing/`, `electron/services/search/query-parser.ts`, `electron/workers/enrichment.worker.ts`, plus helper scripts `fractals/scripts/resync-from-dumps.mjs` and `sync-and-compare.mjs`. All were the canonical-layer enrichment pipeline, separate indexing worker, and old parsed-query search path — superseded by the flat LIKE-on-search_title design.
+6. **User data is not preserved across resync.** Per the g1c hard cut, CASCADE on source delete/sync wipes per-source user_data. Users re-sync from providers after the schema transition.
 
-**Status:** DESIGN LOCKED, NOT YET IMPLEMENTED. See `fractals/docs/archive/TODO.md` for the implementation task list.
+**Normalizer (one function, two callers):** lowercase + any-ascii folding (diacritic strip + ligature fold). Sync workers call it to populate `search_title`; search handler calls it on the user's query before the LIKE comparison. No punctuation strip, no whitespace collapse, no leading-article strip.
 
----
+**Ingest pipeline:**
 
-## g1 — locked (2026-04-12)
-
-Branch: `search-rebuild-g1`
-
-**What shipped:**
-- Stripped canonical tables, FTS, enrichment — pure provider data
-- 12 tables: sources, streams, stream_categories, series_sources, series_source_categories, stream_user_data, series_user_data, channel_user_data, categories, epg, profiles, settings
-- LIKE search with 250ms debounce + min 2 char threshold
-- Sync preserves user data (backup/restore around CASCADE delete)
-- Title normalizer extracts year/language/origin/quality hints at sync time
-- Timezone override in Settings (system default toggle + manual picker)
-- EPG: has_epg_data computed via EXISTS, styled description cards, 300px channel column in Full Guide
-- NavRail sync pulse indicator + home screen sync status strip
-- VirtualGrid dynamic sizing, breadcrumbs pinned top, category filter clearing on navigation
-- Settings cleanup: enrichment hidden, grid page size picker, external player hidden
+- `ingest_state` enum: `added → tested → synced → epg_fetched`
+- Test → Sync (two manual buttons on the source card)
+- EPG auto-chains inside Sync for Xtream sources; M3U stops at `synced`
+- Sync button "done" is true at both `synced` and `epg_fetched`
 
 ---
 
-## g2 — next up
+## g2 — future search improvements
 
-Branch: `search-rebuild-g2` (to be created)
+No commitments. Possibilities when search needs more:
 
-**Goal:** Add FTS5 search on the streams table. Provider titles indexed, ranked search results.
+- Denormalize a per-title "search corpus" column (title + category + hints) so LIKE covers more than just title
+- Trigram index on `search_title` for CJK / Arabic where word boundaries are fuzzy
+- Ranking signals (recency, favorites-weight, source-selection) on top of LIKE
+- Cross-language resolution (single Title seen under different language names)
+- Embeddings / semantic search (sqlite-vec in place, worker not built)
 
-**Scope (tentative):**
-- FTS5 virtual table on streams (title, normalized title)
-- Search handler: FTS5 first, LIKE fallback for special characters
-- Hybrid ranking: FTS5 rank + recency
-- Diacritic folding via FTS5 tokenizer (fixes "forg" → "Forgöraren" bug)
-- Re-enable enrichment UI (TMDB metadata on detail panels)
+FTS5 is **not** on this list — tried twice, rejected both times at this catalog scale. Revisit only if catalog grows past ~1M rows or there's a concrete use case LIKE can't serve.
 
 ---
 
-## Known bugs (not blocking g1, carry forward)
+## Known bugs (carry forward)
 
 - [ ] **Black screen** — occasional idle black screen requiring Cmd+R. Undiagnosed, deferred.
 
@@ -137,8 +117,8 @@ Three-tier split (same React codebase, feature flags):
 
 ## Snapshot (2026-04-14)
 
-- Phase state: g1 locked; g1c schema redesign DESIGN LOCKED, NOT YET IMPLEMENTED
-- Active branch: `g1c` (on top of tag `g1-baseline` @ `3cfac99c`)
-- Target DB: 15 tables — split per-type content/categories/user-data, FTS baked in, no canonical layer
-- Migration: drop old tables + rebuild; user re-syncs
-- Search: LIKE + debounce baseline today; g1c introduces FTS5 on `search_title` with minimal normalizer (lowercase + diacritic strip + ligature fold)
+- Phase state: g1 locked; **g1c shipped** (simplified past the original design — FTS removed, Index step merged into sync, pipeline reduced to 2 buttons)
+- Active branch: `g1c`
+- DB: 15 tables — per-type split for content/categories/user-data, no canonical, no FTS
+- Search: LIKE on `search_title` (populated inline at sync via any-ascii + lowercase). No ranking, no FTS.
+- Pipeline: Test → Sync. Ingest states `added → tested → synced → epg_fetched`. EPG auto-chains for Xtream sources.

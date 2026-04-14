@@ -24,7 +24,6 @@ export function ActionButtons({ item, onPlay, episodeToPlay, overridePlayLabel }
   const userData = userStore.data[item.id]
   const qc = useQueryClient()
 
-  const [extError, setExtError] = useState<string | null>(null)
   const [hoverStar, setHoverStar] = useState<number | null>(null)
 
   // Load user data on mount and seed the store
@@ -106,27 +105,6 @@ export function ActionButtons({ item, onPlay, episodeToPlay, overridePlayLabel }
       qc.invalidateQueries({ queryKey: ['library', 'history'] })
     } catch {
       // noop — store already updated optimistically
-    }
-  }
-
-  const handleExternalPlayer = async () => {
-    setExtError(null)
-    try {
-      const detected = await api.player.detectExternal() as any
-      const player: 'mpv' | 'vlc' = detected?.mpv ? 'mpv' : detected?.vlc ? 'vlc' : null as any
-      if (!player) {
-        setExtError('No external player found. Install MPV or VLC.')
-        return
-      }
-      const urlResult = await api.content.getStreamUrl({ contentId: item.id }) as any
-      const url = urlResult?.url ?? urlResult?.streamUrl ?? urlResult
-      if (!url || typeof url !== 'string') {
-        setExtError('Could not get stream URL.')
-        return
-      }
-      await api.player.openExternal({ player, url, title: item.title })
-    } catch (err) {
-      setExtError(`Failed: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
 

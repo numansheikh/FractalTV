@@ -2,7 +2,6 @@ import { ContentItem } from '@/lib/types'
 
 interface Props {
   item: ContentItem
-  isEnriched: boolean
   isSeries?: boolean
 }
 
@@ -26,7 +25,7 @@ function formatRuntime(minutes: number): string {
   return `${minutes}m`
 }
 
-export function MetadataBlock({ item, isEnriched }: Props) {
+export function MetadataBlock({ item }: Props) {
   const backdrop = item.backdropUrl ?? item.backdrop_url
   const rating = item.ratingTmdb ?? item.rating_tmdb ?? item.ratingImdb ?? item.rating_imdb
   const genres = parseGenres(item.genres)

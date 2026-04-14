@@ -191,6 +191,7 @@ const SYNC_PHASE_LABELS: Record<string, string> = {
   fetching: 'Downloading playlist…',
   parsing: 'Parsing playlist…',
   content: 'Importing content…',
+  epg: 'Fetching EPG…',
 }
 
 function HomeInfoStrip({ sources, syncProgress }: { sources: Source[]; syncProgress: Record<string, SyncProgress | null> }) {
@@ -249,7 +250,7 @@ export function HomeView({ onSelectContent }: Props) {
     homeMode, setHomeMode,
     setShowSources, setChannelSurfContext,
   } = useAppStore()
-  const { queries, debouncedQueries, setQuery, seedQuery } = useSearchStore()
+  const { queries, debouncedQueries, setQuery } = useSearchStore()
   const query = queries['home'] ?? ''
   const debouncedQuery = debouncedQueries['home'] ?? ''
   const { sources, syncProgress } = useSourcesStore()
@@ -869,7 +870,7 @@ function ChannelSkeleton() {
 // Shown inside HomeView when query is non-empty so the bottom search
 // bar never unmounts (and never loses focus).
 
-const SEARCH_FETCH_LIMIT = 200
+const SEARCH_FETCH_LIMIT = 30
 
 function HomeSearchResults({ query, onSelectContent }: { query: string; onSelectContent: (item: ContentItem) => void }) {
   const { selectedSourceIds, setChannelSurfContext, setView, setCategoryFilter } = useAppStore()
@@ -879,22 +880,29 @@ function HomeSearchResults({ query, onSelectContent }: { query: string; onSelect
 
   const searchArgs = (type: 'live' | 'movie' | 'series') => ({
     query, type, sourceIds: selectedSourceIds.length ? selectedSourceIds : undefined, limit: SEARCH_FETCH_LIMIT,
+    // Home shows a fixed cap per type and never displays a total — skip the
+    // FTS COUNT scan, which dominates wall-clock for short common substrings.
+    skipCount: true,
   })
 
-  const { data: liveData, isFetching: liveFetching } = useQuery({
+  // Sequential, not parallel: channels first, then movies after channels
+  // resolves, then series after movies. Each section renders the moment its
+  // own query finishes — gives the user something on screen sooner and keeps
+  // SQLite from running 3 trigram COUNT scans concurrently.
+  const { data: liveData, isFetching: liveFetching, isSuccess: liveDone } = useQuery({
     queryKey: ['search', query, 'live', selectedSourceIds],
     queryFn: () => api.search.query(searchArgs('live')),
     staleTime: 10_000, enabled: !!query,
   })
-  const { data: movieData, isFetching: movieFetching } = useQuery({
+  const { data: movieData, isFetching: movieFetching, isSuccess: movieDone } = useQuery({
     queryKey: ['search', query, 'movie', selectedSourceIds],
     queryFn: () => api.search.query(searchArgs('movie')),
-    staleTime: 10_000, enabled: !!query,
+    staleTime: 10_000, enabled: !!query && liveDone,
   })
   const { data: seriesData, isFetching: seriesFetching } = useQuery({
     queryKey: ['search', query, 'series', selectedSourceIds],
     queryFn: () => api.search.query(searchArgs('series')),
-    staleTime: 10_000, enabled: !!query,
+    staleTime: 10_000, enabled: !!query && movieDone,
   })
 
   const liveResults = (liveData?.items ?? []) as ContentItem[]

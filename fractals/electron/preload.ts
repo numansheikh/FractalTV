@@ -106,7 +106,8 @@ export const api = {
     detectExternal: () => ipcRenderer.invoke('player:detect-external'),
   },
 
-  // V3 keyless metadata enrichment (IMDb suggest + Wikidata for VoD, iptv-org for Live)
+  // Enrichment — stubbed in g1c (no canonical/TMDB layer yet). Kept on the
+  // surface so the renderer's status pollers don't crash; returns zeros.
   enrichment: {
     status: () => ipcRenderer.invoke('enrichment:status'),
     start: () => ipcRenderer.invoke('enrichment:start'),
@@ -114,14 +115,9 @@ export const api = {
 
   // EPG
   epg: {
-    sync: (sourceId: string) => ipcRenderer.invoke('epg:sync', sourceId),
     nowNext: (contentId: string) => ipcRenderer.invoke('epg:now-next', contentId),
     guide: (args: { contentIds: string[]; startTime?: number; endTime?: number }) =>
       ipcRenderer.invoke('epg:guide', args),
-    onProgress: (cb: (data: { sourceId: string; message: string }) => void) => {
-      ipcRenderer.on('epg:progress', (_e, data) => cb(data))
-      return () => ipcRenderer.removeAllListeners('epg:progress')
-    },
   },
 
   // Dialog
