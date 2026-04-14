@@ -363,6 +363,11 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
   useEffect(() => {
     if (!content || content.type === 'live') return
 
+    const invalidateContinue = () => {
+      qc.invalidateQueries({ queryKey: ['home-continue'] })
+      qc.invalidateQueries({ queryKey: ['library', 'continue-watching'] })
+    }
+
     // Fetch saved position — only show resume if not completed
     api.user.getData(content.id).then((data: any) => {
       if (data?.last_position > 5 && !data?.completed) {
@@ -371,12 +376,13 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
       }
     })
 
-    // Save every 10s while playing
+    // Save every 10s while playing. Invalidate continue-watching so the strips
+    // light up mid-session (user may still be in mini-player watching).
     const saveInterval = setInterval(() => {
       const art = artRef.current
       if (!art || !art.playing) return
       const t = Math.floor(art.currentTime)
-      if (t >= minWatchSeconds) api.user.setPosition(content.id, t)
+      if (t >= minWatchSeconds) api.user.setPosition(content.id, t).then(invalidateContinue)
     }, 10000)
 
     // Save on pause
@@ -385,7 +391,7 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
       if (!art) return
       art.on('pause', () => {
         const t = Math.floor(art.currentTime)
-        if (t >= minWatchSeconds) api.user.setPosition(content.id, t)
+        if (t >= minWatchSeconds) api.user.setPosition(content.id, t).then(invalidateContinue)
       })
       // Completion at 92%
       art.on('video:timeupdate', () => {
@@ -412,14 +418,10 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
       // Save position on unmount (mode change to hidden or content change)
       const art = artRef.current
       const t = art ? Math.floor(art.currentTime) : 0
-      const invalidate = () => {
-        qc.invalidateQueries({ queryKey: ['home-continue'] })
-        qc.invalidateQueries({ queryKey: ['library', 'continue-watching'] })
-      }
       if (t >= minWatchSeconds) {
-        api.user.setPosition(content.id, t).then(invalidate).catch(invalidate)
+        api.user.setPosition(content.id, t).then(invalidateContinue).catch(invalidateContinue)
       } else {
-        invalidate()
+        invalidateContinue()
       }
     }
   }, [content?.id, content?.type, qc, minWatchSeconds])
