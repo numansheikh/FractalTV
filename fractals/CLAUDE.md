@@ -441,15 +441,9 @@ Will add a second layer:
 
 - **No FTS / enrichment / canonical (g1)** — Search is LIKE only. No TMDB metadata. No deduplication across sources. All deferred to g2+.
 
-- **Episode stream hang** — Player shows infinite spinner when episode URL 404s. Needs timeout + error overlay.
-
-- **Diacritic search** — "forg" misses "Forgöraren". anyAscii folding issue, deferred to g2 (FTS will handle this).
-
 - **Black screen bug** — Occasional idle black screen requiring Cmd+R. Undiagnosed, needs DevTools console output. Deferred.
 
 - **International character search** — European diacritics partially handled. Arabic, Hebrew, Cyrillic, CJK not transliterated. Cross-language is g5.
-
-- **EPG timeshift bar** — Full Guide panel done. Timeshift bottom bar in fullscreen player pending.
 
 - **Capacitor / mobile not yet implemented** — Phase 3.
 

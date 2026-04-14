@@ -842,7 +842,13 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
       {mode === 'fullscreen' && localContent && onChipClick && (() => {
         const isEpisode = !!(localContent as any)._parent
         const seInfo = isEpisode ? localContent.title.split(' · ')[0] : null
-        const label = isEpisode ? `${(localContent as any)._parent.title} · ${seInfo}` : categoryName
+        const typeFallback = localContent.type === 'live' ? 'Live TV'
+          : localContent.type === 'movie' ? 'Films'
+          : localContent.type === 'series' ? 'Series'
+          : null
+        const label = isEpisode
+          ? `${(localContent as any)._parent.title} · ${seInfo}`
+          : (categoryName ?? typeFallback)
         if (!label) return null
         return (
           <button

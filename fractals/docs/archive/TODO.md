@@ -14,23 +14,9 @@ Target branch: `g1c`. Sits on tag `g1-baseline` at commit `3cfac99c`. See `PLAN.
 
 ---
 
-## Bucket 1 — Data & Search (active)
+## UI punchlist (pre-g1c)
 
-### Bugs
-- [ ] **Search grid broken** — VirtualGrid renders badly in search mode. Root cause undiagnosed. Suspect: `isLive = items[0]?.type === 'live'` is fragile — if item order changes or types mix, grid dimensions are wrong. Attempted fix (pass `contentType` prop) worsened it; needs fresh investigation.
-- [ ] **Diacritic search** — "forg" misses "Förgöraren"; "förg" works via LIKE fallback. anyAscii not folding ö→o in compiled worker context. Investigate `any-ascii` require path in `indexing.worker.ts`. Confirm by searching "forgoraren" — if FTS stored accented form, fix normalization in worker.
-- [ ] **Mixed card sizes in search** — ChannelCards (landscape) and PosterCards (portrait) appear back-to-back in search results. Fix: scope search results per view to that view's content type; render separate sections if mixed.
-- [ ] **Episode stream hang** — player hangs with spinner when an episode URL 404s; needs timeout + error overlay.
-
-### QA / Sync tests (shelved — resume here)
-Two-phase sync implemented, basic tests passed. Resume from:
-- [ ] Let both sources (Opplex + 4K) sync fully; verify Phase 1 browse works before indexing completes
-- [ ] Verify phase messages in order: Downloading → Saving → Indexing channels/movies/series → Search ready
-- [ ] Confirm search is locked until indexing completes (not available during Phase 1)
-- [ ] Test cancel mid-sync — Phase 1 separately, Phase 2 separately
-- [ ] Test factory reset during active sync
-- [ ] Test two sources syncing simultaneously
-- [ ] Verify VirtualGrid last-row padding (cards in last row shouldn't stretch wider than the rest)
+- [ ] Category pill shown on bottom-right in every fullscreen launch path
 
 ---
 
@@ -44,7 +30,6 @@ Two-phase sync implemented, basic tests passed. Resume from:
 ## Bucket 5 — Experience Polish
 
 - [ ] Series page / detail view improvements
-- [ ] Timeshift bottom bar in fullscreen player (EPG + catchup UI done, playback bar missing)
 - [ ] Design system rethink — borders + washed-out lavender (parked, explicitly deferred)
 
 ---

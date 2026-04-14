@@ -92,8 +92,6 @@ Branch: `search-rebuild-g2` (to be created)
 
 ## Known bugs (not blocking g1, carry forward)
 
-- [ ] **Episode stream hang** — player infinite spinner on 404. Needs timeout + error overlay.
-- [ ] **Diacritic search** — "forg" misses "Forgöraren". Will be fixed by FTS5 in g2.
 - [ ] **Black screen** — occasional idle black screen requiring Cmd+R. Undiagnosed, deferred.
 
 ---
@@ -103,7 +101,6 @@ Branch: `search-rebuild-g2` (to be created)
 ### Bucket 2 — Experience Polish
 
 - [ ] **Series full-page view** — replace cramped SeriesDetail slide panel for long-running series
-- [ ] **Timeshift bottom bar** in fullscreen player — catchup channels only
 - [ ] **Design system overhaul** (parked) — borders + washed-out lavender feel off; deferred
 
 ### Bucket 3 — Tech Health
