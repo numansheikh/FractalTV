@@ -5,6 +5,7 @@ import { useSourcesStore } from '@/stores/sources.store'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useQueryClient } from '@tanstack/react-query'
 import { SlidePanel } from '@/components/layout/SlidePanel'
+import { IptvOrgRow } from '@/components/settings/IptvOrgRow'
 import { api } from '@/lib/api'
 import {
   useTheme,
@@ -668,6 +669,9 @@ function DataTab() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
       {/* ── Enrichment — hidden until TMDB integration (g2+) ── */}
+
+      {/* ── iptv-org reference database ── */}
+      <IptvOrgRow />
 
       {/* ── User data ── */}
       <section>

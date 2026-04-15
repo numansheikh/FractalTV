@@ -264,6 +264,36 @@ export const G1C_SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_epg_channel               ON epg(channel_external_id);
   CREATE INDEX IF NOT EXISTS idx_epg_time                  ON epg(start_time, end_time);
 
+  -- ─── iptv-org reference data (g2) ─────────────────────────────────
+  -- Flat, denormalized snapshot of multiple iptv-org endpoints merged
+  -- into one table at ingest time. Replaced atomically on pull; never
+  -- joined at read time. Independent of the channels table — bridge to
+  -- tvg_id is deferred to a later mini-phase.
+
+  CREATE TABLE IF NOT EXISTS iptv_channels (
+    id                TEXT PRIMARY KEY,
+    name              TEXT NOT NULL,
+    alt_names         TEXT,
+    network           TEXT,
+    owners            TEXT,
+    country           TEXT,
+    category_ids      TEXT,
+    is_nsfw           INTEGER NOT NULL DEFAULT 0,
+    launched          TEXT,
+    closed            TEXT,
+    replaced_by       TEXT,
+    website           TEXT,
+    country_name      TEXT,
+    country_flag      TEXT,
+    category_labels   TEXT,
+    logo_url          TEXT,
+    guide_urls        TEXT,
+    stream_urls       TEXT,
+    is_blocked        INTEGER NOT NULL DEFAULT 0
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_iptv_channels_country ON iptv_channels(country);
+
   CREATE INDEX IF NOT EXISTS idx_channel_ud_favorites      ON channel_user_data(profile_id, is_favorite);
   CREATE INDEX IF NOT EXISTS idx_movie_ud_favorites        ON movie_user_data(profile_id, is_favorite);
   CREATE INDEX IF NOT EXISTS idx_movie_ud_watchlist        ON movie_user_data(profile_id, is_watchlisted);

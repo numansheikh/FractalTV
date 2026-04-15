@@ -179,6 +179,13 @@ export const api = {
       isElectron ? (window.api as any).settings.get(key) : Promise.resolve(null),
   },
 
+  iptvOrg: {
+    pull: (): Promise<{ ok: boolean; count?: number; error?: string }> =>
+      isElectron ? (window.api as any).iptvOrg.pull() : Promise.resolve({ ok: false, error: 'Not in Electron' }),
+    status: (): Promise<{ count: number; lastRefreshedAt: number | null }> =>
+      isElectron ? (window.api as any).iptvOrg.status() : Promise.resolve({ count: 0, lastRefreshedAt: null }),
+  },
+
   dialog: {
     openFile: (args?: { filters?: { name: string; extensions: string[] }[] }): Promise<{ canceled: boolean; filePath?: string }> =>
       isElectron ? (window.api as any).dialog.openFile(args) : Promise.resolve({ canceled: true }),

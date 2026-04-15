@@ -144,6 +144,12 @@ export const api = {
     get: (key: string) => ipcRenderer.invoke('settings:get', key),
   },
 
+  // iptv-org reference database (independent module)
+  iptvOrg: {
+    pull: () => ipcRenderer.invoke('iptvOrg:pull'),
+    status: () => ipcRenderer.invoke('iptvOrg:status'),
+  },
+
   // Events from main process
   on: (channel: string, callback: (...args: unknown[]) => void) => {
     const wrapper = (_event: Electron.IpcRendererEvent, ...args: unknown[]) => callback(...args)

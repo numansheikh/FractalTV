@@ -10,6 +10,7 @@ import { xtreamService } from '../services/xtream.service'
 import { m3uService } from '../services/m3u.service'
 import { syncEpg, getNowNext } from '../services/epg.service'
 import { normalizeForSearch } from '../lib/normalize'
+import { pullAll as iptvOrgPullAll, getStatus as iptvOrgGetStatus } from '../services/iptv-org'
 
 // ─── Minimal row interfaces ─────────────────────────────────────────────────
 
@@ -1206,6 +1207,23 @@ export function registerHandlers() {
 
   // ── Settings (key-value) ─────────────────────────────────────────────
   ipcMain.handle('settings:get', (_event, key: string) => getSetting(key))
+
+  // ── iptv-org channel database (g2 — independent module) ─────────────
+  ipcMain.handle('iptvOrg:status', () => iptvOrgGetStatus())
+
+  ipcMain.handle('iptvOrg:pull', async (event) => {
+    const send = (phase: 'fetching' | 'validating' | 'writing' | 'done', extra?: { count?: number }) => {
+      event.sender.send('iptvOrg:progress', { phase, ...(extra ?? {}) })
+    }
+    try {
+      const result = await iptvOrgPullAll(send)
+      return { ok: true, count: result.count }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      event.sender.send('iptvOrg:progress', { phase: 'error', error: message })
+      return { ok: false, error: message }
+    }
+  })
 
   // ── Enrichment — deprecated stubs (no canonical layer in g1c) ─────────
   const deprecatedEnrichment = (opName: string) => () => ({
