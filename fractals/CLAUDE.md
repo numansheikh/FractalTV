@@ -356,7 +356,7 @@ Single layer. What M3U/Xtream APIs return, stored directly into per-type tables:
 
 Canonical identity / deduplication is not on the roadmap — it's a permanent g1c tradeoff.
 
-## Implementation status (as of 2026-04-14)
+## Implementation status (as of 2026-04-15)
 
 **Phase 0–2.5 — Complete.** Core through V3 data model.
 **g1 — Complete (2026-04-12).** Pure provider-data app on 12 tables. LIKE search with debounce. User data survived resync.
@@ -412,9 +412,12 @@ Canonical identity / deduplication is not on the roadmap — it's a permanent g1
 - Category pill chip navigates back to browse category
 
 **Detail panels**
-- Movies: 380px slide panel, breadcrumbs pinned top, category link
-- Series: 720px double-width, season coins + episode list
-- Action buttons: play/resume, favorite, watchlist, star rating, clear history
+- Unified spine via `DetailShell` (close + type badge + source indicator + breadcrumbs + scrollable body). All three types share the same chrome.
+- Channel: 380px, logo + title + EPG schedule + tvg-id block
+- Movie: 380px, hero strip + metadata + actions + opportunistic plot/cast (`AboutBlock`)
+- Series: 700px (380 right + 320 left), left column season coins + episode list, right column shares the movie spine
+- Hero strip: backdrop when present, else blurred poster scaled to fit, else a type-accent gradient with title initials. Broken image URLs fall back to the gradient.
+- Action buttons per-type: live = play + favorite; movie = full set (play/resume, favorite, watchlist, rating, clear history); series = play + favorite + watchlist + rating
 - External player + enrichment sections hidden (deferred)
 
 **Settings**
