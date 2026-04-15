@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Source, useSourcesStore } from '@/stores/sources.store'
 import { useAppStore } from '@/stores/app.store'
 import { getSourceColor, PALETTE_HEX } from '@/lib/sourceColors'
@@ -71,6 +71,59 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
   const [saveError, setSaveError] = useState('')
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null)
+
+  // EPG-only sync (Xtream only)
+  const [epgSyncing, setEpgSyncing] = useState(false)
+  const [epgResult, setEpgResult] = useState<{ success: boolean; message: string } | null>(null)
+
+  const handleEpgSync = async () => {
+    setEpgSyncing(true)
+    setEpgResult(null)
+    try {
+      const r = await api.sources.syncEpg(source.id)
+      if (r.success) {
+        setEpgResult({ success: true, message: r.inserted != null ? `${Number(r.inserted).toLocaleString()} entries` : 'Done' })
+      } else {
+        setEpgResult({ success: false, message: r.error ?? 'EPG sync failed' })
+      }
+    } catch (e) {
+      setEpgResult({ success: false, message: String(e) })
+    } finally {
+      setEpgSyncing(false)
+    }
+  }
+
+  // g2: iptv-org tvg-id matching (per-source, manual)
+  const [matching, setMatching] = useState(false)
+  const [matchResult, setMatchResult] = useState<{ success: boolean; message: string } | null>(null)
+  const [hasIptvOrgData, setHasIptvOrgData] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    api.iptvOrg.status().then((s) => { if (!cancelled) setHasIptvOrgData((s?.count ?? 0) > 0) }).catch(() => {})
+    return () => { cancelled = true }
+  }, [])
+
+  const syncedOrEpg = source.ingestState === 'synced' || source.ingestState === 'epg_fetched'
+  const matchEnabled = syncedOrEpg && hasIptvOrgData && !matching
+
+  const handleMatch = async () => {
+    setMatching(true)
+    setMatchResult(null)
+    try {
+      const r = await api.iptvOrg.matchSource(source.id)
+      if (r.ok) {
+        const considered = r.considered ?? 0
+        const matched = r.matched ?? 0
+        setMatchResult({ success: true, message: `${matched.toLocaleString()} / ${considered.toLocaleString()} tvg-ids matched` })
+      } else {
+        setMatchResult({ success: false, message: r.error ?? 'Match failed' })
+      }
+    } catch (e) {
+      setMatchResult({ success: false, message: String(e) })
+    } finally {
+      setMatching(false)
+    }
+  }
 
   // Pipeline Test — tests the already-added source and advances ingest_state.
   const handlePipelineTest = async () => {
@@ -314,6 +367,75 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
             loading={isSyncing}
             onClick={() => onSync(source.id)}
           />
+          {source.type === 'xtream' && (
+            <PipelineButton
+              step={3}
+              label={epgSyncing ? 'EPG…' : 'EPG'}
+              done={source.ingestState === 'epg_fetched'}
+              enabled={(source.ingestState === 'synced' || source.ingestState === 'epg_fetched') && !isSyncing && !epgSyncing}
+              loading={epgSyncing}
+              onClick={handleEpgSync}
+            />
+          )}
+        </div>
+      )}
+
+      {/* EPG sync result */}
+      {!editMode && epgResult && (
+        <div style={{
+          padding: '5px 8px', borderRadius: 5, fontSize: 10,
+          background: epgResult.success
+            ? 'color-mix(in srgb, var(--accent-success) 10%, transparent)'
+            : 'color-mix(in srgb, var(--accent-danger) 10%, transparent)',
+          border: `1px solid color-mix(in srgb, ${epgResult.success ? 'var(--accent-success)' : 'var(--accent-danger)'} 25%, transparent)`,
+          color: epgResult.success ? 'var(--accent-success)' : 'var(--accent-danger)',
+        }}>
+          {epgResult.success ? '✓' : '✗'} EPG {epgResult.message}
+        </div>
+      )}
+
+      {/* g2: iptv-org tvg-id match (secondary, manual, per-source) */}
+      {!editMode && (
+        <button
+          onClick={handleMatch}
+          disabled={!matchEnabled}
+          title={
+            !syncedOrEpg ? 'Sync the source first'
+            : !hasIptvOrgData ? 'Pull iptv-org data from Settings first'
+            : 'Match channels.tvg_id against iptv-org channel IDs'
+          }
+          style={{
+            padding: '5px 8px', borderRadius: 6,
+            fontSize: 11, fontWeight: 500,
+            background: 'transparent',
+            border: '1px solid var(--border-default)',
+            color: matchEnabled ? 'var(--text-1)' : 'var(--text-3)',
+            cursor: matchEnabled ? 'pointer' : 'default',
+            opacity: matchEnabled ? 1 : 0.6,
+            fontFamily: 'var(--font-ui)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+            transition: 'background 0.1s, color 0.1s',
+          }}
+          onMouseEnter={(e) => { if (matchEnabled) { e.currentTarget.style.background = 'var(--bg-4)'; e.currentTarget.style.color = 'var(--text-0)' } }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = matchEnabled ? 'var(--text-1)' : 'var(--text-3)' }}
+        >
+          {matching && (
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ animation: 'spin 1s linear infinite' }}><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
+          )}
+          {matching ? 'Matching…' : 'Match iptv-org tvg-ids'}
+        </button>
+      )}
+
+      {!editMode && matchResult && (
+        <div style={{
+          padding: '5px 8px', borderRadius: 5, fontSize: 10,
+          background: matchResult.success
+            ? 'color-mix(in srgb, var(--accent-success) 10%, transparent)'
+            : 'color-mix(in srgb, var(--accent-danger) 10%, transparent)',
+          border: `1px solid color-mix(in srgb, ${matchResult.success ? 'var(--accent-success)' : 'var(--accent-danger)'} 25%, transparent)`,
+          color: matchResult.success ? 'var(--accent-success)' : 'var(--accent-danger)',
+        }}>
+          {matchResult.success ? '✓' : '✗'} {matchResult.message}
         </div>
       )}
 

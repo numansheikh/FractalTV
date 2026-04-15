@@ -65,6 +65,12 @@ function createTables(db: Database.Database) {
     }
   }
 
+  // g2: ensure `channels.iptv_org_id` exists on pre-existing dev DBs
+  // BEFORE running G1C_SCHEMA_SQL — the schema's index on that column
+  // would fail on an existing `channels` table lacking the column.
+  addIptvOrgIdColumn(db)
+  addNsfwColumns(db)
+
   db.exec(G1C_SCHEMA_SQL)
 
   // Drop FTS tables from older g1c builds — search is now plain LIKE on
@@ -76,6 +82,35 @@ function createTables(db: Database.Database) {
 
   // Insert default profile if not exists
   db.prepare(`INSERT OR IGNORE INTO profiles (id, name) VALUES ('default', 'Default')`).run()
+}
+
+/** g2: add channels.iptv_org_id on pre-existing DBs. FK enforced via schema.sql. */
+function addIptvOrgIdColumn(db: Database.Database) {
+  const cols = db.prepare(`PRAGMA table_info(channels)`).all() as { name: string }[]
+  if (!cols.length) return
+  if (cols.some((c) => c.name === 'iptv_org_id')) return
+  console.log('[DB] migrating: adding channels.iptv_org_id')
+  db.exec(`ALTER TABLE channels ADD COLUMN iptv_org_id TEXT REFERENCES iptv_channels(id) ON DELETE SET NULL`)
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_channels_iptv_org_id ON channels(iptv_org_id)`)
+}
+
+/** Add is_nsfw column to category + content tables on pre-existing DBs. */
+function addNsfwColumns(db: Database.Database) {
+  const migrations: [string, string][] = [
+    ['channel_categories', 'is_nsfw INTEGER NOT NULL DEFAULT 0'],
+    ['movie_categories',   'is_nsfw INTEGER NOT NULL DEFAULT 0'],
+    ['series_categories',  'is_nsfw INTEGER NOT NULL DEFAULT 0'],
+    ['channels',           'is_nsfw INTEGER NOT NULL DEFAULT 0'],
+    ['movies',             'is_nsfw INTEGER NOT NULL DEFAULT 0'],
+    ['series',             'is_nsfw INTEGER NOT NULL DEFAULT 0'],
+  ]
+  for (const [table, colDef] of migrations) {
+    const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]
+    if (!cols.length) continue
+    if (cols.some((c) => c.name === 'is_nsfw')) continue
+    console.log(`[DB] migrating: adding ${table}.is_nsfw`)
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${colDef}`)
+  }
 }
 
 /** One-shot cleanup: drop any leftover FTS virtual tables from earlier builds. */

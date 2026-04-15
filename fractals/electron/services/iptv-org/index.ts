@@ -202,6 +202,30 @@ export function getStatus(): { count: number; lastRefreshedAt: number | null } {
   }
 }
 
+/**
+ * g2: populate channels.iptv_org_id for a single source by matching
+ * channels.tvg_id against iptv_channels.id. Idempotent — a single UPDATE
+ * handles both match and un-match (subquery returns NULL for no-match).
+ */
+export function matchChannelsForSource(sourceId: string): { considered: number; matched: number } {
+  const db = getSqlite()
+  db.prepare(`
+    UPDATE channels
+    SET iptv_org_id = (
+      SELECT ic.id FROM iptv_channels ic
+      WHERE ic.id = channels.tvg_id
+    )
+    WHERE source_id = ?
+  `).run(sourceId)
+  const row = db.prepare(`
+    SELECT
+      COUNT(*) AS considered,
+      SUM(CASE WHEN iptv_org_id IS NOT NULL THEN 1 ELSE 0 END) AS matched
+    FROM channels WHERE source_id = ?
+  `).get(sourceId) as { considered: number; matched: number | null }
+  return { considered: row?.considered ?? 0, matched: row?.matched ?? 0 }
+}
+
 export async function pullAll(onProgress?: (phase: 'fetching' | 'validating' | 'writing' | 'done', extra?: { count?: number }) => void): Promise<{ count: number }> {
   onProgress?.('fetching')
   const payloads = await fetchAll()

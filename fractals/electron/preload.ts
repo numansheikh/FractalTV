@@ -22,6 +22,7 @@ export const api = {
     toggleDisabled: (sourceId: string) => ipcRenderer.invoke('sources:toggle-disabled', sourceId),
     setColor: (sourceId: string, colorIndex: number) => ipcRenderer.invoke('sources:set-color', sourceId, colorIndex),
     sync: (sourceId: string) => ipcRenderer.invoke('sources:sync', sourceId),
+    syncEpg: (sourceId: string) => ipcRenderer.invoke('sources:sync-epg', sourceId),
     cancelSync: (sourceId: string) => ipcRenderer.invoke('sources:sync:cancel', sourceId),
     accountInfo: (sourceId: string) => ipcRenderer.invoke('sources:account-info', sourceId),
     startupCheck: () => ipcRenderer.invoke('sources:startup-check'),
@@ -35,6 +36,8 @@ export const api = {
   categories: {
     list: (args: { type?: 'live' | 'movie' | 'series'; sourceIds?: string[] }) =>
       ipcRenderer.invoke('categories:list', args),
+    setNsfw: (id: string, value: 0 | 1) =>
+      ipcRenderer.invoke('categories:set-nsfw', id, value),
   },
 
   // Search
@@ -97,6 +100,8 @@ export const api = {
       ipcRenderer.invoke('channels:reorder-favorites', order),
     getData: (canonicalId: string) =>
       ipcRenderer.invoke('channels:get-data', canonicalId),
+    siblings: (channelId: string) =>
+      ipcRenderer.invoke('channels:siblings', channelId),
   },
 
   // External player
@@ -142,12 +147,14 @@ export const api = {
   // Settings (key-value store)
   settings: {
     get: (key: string) => ipcRenderer.invoke('settings:get', key),
+    set: (key: string, value: string) => ipcRenderer.invoke('settings:set', key, value),
   },
 
   // iptv-org reference database (independent module)
   iptvOrg: {
     pull: () => ipcRenderer.invoke('iptvOrg:pull'),
     status: () => ipcRenderer.invoke('iptvOrg:status'),
+    matchSource: (sourceId: string) => ipcRenderer.invoke('iptvOrg:matchSource', sourceId),
   },
 
   // Events from main process
@@ -167,7 +174,7 @@ contextBridge.exposeInMainWorld('electronDevTools', () => {
 
 declare global {
   interface Window {
-    api: typeof api & { settings: { get: (key: string) => Promise<string | null> } }
+    api: typeof api & { settings: { get: (key: string) => Promise<string | null>; set: (key: string, value: string) => Promise<{ ok: boolean }> } }
     electronDevTools: () => void
   }
 }

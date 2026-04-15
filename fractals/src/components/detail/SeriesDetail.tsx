@@ -11,6 +11,7 @@ import { MetadataBlock } from './MetadataBlock'
 import { ActionButtons } from './ActionButtons'
 import { AboutBlock } from './AboutBlock'
 import { DetailShell, BreadcrumbItem } from './DetailShell'
+import { DetailMiniPlayer } from '@/components/player/DetailMiniPlayer'
 
 interface Props {
   item: ContentItem
@@ -22,10 +23,22 @@ interface Props {
 
 export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: Props) {
   const [activeSeason, setActiveSeason] = useState<string | null>(null)
+  const [autoplay, setAutoplay] = useState(true)
+  const [promptSeen, setPromptSeen] = useState(false)
 
   const { sources } = useSourcesStore()
   const colorMap = buildColorMapFromSources(sources)
   const userStore = useUserStore()
+
+  useEffect(() => {
+    Promise.all([
+      api.settings.get('autoplay_detail'),
+      api.settings.get('autoplay_prompt_shown'),
+    ]).then(([ad, aps]) => {
+      setAutoplay(ad !== '0')
+      setPromptSeen(aps === '1')
+    })
+  }, [])
 
   const { data: enrichedItem } = useQuery({
     queryKey: ['content', item.id],
@@ -133,7 +146,7 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
 
   return (
     <SlidePanel open={true} onClose={onClose} width={panelWidth} suppressClose={isPlaying}>
-      <div style={{ display: 'flex', flexDirection: 'row', height: '100%', background: 'var(--bg-1)' }}>
+      <div style={{ display: 'flex', flexDirection: 'row', height: '100%', background: 'var(--bg-2)' }}>
 
         {/* ── Left column: Season selector + episode list ── */}
         <div style={{
@@ -143,6 +156,7 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
           flexDirection: 'column',
           borderRight: '1px solid var(--border-subtle)',
           overflow: 'hidden',
+          background: 'var(--bg-1)',
         }}>
           <div style={{
             height: 48,
@@ -285,14 +299,45 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
             allSourceIds={allSourceIds}
             sourceColorMap={colorMap}
             onClose={onClose}
+            footer={
+              <>
+                <ActionButtons
+                  item={c}
+                  onPlay={onPlay}
+                  episodeToPlay={firstEpItem}
+                  hidePrimary
+                />
+                <button
+                  onClick={() => onPlay(firstEpItem ?? c)}
+                  style={{
+                    width: '100%', height: 36, borderRadius: 6,
+                    background: 'var(--accent-series)', color: '#fff',
+                    border: 'none', fontSize: 13, fontWeight: 600,
+                    cursor: 'pointer', fontFamily: 'var(--font-ui)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                    transition: 'opacity 0.12s',
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.88' }}
+                  onMouseLeave={(e) => { e.currentTarget.style.opacity = '1' }}
+                >
+                  <span>{playButtonLabel}</span>
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                    <polyline points="15 3 21 3 21 9" /><polyline points="9 21 3 21 3 15" />
+                    <line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" />
+                  </svg>
+                </button>
+                {firstEpItem && (
+                  <DetailMiniPlayer
+                    contentId={firstEpItem.id}
+                    autoplay={autoplay}
+                    promptSeen={promptSeen}
+                    onPromptSeen={() => setPromptSeen(true)}
+                  />
+                )}
+              </>
+            }
           >
             <MetadataBlock item={c} isSeries />
-            <ActionButtons
-              item={c}
-              onPlay={onPlay}
-              episodeToPlay={firstEpItem}
-              overridePlayLabel={playButtonLabel}
-            />
             <AboutBlock item={c} onClose={onClose} />
           </DetailShell>
         </div>

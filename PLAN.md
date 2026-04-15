@@ -16,7 +16,7 @@ Architecture, tech stack, schema, conventions, design language: see `fractals/CL
 | 2.5 | Complete | V3 data model + search (canonical split, association layer, MetadataProvider, advanced search, two-phase sync) |
 | g1 | Complete | Strip to pure provider-data app. 12 tables. LIKE search + debounce. |
 | g1c | **Complete** | 15-table per-type split. LIKE on `search_title` (inline at sync). Test → Sync pipeline (EPG auto-chains). VoD card redesign, vocabulary sweep, Channel Detail panel (logo/title/actions + Schedule section + EPG identity) + card Details buttons. Continue-watching invalidation bug fixed (2026-04-15). Tech cleanup: `tsconfig.node.json` fixed, Electron sandbox enabled. |
-| g2 | Future | Search improvements (possibilities listed below; no commitments) |
+| g2 | **In progress** | iptv-org ingestion, detail panels, mini player, NSFW filtering, EPG sync |
 | 3 | Not started | Capacitor (Android/iOS/TV), Tizen |
 
 ---
@@ -99,6 +99,18 @@ Three-tier split (same React codebase, feature flags):
 | `XtreamCodesAPI.md` | Xtream Codes API reference |
 
 ---
+
+## g2 — shipped so far (branch: g2, 2026-04-15)
+
+- **iptv-org channel DB ingestion** — 39K channel snapshot, tvg-id matching, country/category/NSFW flags
+- **Unified detail panel spine** (`DetailShell`) — Channel/Movie/Series share chrome; breadcrumbs, type badge, source indicator
+- **Mini player in detail panels** — 2s autoplay, pause/play, one-time prompt, `autoplay_detail` setting; all three panel types
+- **PlayerOverlay reconnect overlay** — 5-attempt exponential backoff, spinner + attempt counter
+- **IptvStrip siblings redesign** — list rows (dot + source + title), V+H scrollable
+- **Panel visual separation** — `--bg-panel` tint + left-edge drop shadow; series left column (`--bg-panel-sub`) distinct from right
+- **EPG Sync button** — explicit "EPG" pipeline step in SourceCard (Xtream only); 24h auto-refresh on startup (silent)
+- **Bottom panel collapse rule** — LiveView bottom panel expanded only if EPG or iptv-org data present
+- **Adult content (NSFW) filtering** — `is_nsfw` on 3 category + 3 content tables; right-click category → mark/unmark; "Allow adult content" toggle in Settings; flag propagates to content rows on mark and post-sync
 
 ## Snapshot (2026-04-15)
 

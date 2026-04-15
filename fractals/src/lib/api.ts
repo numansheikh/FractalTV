@@ -38,6 +38,9 @@ export const api = {
     sync: (sourceId: string) =>
       isElectron ? window.api.sources.sync(sourceId) : Promise.resolve({ success: false }),
 
+    syncEpg: (sourceId: string): Promise<{ success: boolean; inserted?: number; error?: string }> =>
+      isElectron ? (window.api as any).sources.syncEpg(sourceId) : Promise.resolve({ success: false, error: 'Not in Electron' }),
+
     cancelSync: (sourceId: string) =>
       isElectron ? (window.api as any).sources.cancelSync(sourceId) : Promise.resolve({ ok: true }),
 
@@ -63,6 +66,8 @@ export const api = {
   categories: {
     list: (args: { type?: 'live' | 'movie' | 'series'; sourceIds?: string[] }) =>
       isElectron ? window.api.categories.list(args) : Promise.resolve([]),
+    setNsfw: (id: string, value: 0 | 1): Promise<{ ok: boolean }> =>
+      isElectron ? (window.api as any).categories.setNsfw(id, value) : Promise.resolve({ ok: false }),
   },
 
   search: {
@@ -141,6 +146,8 @@ export const api = {
       isElectron ? (window.api as any).channels.reorderFavorites(order) : Promise.resolve({ ok: false }),
     getData: (canonicalId: string) =>
       isElectron ? (window.api as any).channels.getData(canonicalId) : Promise.resolve({ favorite: false, watchlisted: false, rating: null, position: 0, completed: false }),
+    siblings: (channelId: string): Promise<{ id: string; title: string; source_id: string }[]> =>
+      isElectron ? (window.api as any).channels.siblings(channelId) : Promise.resolve([]),
   },
 
   player: {
@@ -177,6 +184,8 @@ export const api = {
   settings: {
     get: (key: string): Promise<string | null> =>
       isElectron ? (window.api as any).settings.get(key) : Promise.resolve(null),
+    set: (key: string, value: string): Promise<{ ok: boolean }> =>
+      isElectron ? (window.api as any).settings.set(key, value) : Promise.resolve({ ok: false }),
   },
 
   iptvOrg: {
@@ -184,6 +193,8 @@ export const api = {
       isElectron ? (window.api as any).iptvOrg.pull() : Promise.resolve({ ok: false, error: 'Not in Electron' }),
     status: (): Promise<{ count: number; lastRefreshedAt: number | null }> =>
       isElectron ? (window.api as any).iptvOrg.status() : Promise.resolve({ count: 0, lastRefreshedAt: null }),
+    matchSource: (sourceId: string): Promise<{ ok: boolean; considered?: number; matched?: number; error?: string }> =>
+      isElectron ? (window.api as any).iptvOrg.matchSource(sourceId) : Promise.resolve({ ok: false, error: 'Not in Electron' }),
   },
 
   dialog: {

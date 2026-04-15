@@ -175,6 +175,11 @@ function AppShell() {
   }
 
   const handleSelectContent = (item: ContentItem) => {
+    // Clear any floating mini-player when opening a detail panel
+    if (playerMode === 'mini') {
+      setPlayingContent(null)
+      setPlayerMode('hidden')
+    }
     if (item.type === 'live') {
       setLiveViewChannel(item)
     } else {
@@ -183,8 +188,14 @@ function AppShell() {
   }
 
   const handlePlay = (item: ContentItem) => {
-    setPlayingContent(item)
-    setPlayerMode('fullscreen')
+    if (item.type === 'live') {
+      // Channels always go to Live View — close detail panel, open Live View
+      setSelectedContent(null)
+      setLiveViewChannel(item)
+    } else {
+      setPlayingContent(item)
+      setPlayerMode('fullscreen')
+    }
   }
 
   const handlePlayerClose = () => {
@@ -192,14 +203,39 @@ function AppShell() {
     setPlayerMode('hidden')
   }
 
+  const handlePlayerMinimize = () => {
+    const content = playingContent
+    setPlayingContent(null)
+    setPlayerMode('hidden')
+    if (!selectedContent && content) {
+      // No detail panel open — open it now (escape from fullscreen = detail panel)
+      if (content.type === 'live') {
+        setLiveViewChannel(content)
+      } else {
+        // For episodes, open parent series detail
+        const parent = (content as any)._parent
+        if (parent?.type === 'series') {
+          setSelectedContent({ ...content, id: parent.id, title: parent.title, type: 'series' } as ContentItem)
+        } else {
+          setSelectedContent(content)
+        }
+      }
+    }
+    // If selectedContent is set, detail panel is already open — its mini player takes over
+  }
+
   const handlePlayerChipClick = (item: ContentItem) => {
-    setPlayerMode('mini')
+    // Close the fullscreen player — no floating mini player
+    setPlayingContent(null)
+    setPlayerMode('hidden')
+    setLiveViewChannel(null)
     const parent = (item as any)._parent
     if (parent) {
-      // Episode — open series detail panel
+      // Episode — open series detail panel (mini player starts there)
       setSelectedContent({ ...item, id: parent.id, title: parent.title, type: 'series' } as ContentItem)
     } else {
       // Navigate to category in the appropriate view
+      setSelectedContent(null)
       const cat = (item as any).category_name
       const viewMap = { live: 'live', movie: 'films', series: 'series' } as const
       setView(viewMap[item.type as keyof typeof viewMap] ?? 'films')
@@ -254,7 +290,7 @@ function AppShell() {
         content={playingContent}
         mode={playerMode}
         onClose={handlePlayerClose}
-        onMinimize={() => setPlayerMode('mini')}
+        onMinimize={handlePlayerMinimize}
         onExpand={() => setPlayerMode('fullscreen')}
         onSurfChannel={surfChannel}
         onChipClick={handlePlayerChipClick}
@@ -310,23 +346,20 @@ function AppShell() {
         {liveViewChannel && playerMode === 'hidden' && (
           <LiveView
             channel={liveViewChannel}
-            onFullscreen={(ch) => handlePlay(ch)}
+            onFullscreen={(ch) => { setPlayingContent(ch); setPlayerMode('fullscreen') }}
             onSwitchChannel={(ch) => setLiveViewChannel(ch)}
             onClose={() => setLiveViewChannel(null)}
           />
         )}
-        {/* Settings — suppressScrim: shared scrim above handles it */}
         {showSettings && (
-          <SettingsPanel onClose={() => setShowSettings(false)} suppressScrim />
+          <SettingsPanel onClose={() => setShowSettings(false)} />
         )}
-        {/* Sources — suppressScrim: shared scrim above handles it */}
         {showSources && (
           <SourcesPanel
             onClose={() => setShowSources(false)}
             onSync={handleSync}
             onRemove={handleRemove}
             onAdded={async (_sourceId: string) => { await handleSourceAdded() }}
-            suppressScrim
           />
         )}
         {/* First-launch / direct add source modal */}

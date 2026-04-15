@@ -10,10 +10,9 @@ interface Props {
   onSync: (id: string) => void
   onRemove: (id: string) => void
   onAdded: (sourceId: string) => void
-  suppressScrim?: boolean
 }
 
-export function SourcesPanel({ onClose, onSync, onRemove, onAdded, suppressScrim }: Props) {
+export function SourcesPanel({ onClose, onSync, onRemove, onAdded }: Props) {
   const { sources } = useSourcesStore()
   const [showAddModal, setShowAddModal] = useState(false)
 
@@ -24,7 +23,7 @@ export function SourcesPanel({ onClose, onSync, onRemove, onAdded, suppressScrim
 
   return (
     <>
-      <SlidePanel open={true} onClose={onClose} width={480} suppressScrim={suppressScrim}>
+      <SlidePanel open={true} onClose={onClose} width={480}>
         {/* Header */}
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',

@@ -66,7 +66,8 @@ export const G1C_SCHEMA_SQL = `
     source_id   TEXT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
     external_id TEXT NOT NULL,
     name        TEXT NOT NULL,
-    position    INTEGER NOT NULL DEFAULT 0
+    position    INTEGER NOT NULL DEFAULT 0,
+    is_nsfw     INTEGER NOT NULL DEFAULT 0
   );
 
   CREATE TABLE IF NOT EXISTS channels (
@@ -82,8 +83,10 @@ export const G1C_SCHEMA_SQL = `
     stream_url          TEXT,
     tvg_id              TEXT,
     epg_channel_id      TEXT,
+    iptv_org_id         TEXT REFERENCES iptv_channels(id) ON DELETE SET NULL,
     catchup_supported   INTEGER NOT NULL DEFAULT 0,
     catchup_days        INTEGER NOT NULL DEFAULT 0,
+    is_nsfw             INTEGER NOT NULL DEFAULT 0,
     provider_metadata   TEXT,               -- JSON bag
 
     md_country          TEXT,
@@ -113,7 +116,8 @@ export const G1C_SCHEMA_SQL = `
     source_id   TEXT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
     external_id TEXT NOT NULL,
     name        TEXT NOT NULL,
-    position    INTEGER NOT NULL DEFAULT 0
+    position    INTEGER NOT NULL DEFAULT 0,
+    is_nsfw     INTEGER NOT NULL DEFAULT 0
   );
 
   CREATE TABLE IF NOT EXISTS movies (
@@ -128,6 +132,7 @@ export const G1C_SCHEMA_SQL = `
     thumbnail_url       TEXT,
     stream_url          TEXT,
     container_extension TEXT,
+    is_nsfw             INTEGER NOT NULL DEFAULT 0,
     provider_metadata   TEXT,               -- JSON bag
 
     md_country          TEXT,
@@ -146,7 +151,8 @@ export const G1C_SCHEMA_SQL = `
     source_id   TEXT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
     external_id TEXT NOT NULL,
     name        TEXT NOT NULL,
-    position    INTEGER NOT NULL DEFAULT 0
+    position    INTEGER NOT NULL DEFAULT 0,
+    is_nsfw     INTEGER NOT NULL DEFAULT 0
   );
 
   CREATE TABLE IF NOT EXISTS series (
@@ -159,6 +165,7 @@ export const G1C_SCHEMA_SQL = `
     search_title        TEXT,              -- populated by Index button
 
     thumbnail_url       TEXT,
+    is_nsfw             INTEGER NOT NULL DEFAULT 0,
     provider_metadata   TEXT,               -- JSON bag
 
     md_country          TEXT,
@@ -247,6 +254,7 @@ export const G1C_SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_channels_source           ON channels(source_id);
   CREATE INDEX IF NOT EXISTS idx_channels_category         ON channels(category_id, source_id);
   CREATE INDEX IF NOT EXISTS idx_channels_epg              ON channels(epg_channel_id);
+  CREATE INDEX IF NOT EXISTS idx_channels_iptv_org_id      ON channels(iptv_org_id);
 
   CREATE INDEX IF NOT EXISTS idx_movies_source             ON movies(source_id);
   CREATE INDEX IF NOT EXISTS idx_movies_category           ON movies(category_id, source_id);

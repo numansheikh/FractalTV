@@ -107,6 +107,10 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
   const completionMarkedRef = useRef(false)
   const suppressRebuildRef = useRef(false)
   const [isOsFullscreen, setIsOsFullscreen] = useState(false)
+  const [reconnectAttempt, setReconnectAttempt] = useState<number | null>(null)
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const MAX_RECONNECT = 5
+  const RECONNECT_BACKOFF = [2000, 4000, 8000, 16000, 32000]
 
   // Loading elapsed timer
   const [loadingElapsed, setLoadingElapsed] = useState(0)
@@ -242,16 +246,25 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
               ;(art as any).hls = hls
               hls.loadSource(src)
               hls.attachMedia(video)
-              let networkRecoveryCount = 0
-              let mediaRecoveryCount = 0
+              let reconnectCount = 0
               hls.on(Hls.Events.ERROR, (_e: any, data: any) => {
                 if (data.fatal && !cancelled) {
-                  if (data.type === Hls.ErrorTypes.NETWORK_ERROR && networkRecoveryCount < 3) {
-                    networkRecoveryCount++; hls.startLoad()
-                  } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR && mediaRecoveryCount < 3) {
-                    mediaRecoveryCount++; hls.recoverMediaError()
+                  if (reconnectCount < MAX_RECONNECT) {
+                    reconnectCount++
+                    setReconnectAttempt(reconnectCount)
+                    reconnectTimerRef.current = setTimeout(() => {
+                      if (!cancelled) {
+                        setReconnectAttempt(null)
+                        if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+                          hls.recoverMediaError()
+                        } else {
+                          hls.startLoad()
+                        }
+                      }
+                    }, RECONNECT_BACKOFF[reconnectCount - 1])
                   } else {
-                    setError(`Playback error: ${data.details ?? data.type}`)
+                    setReconnectAttempt(null)
+                    setError('Stream unavailable')
                     setPlayerState('error')
                   }
                 }
@@ -340,6 +353,8 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
       if (suppressRebuildRef.current) return
       cancelled = true
       clearLoadingTimer()
+      if (reconnectTimerRef.current) { clearTimeout(reconnectTimerRef.current); reconnectTimerRef.current = null }
+      setReconnectAttempt(null)
       if (artRef.current) {
         const hls = (artRef.current as any).hls
         hls?.destroy()
@@ -774,9 +789,22 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
         )}
       </AnimatePresence>
 
+      {/* ── Reconnect overlay ── */}
+      <AnimatePresence>
+        {reconnectAttempt !== null && !isError && (
+          <motion.div key="reconnect" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, zIndex: 90, background: 'rgba(0,0,0,0.7)', pointerEvents: 'none' }}>
+            <div style={{ width: 32, height: 32, borderRadius: '50%', border: '2px solid rgba(255,255,255,0.15)', borderTopColor: '#fff', animation: 'spin 0.8s linear infinite' }} />
+            <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)', fontFamily: 'var(--font-ui)' }}>
+              Reconnecting… ({reconnectAttempt}/{MAX_RECONNECT})
+            </p>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* ── Loading overlay ── */}
       <AnimatePresence>
-        {isLoading && (
+        {isLoading && !reconnectAttempt && (
           <motion.div key="loader" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, pointerEvents: 'none', zIndex: 90 }}>
             <div style={{ width: 36, height: 36, borderRadius: '50%', border: '2px solid rgba(124,77,255,0.25)', borderTopColor: 'var(--accent-interactive)', animation: 'spin 0.8s linear infinite' }} />

@@ -23,6 +23,7 @@ interface Props {
   sourceColorMap?: Record<string, SourceColor>
   onClose: () => void
   children: ReactNode
+  footer?: ReactNode
 }
 
 export function DetailShell({
@@ -34,6 +35,7 @@ export function DetailShell({
   sourceColorMap,
   onClose,
   children,
+  footer,
 }: Props) {
   const hasMultiSource = (allSourceIds?.length ?? 0) > 1
 
@@ -153,6 +155,21 @@ export function DetailShell({
       }}>
         {children}
       </div>
+
+      {/* Sticky footer — action button + mini player */}
+      {footer && (
+        <div style={{
+          flexShrink: 0,
+          borderTop: '1px solid var(--border-subtle)',
+          padding: '10px 12px 12px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 8,
+          background: 'var(--bg-2)',
+        }}>
+          {footer}
+        </div>
+      )}
     </div>
   )
 }

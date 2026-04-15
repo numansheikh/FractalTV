@@ -4,6 +4,7 @@ import { ContentItem } from '@/lib/types'
 interface Props {
   item: ContentItem
   isSeries?: boolean
+  hideHero?: boolean
 }
 
 function titleInitials(title: string): string {
@@ -35,7 +36,7 @@ function formatRuntime(minutes: number): string {
   return `${minutes}m`
 }
 
-export function MetadataBlock({ item, isSeries }: Props) {
+export function MetadataBlock({ item, isSeries, hideHero }: Props) {
   const [heroError, setHeroError] = useState(false)
   const backdrop = item.backdropUrl ?? item.backdrop_url
   const poster = item.posterUrl ?? item.poster_url
@@ -54,7 +55,7 @@ export function MetadataBlock({ item, isSeries }: Props) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      {!heroSrc && (
+      {!hideHero && !heroSrc && (
         <div style={{
           position: 'relative',
           borderRadius: 8,
@@ -77,12 +78,12 @@ export function MetadataBlock({ item, isSeries }: Props) {
             position: 'absolute',
             bottom: 0, left: 0, right: 0,
             height: '55%',
-            background: 'linear-gradient(to bottom, transparent, var(--bg-1))',
+            background: 'linear-gradient(to bottom, transparent, var(--bg-2))',
             pointerEvents: 'none',
           }} />
         </div>
       )}
-      {heroSrc && (
+      {!hideHero && heroSrc && (
         <div style={{ position: 'relative', borderRadius: 8, overflow: 'hidden', height: 180, background: 'var(--bg-2)' }}>
           {/* Blurred fill — when only a portrait poster is available, scale-up + blur
               it so it can fill a wide hero strip without black bars. */}
@@ -120,7 +121,7 @@ export function MetadataBlock({ item, isSeries }: Props) {
             position: 'absolute',
             bottom: 0, left: 0, right: 0,
             height: '55%',
-            background: 'linear-gradient(to bottom, transparent, var(--bg-1))',
+            background: 'linear-gradient(to bottom, transparent, var(--bg-2))',
             pointerEvents: 'none',
           }} />
         </div>

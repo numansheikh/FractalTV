@@ -3,14 +3,14 @@ import { spawn } from 'child_process'
 import { existsSync, writeFileSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { Worker } from 'worker_threads'
-import { getDb, getSqlite, getSetting } from '../database/connection'
+import { getDb, getSqlite, getSetting, setSetting } from '../database/connection'
 import { sources } from '../database/schema'
 import { eq } from 'drizzle-orm'
 import { xtreamService } from '../services/xtream.service'
 import { m3uService } from '../services/m3u.service'
 import { syncEpg, getNowNext } from '../services/epg.service'
 import { normalizeForSearch } from '../lib/normalize'
-import { pullAll as iptvOrgPullAll, getStatus as iptvOrgGetStatus } from '../services/iptv-org'
+import { pullAll as iptvOrgPullAll, getStatus as iptvOrgGetStatus, matchChannelsForSource as iptvOrgMatchSource } from '../services/iptv-org'
 
 // ─── Minimal row interfaces ─────────────────────────────────────────────────
 
@@ -477,7 +477,30 @@ export function registerHandlers() {
       }
     }
 
-    // EPG/Index refresh is manual in g1c — driven by the pipeline buttons.
+    // Propagate NSFW category flags to content rows (catches any drift from resync)
+    applyNsfwFlags(sqlite)
+
+    // Auto-refresh EPG if last sync was >24h ago (or never synced).
+    const staleThreshold = Math.floor(Date.now() / 1000) - 24 * 60 * 60
+    for (const source of activeSources) {
+      if (source.ingest_state !== 'synced' && source.ingest_state !== 'epg_fetched') continue
+      if (source.last_epg_sync && source.last_epg_sync > staleThreshold) continue
+      try {
+        const result = await syncEpg(
+          source.id, source.server_url, source.username, source.password,
+          () => {} // silent — no progress events, no Sync button interference
+        )
+        if (!result.error) {
+          sqlite.prepare(
+            `UPDATE sources SET last_epg_sync = unixepoch(), ingest_state = 'epg_fetched'
+             WHERE id = ? AND ingest_state IN ('synced','epg_fetched')`
+          ).run(source.id)
+        }
+      } catch {
+        // Silent — auto-refresh failure is non-fatal
+      }
+    }
+
     return { done: true }
   })
 
@@ -559,6 +582,7 @@ export function registerHandlers() {
           }
 
           runEpgChain().then((epgResult) => {
+            applyNsfwFlags(sqlite)
             const syncMsg = `Synced ${msg.catCount} categories, ${msg.totalItems.toLocaleString()} items`
             const doneMsg = epgResult
               ? (epgResult.error ? `${syncMsg} · EPG failed: ${epgResult.error}` : `${syncMsg} · EPG ${Number(epgResult.inserted ?? 0).toLocaleString()} entries`)
@@ -610,8 +634,44 @@ export function registerHandlers() {
   })
 
   // ── EPG ─────────────────────────────────────────────────────────────────
-  // `epg:sync` IPC is gone — EPG is chained automatically inside the Sync
-  // handler's done branch. The remaining handlers below are read-only lookups.
+  // `sources:sync-epg` — standalone EPG-only sync for Xtream sources.
+  // Mirrors the EPG chain inside sources:sync but without re-syncing content.
+  ipcMain.handle('sources:sync-epg', async (event, sourceId: string) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const sqlite = getSqlite()
+    const source = sqlite.prepare('SELECT * FROM sources WHERE id = ?').get(sourceId) as SourceRow | undefined
+    if (!source) return { success: false, error: 'Source not found' }
+    if (source.type === 'm3u') return { success: false, error: 'EPG sync is only supported for Xtream sources' }
+    if (!source.server_url) return { success: false, error: 'Source missing server URL' }
+
+    win?.webContents.send('sync:progress', {
+      sourceId, phase: 'epg', current: 0, total: 0, message: 'Fetching EPG…',
+    })
+    const result = await syncEpg(
+      sourceId, source.server_url, source.username, source.password,
+      (m) => win?.webContents.send('sync:progress', {
+        sourceId, phase: 'epg', current: 0, total: 0, message: m,
+      })
+    )
+    if (!result.error) {
+      sqlite.prepare(
+        `UPDATE sources SET last_epg_sync = unixepoch(), ingest_state = 'epg_fetched'
+         WHERE id = ? AND ingest_state IN ('synced','epg_fetched')`
+      ).run(sourceId)
+      win?.webContents.send('sync:progress', {
+        sourceId, phase: 'done', current: 0, total: 0,
+        message: `EPG ${Number(result.inserted ?? 0).toLocaleString()} entries`,
+      })
+      return { success: true, inserted: result.inserted }
+    } else {
+      win?.webContents.send('sync:progress', {
+        sourceId, phase: 'error', current: 0, total: 0, message: `EPG failed: ${result.error}`,
+      })
+      return { success: false, error: result.error }
+    }
+  })
+
+  // `epg:now-next` and `epg:guide` are read-only lookups.
   ipcMain.handle('epg:now-next', (_event, contentId: string) => getNowNext(contentId))
 
   ipcMain.handle('epg:guide', (_event, args: { contentIds: string[]; startTime?: number; endTime?: number }) => {
@@ -764,9 +824,25 @@ export function registerHandlers() {
 
     if (kind === 'channel') {
       return sqlite.prepare(`
-        SELECT ${CHANNEL_SELECT}, cat.name AS category_name
+        SELECT ${CHANNEL_SELECT}, cat.name AS category_name,
+          ic.name            AS io_name,
+          ic.alt_names       AS io_alt_names,
+          ic.network         AS io_network,
+          ic.owners          AS io_owners,
+          ic.country         AS io_country,
+          ic.country_name    AS io_country_name,
+          ic.country_flag    AS io_country_flag,
+          ic.category_labels AS io_category_labels,
+          ic.is_nsfw         AS io_is_nsfw,
+          ic.is_blocked      AS io_is_blocked,
+          ic.launched        AS io_launched,
+          ic.closed          AS io_closed,
+          ic.replaced_by     AS io_replaced_by,
+          ic.website         AS io_website,
+          ic.logo_url        AS io_logo_url
         FROM channels c
         LEFT JOIN channel_categories cat ON cat.id = c.category_id
+        LEFT JOIN iptv_channels ic ON ic.id = c.iptv_org_id
         WHERE c.id = ?
       `).get(contentId) ?? null
     }
@@ -1028,6 +1104,18 @@ export function registerHandlers() {
     }
   })
 
+  ipcMain.handle('channels:siblings', async (_event, channelId: string) => {
+    const sqlite = getSqlite()
+    const ch = sqlite.prepare('SELECT iptv_org_id FROM channels WHERE id = ?').get(channelId) as { iptv_org_id?: string | null } | undefined
+    if (!ch?.iptv_org_id) return []
+    return sqlite.prepare(`
+      SELECT c.id, c.title, c.source_id
+      FROM channels c
+      WHERE c.iptv_org_id = ? AND c.id != ?
+      LIMIT 10
+    `).all(ch.iptv_org_id, channelId)
+  })
+
   ipcMain.handle('user:watchlist', async (_event, args?: { type?: 'live' | 'movie' | 'series' }) => {
     const sqlite = getSqlite()
     return listWatchlist(sqlite, args?.type)
@@ -1207,9 +1295,23 @@ export function registerHandlers() {
 
   // ── Settings (key-value) ─────────────────────────────────────────────
   ipcMain.handle('settings:get', (_event, key: string) => getSetting(key))
+  ipcMain.handle('settings:set', (_event, key: string, value: string) => {
+    setSetting(key, value)
+    return { ok: true }
+  })
 
   // ── iptv-org channel database (g2 — independent module) ─────────────
   ipcMain.handle('iptvOrg:status', () => iptvOrgGetStatus())
+
+  ipcMain.handle('iptvOrg:matchSource', (_event, sourceId: string) => {
+    try {
+      const result = iptvOrgMatchSource(sourceId)
+      return { ok: true as const, ...result }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      return { ok: false as const, error: message }
+    }
+  })
 
   ipcMain.handle('iptvOrg:pull', async (event) => {
     const send = (phase: 'fetching' | 'validating' | 'writing' | 'done', extra?: { count?: number }) => {
@@ -1244,6 +1346,20 @@ export function registerHandlers() {
   })
 
   // ── Categories ────────────────────────────────────────────────────────
+  ipcMain.handle('categories:set-nsfw', (_event, id: string, value: 0 | 1) => {
+    const sqlite = getSqlite()
+    const table = id.includes(':chancat:')   ? 'channel_categories'
+                : id.includes(':moviecat:')  ? 'movie_categories'
+                : id.includes(':seriescat:') ? 'series_categories'
+                : (() => { throw new Error(`Unknown category ID format: ${id}`) })()
+    // Mark ALL categories with the same name (covers multiple sources)
+    const row = sqlite.prepare(`SELECT name FROM ${table} WHERE id = ?`).get(id) as { name: string } | undefined
+    if (!row) return { ok: false }
+    sqlite.prepare(`UPDATE ${table} SET is_nsfw = ? WHERE name = ?`).run(value, row.name)
+    applyNsfwFlags(sqlite)
+    return { ok: true }
+  })
+
   ipcMain.handle('categories:list', (_event, args: {
     type?: 'live' | 'movie' | 'series'
     sourceIds?: string[]
@@ -1265,20 +1381,25 @@ export function registerHandlers() {
       { table: 'series_categories',  content: 'series',   type: 'series' as const },
     ]
 
+    const allowAdult = getSetting('allow_adult') !== '0'
+
     const rows: any[] = []
     for (const q of queries) {
       if (args.type && args.type !== q.type) continue
+      const nsfwFilter = allowAdult ? '' : 'AND cat.is_nsfw = 0'
       const partial = sqlite.prepare(`
         SELECT
+          cat.id                                      AS id,
           cat.name                                    AS name,
           '${q.type}'                                 AS type,
+          MAX(cat.is_nsfw)                            AS is_nsfw,
           GROUP_CONCAT(DISTINCT cat.source_id)        AS source_ids,
           COUNT(DISTINCT x.id)                        AS item_count,
           0                                           AS needs_sync,
           MIN(cat.position)                           AS position
         FROM ${q.table} cat
         LEFT JOIN ${q.content} x ON x.category_id = cat.id
-        WHERE cat.source_id IN (${inList})
+        WHERE cat.source_id IN (${inList}) ${nsfwFilter}
         GROUP BY cat.name
         HAVING item_count > 0
         ORDER BY item_count DESC
@@ -1346,6 +1467,16 @@ export function registerHandlers() {
   })
 }
 
+// ─── NSFW helpers ────────────────────────────────────────────────────────
+
+/** Propagate is_nsfw from categories to content rows. Each row inherits its
+ *  category's flag (or 0 if uncategorised). Called after sync and on mark/unmark. */
+function applyNsfwFlags(sqlite: ReturnType<typeof getSqlite>) {
+  sqlite.prepare(`UPDATE channels SET is_nsfw = COALESCE((SELECT is_nsfw FROM channel_categories WHERE id = channels.category_id), 0)`).run()
+  sqlite.prepare(`UPDATE movies  SET is_nsfw = COALESCE((SELECT is_nsfw FROM movie_categories   WHERE id = movies.category_id),   0)`).run()
+  sqlite.prepare(`UPDATE series  SET is_nsfw = COALESCE((SELECT is_nsfw FROM series_categories  WHERE id = series.category_id),   0)`).run()
+}
+
 // ─── Search helpers ──────────────────────────────────────────────────────
 // LIKE `%query%` on `search_title`. Sync workers populate `search_title`
 // inline via `normalizeForSearch` (any-ascii + lowercase) so ligatures /
@@ -1361,6 +1492,7 @@ function g1cSearchChannels(
     ? `JOIN channel_categories cat ON cat.id = c.category_id AND cat.name = ?`
     : ''
   const catParams: unknown[] = categoryName ? [categoryName] : []
+  const nsfwWhere = getSetting('allow_adult') !== '0' ? '' : 'AND c.is_nsfw = 0'
   const normalized = normalizeForSearch(query)
   if (!normalized) return { items: [], total: 0 }
   const like = `%${normalized}%`
@@ -1369,7 +1501,7 @@ function g1cSearchChannels(
     SELECT ${CHANNEL_SELECT}
     FROM channels c
     ${catJoin}
-    WHERE c.search_title LIKE ? AND c.source_id IN (${sourceList})
+    WHERE c.search_title LIKE ? AND c.source_id IN (${sourceList}) ${nsfwWhere}
     LIMIT ? OFFSET ?
   `).all(...catParams, like, ...filterIds, limit, offset) as unknown[]
 
@@ -1380,7 +1512,7 @@ function g1cSearchChannels(
     SELECT COUNT(*) AS cnt
     FROM channels c
     ${catJoin}
-    WHERE c.search_title LIKE ? AND c.source_id IN (${sourceList})
+    WHERE c.search_title LIKE ? AND c.source_id IN (${sourceList}) ${nsfwWhere}
   `).get(...catParams, like, ...filterIds) as { cnt: number }).cnt
   return { items, total }
 }
@@ -1395,6 +1527,7 @@ function g1cSearchMovies(
     ? `JOIN movie_categories cat ON cat.id = m.category_id AND cat.name = ?`
     : ''
   const catParams: unknown[] = categoryName ? [categoryName] : []
+  const nsfwWhere = getSetting('allow_adult') !== '0' ? '' : 'AND m.is_nsfw = 0'
   const normalized = normalizeForSearch(query)
   if (!normalized) return { items: [], total: 0 }
   const like = `%${normalized}%`
@@ -1403,7 +1536,7 @@ function g1cSearchMovies(
     SELECT ${MOVIE_SELECT}
     FROM movies m
     ${catJoin}
-    WHERE m.search_title LIKE ? AND m.source_id IN (${sourceList})
+    WHERE m.search_title LIKE ? AND m.source_id IN (${sourceList}) ${nsfwWhere}
     LIMIT ? OFFSET ?
   `).all(...catParams, like, ...filterIds, limit, offset) as unknown[]
 
@@ -1414,7 +1547,7 @@ function g1cSearchMovies(
     SELECT COUNT(*) AS cnt
     FROM movies m
     ${catJoin}
-    WHERE m.search_title LIKE ? AND m.source_id IN (${sourceList})
+    WHERE m.search_title LIKE ? AND m.source_id IN (${sourceList}) ${nsfwWhere}
   `).get(...catParams, like, ...filterIds) as { cnt: number }).cnt
   return { items, total }
 }
@@ -1429,6 +1562,7 @@ function g1cSearchSeries(
     ? `JOIN series_categories cat ON cat.id = sr.category_id AND cat.name = ?`
     : ''
   const catParams: unknown[] = categoryName ? [categoryName] : []
+  const nsfwWhere = getSetting('allow_adult') !== '0' ? '' : 'AND sr.is_nsfw = 0'
   const normalized = normalizeForSearch(query)
   if (!normalized) return { items: [], total: 0 }
   const like = `%${normalized}%`
@@ -1437,7 +1571,7 @@ function g1cSearchSeries(
     SELECT ${SERIES_SELECT}
     FROM series sr
     ${catJoin}
-    WHERE sr.search_title LIKE ? AND sr.source_id IN (${sourceList})
+    WHERE sr.search_title LIKE ? AND sr.source_id IN (${sourceList}) ${nsfwWhere}
     LIMIT ? OFFSET ?
   `).all(...catParams, like, ...filterIds, limit, offset) as unknown[]
 
@@ -1448,7 +1582,7 @@ function g1cSearchSeries(
     SELECT COUNT(*) AS cnt
     FROM series sr
     ${catJoin}
-    WHERE sr.search_title LIKE ? AND sr.source_id IN (${sourceList})
+    WHERE sr.search_title LIKE ? AND sr.source_id IN (${sourceList}) ${nsfwWhere}
   `).get(...catParams, like, ...filterIds) as { cnt: number }).cnt
   return { items, total }
 }
@@ -1466,20 +1600,20 @@ function runBrowseSearch(
   const sourceList = filterIds.map(() => '?').join(',')
   const dir = sortDir === 'asc' ? 'ASC' : 'DESC'
 
+  const allowAdult = getSetting('allow_adult') !== '0'
+
   if (type === 'live') {
     const sortCol: Record<string, string> = { title: 'c.title', year: 'c.md_year', rating: 'c.added_at', updated: 'c.added_at' }
     const catJoin = categoryName ? `JOIN channel_categories cat ON cat.id = c.category_id AND cat.name = ?` : ''
     const catParams: unknown[] = categoryName ? [categoryName] : []
+    const nsfwWhere = allowAdult ? '' : 'AND c.is_nsfw = 0'
     const total = (sqlite.prepare(`
-      SELECT COUNT(*) as cnt FROM channels c ${catJoin} WHERE c.source_id IN (${sourceList})
+      SELECT COUNT(*) as cnt FROM channels c ${catJoin} WHERE c.source_id IN (${sourceList}) ${nsfwWhere}
     `).get(...catParams, ...filterIds) as { cnt: number }).cnt
     const items = sqlite.prepare(`
-      SELECT ${CHANNEL_SELECT}
-      FROM channels c
-      ${catJoin}
-      WHERE c.source_id IN (${sourceList})
-      ORDER BY ${sortCol[sortBy] ?? 'c.added_at'} ${dir}
-      LIMIT ? OFFSET ?
+      SELECT ${CHANNEL_SELECT} FROM channels c ${catJoin}
+      WHERE c.source_id IN (${sourceList}) ${nsfwWhere}
+      ORDER BY ${sortCol[sortBy] ?? 'c.added_at'} ${dir} LIMIT ? OFFSET ?
     `).all(...catParams, ...filterIds, limit, offset) as unknown[]
     return { items, total }
   }
@@ -1488,16 +1622,14 @@ function runBrowseSearch(
     const sortCol: Record<string, string> = { title: 'm.title', year: 'm.md_year', rating: 'm.added_at', updated: 'm.added_at' }
     const catJoin = categoryName ? `JOIN movie_categories cat ON cat.id = m.category_id AND cat.name = ?` : ''
     const catParams: unknown[] = categoryName ? [categoryName] : []
+    const nsfwWhere = allowAdult ? '' : 'AND m.is_nsfw = 0'
     const total = (sqlite.prepare(`
-      SELECT COUNT(*) as cnt FROM movies m ${catJoin} WHERE m.source_id IN (${sourceList})
+      SELECT COUNT(*) as cnt FROM movies m ${catJoin} WHERE m.source_id IN (${sourceList}) ${nsfwWhere}
     `).get(...catParams, ...filterIds) as { cnt: number }).cnt
     const items = sqlite.prepare(`
-      SELECT ${MOVIE_SELECT}
-      FROM movies m
-      ${catJoin}
-      WHERE m.source_id IN (${sourceList})
-      ORDER BY ${sortCol[sortBy] ?? 'm.added_at'} ${dir}
-      LIMIT ? OFFSET ?
+      SELECT ${MOVIE_SELECT} FROM movies m ${catJoin}
+      WHERE m.source_id IN (${sourceList}) ${nsfwWhere}
+      ORDER BY ${sortCol[sortBy] ?? 'm.added_at'} ${dir} LIMIT ? OFFSET ?
     `).all(...catParams, ...filterIds, limit, offset) as unknown[]
     return { items, total }
   }
@@ -1506,16 +1638,14 @@ function runBrowseSearch(
     const sortCol: Record<string, string> = { title: 'sr.title', year: 'sr.md_year', rating: 'sr.added_at', updated: 'sr.added_at' }
     const catJoin = categoryName ? `JOIN series_categories cat ON cat.id = sr.category_id AND cat.name = ?` : ''
     const catParams: unknown[] = categoryName ? [categoryName] : []
+    const nsfwWhere = allowAdult ? '' : 'AND sr.is_nsfw = 0'
     const total = (sqlite.prepare(`
-      SELECT COUNT(*) as cnt FROM series sr ${catJoin} WHERE sr.source_id IN (${sourceList})
+      SELECT COUNT(*) as cnt FROM series sr ${catJoin} WHERE sr.source_id IN (${sourceList}) ${nsfwWhere}
     `).get(...catParams, ...filterIds) as { cnt: number }).cnt
     const items = sqlite.prepare(`
-      SELECT ${SERIES_SELECT}
-      FROM series sr
-      ${catJoin}
-      WHERE sr.source_id IN (${sourceList})
-      ORDER BY ${sortCol[sortBy] ?? 'sr.added_at'} ${dir}
-      LIMIT ? OFFSET ?
+      SELECT ${SERIES_SELECT} FROM series sr ${catJoin}
+      WHERE sr.source_id IN (${sourceList}) ${nsfwWhere}
+      ORDER BY ${sortCol[sortBy] ?? 'sr.added_at'} ${dir} LIMIT ? OFFSET ?
     `).all(...catParams, ...filterIds, limit, offset) as unknown[]
     return { items, total }
   }

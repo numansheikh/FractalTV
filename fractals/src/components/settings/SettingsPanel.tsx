@@ -16,7 +16,6 @@ import {
 
 interface Props {
   onClose: () => void
-  suppressScrim?: boolean
 }
 
 type PlayerPref = 'artplayer' | 'mpv' | 'vlc'
@@ -32,7 +31,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'about',      label: 'About' },
 ]
 
-export function SettingsPanel({ onClose, suppressScrim }: Props) {
+export function SettingsPanel({ onClose }: Props) {
   const { theme, font, setTheme, setFont } = useTheme()
   const [activeTab, setActiveTab] = useState<Tab>('appearance')
 
@@ -42,7 +41,7 @@ export function SettingsPanel({ onClose, suppressScrim }: Props) {
   const [mpvPath, setMpvPath] = useState(() => localStorage.getItem('fractals-player-mpv-path') ?? '')
   const [vlcPath, setVlcPath] = useState(() => localStorage.getItem('fractals-player-vlc-path') ?? '')
   return (
-    <SlidePanel open={true} onClose={onClose} width={480} suppressScrim={suppressScrim}>
+    <SlidePanel open={true} onClose={onClose} width={480}>
       {/* Header */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -237,6 +236,10 @@ const COMMON_TIMEZONES = Intl.supportedValuesOf('timeZone')
 
 function InterfaceTab() {
   const { pageSize, setPageSize, homeMode, setHomeMode, homeStripSize, setHomeStripSize, timezone, setTimezone } = useAppStore()
+  const [allowAdult, setAllowAdult] = useState(true)
+  useEffect(() => {
+    api.settings.get('allow_adult').then((v) => setAllowAdult(v !== '0'))
+  }, [])
   const systemTz = Intl.DateTimeFormat().resolvedOptions().timeZone
   const [tzSearch, setTzSearch] = useState('')
   const filteredTz = tzSearch
@@ -361,6 +364,37 @@ function InterfaceTab() {
               </div>
             </div>
           )}
+        </div>
+      </section>
+
+      <section>
+        <SectionLabel>Content</SectionLabel>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div>
+            <div style={{ fontSize: 12, color: 'var(--text-0)', fontFamily: 'var(--font-ui)' }}>Allow adult content</div>
+            <div style={{ fontSize: 11, color: 'var(--text-2)', fontFamily: 'var(--font-ui)', marginTop: 2 }}>
+              Show categories marked as adult (18+)
+            </div>
+          </div>
+          <button
+            onClick={async () => {
+              const next = !allowAdult
+              setAllowAdult(next)
+              await api.settings.set('allow_adult', next ? '1' : '0')
+            }}
+            style={{
+              width: 36, height: 20, borderRadius: 10, border: 'none', cursor: 'pointer',
+              background: allowAdult ? 'var(--accent-interactive)' : 'var(--bg-3)',
+              position: 'relative', transition: 'background 0.15s', flexShrink: 0,
+            }}
+          >
+            <div style={{
+              width: 16, height: 16, borderRadius: 8, background: '#fff',
+              position: 'absolute', top: 2,
+              left: allowAdult ? 18 : 2,
+              transition: 'left 0.15s',
+            }} />
+          </button>
         </div>
       </section>
     </div>
