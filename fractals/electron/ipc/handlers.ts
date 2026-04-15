@@ -1306,6 +1306,7 @@ export function registerHandlers() {
   ipcMain.handle('iptvOrg:matchSource', (_event, sourceId: string) => {
     try {
       const result = iptvOrgMatchSource(sourceId)
+      applyNsfwFlags(getSqlite())
       return { ok: true as const, ...result }
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
