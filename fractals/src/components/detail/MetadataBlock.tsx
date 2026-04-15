@@ -1,8 +1,18 @@
+import { useState } from 'react'
 import { ContentItem } from '@/lib/types'
 
 interface Props {
   item: ContentItem
   isSeries?: boolean
+}
+
+function titleInitials(title: string): string {
+  return title
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase() ?? '')
+    .join('')
 }
 
 function parseGenres(raw: string | undefined): string[] {
@@ -25,10 +35,16 @@ function formatRuntime(minutes: number): string {
   return `${minutes}m`
 }
 
-export function MetadataBlock({ item }: Props) {
+export function MetadataBlock({ item, isSeries }: Props) {
+  const [heroError, setHeroError] = useState(false)
   const backdrop = item.backdropUrl ?? item.backdrop_url
+  const poster = item.posterUrl ?? item.poster_url
+  const rawHero = backdrop || poster
+  const heroSrc = rawHero && !heroError ? rawHero : null
+  const heroIsPosterFallback = !backdrop && !!poster
   const rating = item.ratingTmdb ?? item.rating_tmdb ?? item.ratingImdb ?? item.rating_imdb
   const genres = parseGenres(item.genres)
+  const typeAccent = isSeries ? 'var(--accent-series)' : 'var(--accent-film)'
 
   const metaparts: string[] = []
   if (item.year) metaparts.push(String(item.year))
@@ -38,26 +54,72 @@ export function MetadataBlock({ item }: Props) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      {/* Backdrop strip */}
-      {backdrop && (
-        <div style={{ position: 'relative', borderRadius: 8, overflow: 'hidden' }}>
+      {!heroSrc && (
+        <div style={{
+          position: 'relative',
+          borderRadius: 8,
+          overflow: 'hidden',
+          height: 180,
+          background: `linear-gradient(135deg, color-mix(in srgb, ${typeAccent} 22%, var(--bg-2)), var(--bg-2) 70%)`,
+          border: '1px solid var(--border-subtle)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}>
+          <span style={{
+            fontSize: 56, fontWeight: 700,
+            color: typeAccent, opacity: 0.55,
+            letterSpacing: '-0.03em', fontFamily: 'var(--font-ui)',
+          }}>
+            {titleInitials(item.title)}
+          </span>
+          <div style={{
+            position: 'absolute',
+            bottom: 0, left: 0, right: 0,
+            height: '55%',
+            background: 'linear-gradient(to bottom, transparent, var(--bg-1))',
+            pointerEvents: 'none',
+          }} />
+        </div>
+      )}
+      {heroSrc && (
+        <div style={{ position: 'relative', borderRadius: 8, overflow: 'hidden', height: 180, background: 'var(--bg-2)' }}>
+          {/* Blurred fill — when only a portrait poster is available, scale-up + blur
+              it so it can fill a wide hero strip without black bars. */}
+          {heroIsPosterFallback && (
+            <img
+              src={heroSrc}
+              alt=""
+              aria-hidden
+              onError={() => setHeroError(true)}
+              style={{
+                position: 'absolute', inset: 0,
+                width: '100%', height: '100%',
+                objectFit: 'cover',
+                filter: 'blur(24px) saturate(1.1)',
+                transform: 'scale(1.15)',
+                opacity: 0.7,
+              }}
+            />
+          )}
+          {/* Sharp image: contain-fit for poster fallback (keeps portrait intact),
+              cover-fit for a proper landscape backdrop. */}
           <img
-            src={backdrop}
+            src={heroSrc}
             alt=""
+            onError={() => setHeroError(true)}
             style={{
-              width: '100%',
-              maxHeight: 180,
-              objectFit: 'cover',
+              position: 'relative',
+              width: '100%', height: '100%',
+              objectFit: heroIsPosterFallback ? 'contain' : 'cover',
               display: 'block',
             }}
           />
-          {/* Gradient overlay at bottom fading to --bg-1 */}
+          {/* Gradient fade to --bg-1 at bottom */}
           <div style={{
             position: 'absolute',
-            bottom: 0,
-            left: 0,
-            right: 0,
-            height: '50%',
+            bottom: 0, left: 0, right: 0,
+            height: '55%',
             background: 'linear-gradient(to bottom, transparent, var(--bg-1))',
             pointerEvents: 'none',
           }} />

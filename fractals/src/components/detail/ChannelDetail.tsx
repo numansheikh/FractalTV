@@ -6,6 +6,7 @@ import { useSourcesStore } from '@/stores/sources.store'
 import { buildColorMapFromSources } from '@/lib/sourceColors'
 import { SlidePanel } from '@/components/layout/SlidePanel'
 import { ActionButtons } from './ActionButtons'
+import { DetailShell, BreadcrumbItem } from './DetailShell'
 import { fmtTime } from '@/lib/time'
 
 interface EpgProg {
@@ -50,9 +51,6 @@ export function ChannelDetail({ item, onPlay, onClose, onNavigate, isPlaying }: 
   const catchupSupported = ((c as any).catchup_supported ?? (c as any).catchupSupported) === 1
   const catchupDays = (c as any).catchup_days ?? (c as any).catchupDays
 
-  // EPG schedule — 12h forward, plus 6h back if channel has any epg_channel_id.
-  // Gate the whole query on epg_channel_id to avoid hitting the IPC for channels
-  // that can never return programmes.
   const { data: epgData } = useQuery({
     queryKey: ['channel-detail-epg', item.id, epgChannelId],
     queryFn: async () => {
@@ -76,174 +74,101 @@ export function ChannelDetail({ item, onPlay, onClose, onNavigate, isPlaying }: 
     .map((w) => w[0].toUpperCase())
     .join('')
 
+  const breadcrumbs: BreadcrumbItem[] = [
+    ...(primarySource && sourceColor ? [{
+      label: primarySource.name,
+      color: sourceColor.accent,
+      onClick: () => onNavigate({ sourceId: primarySourceId }),
+    }] : []),
+    { label: 'Channels', color: 'var(--accent-live)', onClick: () => onNavigate({ type: 'live' }) },
+    ...(categoryName ? [{
+      label: categoryName,
+      color: 'var(--accent-live)',
+      onClick: () => onNavigate({ type: 'live', category: categoryName }),
+      bold: true,
+    }] : []),
+  ]
+
   return (
-    <SlidePanel open={true} onClose={onClose} width={420} suppressClose={isPlaying}>
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--bg-1)' }}>
-
-        {/* Header bar */}
-        <div style={{
-          height: 44,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          padding: '0 12px',
-          borderBottom: '1px solid var(--border-subtle)',
-          flexShrink: 0,
-        }}>
-          <button
-            onClick={onClose}
-            style={{
-              width: 28, height: 28, borderRadius: 6,
-              background: 'transparent', border: 'none',
-              color: 'var(--text-2)', cursor: 'pointer',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 16, lineHeight: 1,
-              transition: 'color 0.12s', flexShrink: 0,
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-0)' }}
-            onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-2)' }}
-          >
-            ✕
-          </button>
-
-          <span style={{
-            fontSize: 11, fontWeight: 600,
-            color: 'var(--accent-live)',
-            background: 'color-mix(in srgb, var(--accent-live) 15%, transparent)',
-            borderRadius: 4, padding: '2px 7px',
-            fontFamily: 'var(--font-ui)', letterSpacing: '0.04em',
+    <SlidePanel open={true} onClose={onClose} width={380} suppressClose={isPlaying}>
+      <DetailShell
+        typeBadge={{ label: 'CHANNEL', accent: 'var(--accent-live)' }}
+        breadcrumbs={breadcrumbs}
+        primarySource={primarySource}
+        primarySourceColor={sourceColor}
+        onClose={onClose}
+      >
+        {/* Logo + title */}
+        <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+          <div style={{
+            width: 96, height: 96,
+            borderRadius: 8,
+            background: 'var(--bg-3)',
+            border: '1px solid var(--border-subtle)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            overflow: 'hidden',
+            flexShrink: 0,
           }}>
-            CHANNEL
-          </span>
-
-          <div style={{ flex: 1 }} />
-
-          {primarySource && sourceColor && (
-            <span style={{
-              fontSize: 11, fontWeight: 500,
-              color: sourceColor.accent,
-              background: sourceColor.dim,
-              borderRadius: 4, padding: '2px 7px',
-              fontFamily: 'var(--font-ui)',
-              maxWidth: 120,
-              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-            }}>
-              {primarySource.name}
-            </span>
-          )}
-        </div>
-
-        {/* Breadcrumbs */}
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap',
-          padding: '8px 16px',
-          borderBottom: '1px solid var(--border-subtle)',
-          flexShrink: 0,
-        }}>
-          {primarySource && sourceColor && (
-            <>
-              <BreadcrumbLink color={sourceColor.accent} onClick={() => onNavigate({ sourceId: primarySourceId })}>
-                {primarySource.name}
-              </BreadcrumbLink>
-              <BreadcrumbSep />
-            </>
-          )}
-          <BreadcrumbLink color="var(--accent-live)" onClick={() => onNavigate({ type: 'live' })}>
-            Channels
-          </BreadcrumbLink>
-          {categoryName && (
-            <>
-              <BreadcrumbSep />
-              <BreadcrumbLink
-                color="var(--accent-live)"
-                onClick={() => onNavigate({ type: 'live', category: categoryName })}
-                bold
-              >
-                {categoryName}
-              </BreadcrumbLink>
-            </>
-          )}
-        </div>
-
-        {/* Scrollable content */}
-        <div style={{
-          flex: 1, overflowY: 'auto', padding: 16,
-          display: 'flex', flexDirection: 'column', gap: 16,
-        }}>
-          {/* Logo + title */}
-          <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
-            <div style={{
-              width: 96, height: 96,
-              borderRadius: 8,
-              background: 'var(--bg-3)',
-              border: '1px solid var(--border-subtle)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              overflow: 'hidden',
-              flexShrink: 0,
-            }}>
-              {hasLogo ? (
-                <img
-                  src={logo}
-                  alt=""
-                  style={{ width: '100%', height: '100%', objectFit: 'contain', padding: 10 }}
-                  onError={() => setImgError(true)}
-                />
-              ) : (
-                <span style={{
-                  fontSize: 28, fontWeight: 700,
-                  color: sourceColor?.accent ?? 'var(--text-2)',
-                  opacity: 0.7, letterSpacing: '-0.02em',
-                }}>
-                  {initials}
-                </span>
-              )}
-            </div>
-            <div style={{ minWidth: 0, flex: 1 }}>
-              <h2 style={{
-                fontSize: 18, fontWeight: 600,
-                color: 'var(--text-0)',
-                margin: 0, lineHeight: 1.3,
-                fontFamily: 'var(--font-ui)',
-                wordBreak: 'break-word',
+            {hasLogo ? (
+              <img
+                src={logo}
+                alt=""
+                style={{ width: '100%', height: '100%', objectFit: 'contain', padding: 10 }}
+                onError={() => setImgError(true)}
+              />
+            ) : (
+              <span style={{
+                fontSize: 28, fontWeight: 700,
+                color: sourceColor?.accent ?? 'var(--text-2)',
+                opacity: 0.7, letterSpacing: '-0.02em',
               }}>
-                {c.title}
-              </h2>
-              {catchupSupported && (
-                <p style={{
-                  marginTop: 6, margin: 0,
-                  fontSize: 11, color: 'var(--text-2)',
-                  fontFamily: 'var(--font-ui)',
-                }}>
-                  Catchup{catchupDays ? ` · ${catchupDays} days` : ''}
-                </p>
-              )}
-            </div>
+                {initials}
+              </span>
+            )}
           </div>
-
-          <ActionButtons item={c} onPlay={onPlay} overridePlayLabel="▶ Watch live" />
-
-          {/* Schedule — show when EPG data is available for this channel */}
-          {programmes.length > 0 && <ScheduleSection programmes={programmes} />}
-
-          {/* Minimal technical metadata — shown only if present */}
-          {(tvgId || epgChannelId) && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <h2 style={{
+              fontSize: 18, fontWeight: 600,
+              color: 'var(--text-0)',
+              margin: 0, lineHeight: 1.3,
+              fontFamily: 'var(--font-ui)',
+              wordBreak: 'break-word',
+            }}>
+              {c.title}
+            </h2>
+            {catchupSupported && (
               <p style={{
-                fontSize: 10, fontWeight: 600,
-                textTransform: 'uppercase', letterSpacing: '0.06em',
-                color: 'var(--text-3)',
-                margin: 0, fontFamily: 'var(--font-ui)',
+                marginTop: 6, margin: 0,
+                fontSize: 11, color: 'var(--text-2)',
+                fontFamily: 'var(--font-ui)',
               }}>
-                EPG identity
+                Catchup{catchupDays ? ` · ${catchupDays} days` : ''}
               </p>
-              {tvgId && <MetaRow label="tvg-id" value={String(tvgId)} />}
-              {epgChannelId && epgChannelId !== tvgId && (
-                <MetaRow label="EPG channel" value={String(epgChannelId)} />
-              )}
-            </div>
-          )}
+            )}
+          </div>
         </div>
-      </div>
+
+        <ActionButtons item={c} onPlay={onPlay} overridePlayLabel="▶ Watch live" />
+
+        {programmes.length > 0 && <ScheduleSection programmes={programmes} />}
+
+        {(tvgId || epgChannelId) && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <p style={{
+              fontSize: 10, fontWeight: 600,
+              textTransform: 'uppercase', letterSpacing: '0.06em',
+              color: 'var(--text-3)',
+              margin: 0, fontFamily: 'var(--font-ui)',
+            }}>
+              EPG identity
+            </p>
+            {tvgId && <MetaRow label="tvg-id" value={String(tvgId)} />}
+            {epgChannelId && epgChannelId !== tvgId && (
+              <MetaRow label="EPG channel" value={String(epgChannelId)} />
+            )}
+          </div>
+        )}
+      </DetailShell>
     </SlidePanel>
   )
 }
@@ -269,39 +194,11 @@ function MetaRow({ label, value }: { label: string; value: string }) {
   )
 }
 
-function BreadcrumbLink({ children, color, onClick, bold }: { children: React.ReactNode; color: string; onClick: () => void; bold?: boolean }) {
-  return (
-    <span
-      onClick={onClick}
-      style={{
-        fontSize: bold ? 11 : 10,
-        fontWeight: bold ? 600 : 400,
-        color,
-        cursor: 'pointer',
-        fontFamily: 'var(--font-ui)',
-        transition: 'opacity 0.12s',
-      }}
-      onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.65'; e.currentTarget.style.textDecoration = 'underline' }}
-      onMouseLeave={(e) => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.textDecoration = 'none' }}
-    >
-      {children}
-    </span>
-  )
-}
-
-function BreadcrumbSep() {
-  return (
-    <svg width="6" height="6" viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" strokeWidth="2.5" strokeLinecap="round">
-      <polyline points="9 18 15 12 9 6" />
-    </svg>
-  )
-}
-
 function ScheduleSection({ programmes }: { programmes: EpgProg[] }) {
   const nowSec = Math.floor(Date.now() / 1000)
   const sorted = [...programmes].sort((a, b) => a.startTime - b.startTime)
   const current = sorted.find((p) => p.startTime <= nowSec && p.endTime > nowSec) ?? null
-  const past = sorted.filter((p) => p.endTime <= nowSec).slice(-3)  // last 3 completed slots
+  const past = sorted.filter((p) => p.endTime <= nowSec).slice(-3)
   const upcoming = sorted.filter((p) => p.startTime > nowSec).slice(0, 10)
 
   return (
@@ -350,9 +247,7 @@ function ProgRow({ prog, state, nowSec }: { prog: EpgProg; state: 'past' | 'now'
         }} />
       )}
       <div style={{
-        display: 'flex',
-        alignItems: 'baseline',
-        gap: 8,
+        display: 'flex', alignItems: 'baseline', gap: 8,
         marginBottom: prog.description ? 2 : 0,
       }}>
         <span style={{
@@ -360,8 +255,7 @@ function ProgRow({ prog, state, nowSec }: { prog: EpgProg; state: 'past' | 'now'
           color: isNow ? 'var(--accent-live)' : 'var(--text-3)',
           fontFamily: 'var(--font-mono)',
           fontWeight: isNow ? 600 : 400,
-          flexShrink: 0,
-          minWidth: 44,
+          flexShrink: 0, minWidth: 44,
         }}>
           {fmtTime(prog.startTime)}
         </span>
@@ -370,8 +264,7 @@ function ProgRow({ prog, state, nowSec }: { prog: EpgProg; state: 'past' | 'now'
           fontWeight: isNow ? 600 : 500,
           color: isNow ? 'var(--text-0)' : 'var(--text-1)',
           fontFamily: 'var(--font-ui)',
-          lineHeight: 1.3,
-          wordBreak: 'break-word',
+          lineHeight: 1.3, wordBreak: 'break-word',
         }}>
           {prog.title}
         </span>
