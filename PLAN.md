@@ -76,6 +76,10 @@ FTS5 is **not** on this list — tried twice, rejected both times at this catalo
 
 - [ ] 130+ `as any` casts across IPC layer — triage sprint (worst: `lib/api.ts`, `PlayerOverlay`, `ipc/handlers.ts`)
 
+### Bucket 5 — Detail Panel Polish
+
+- [ ] Show film duration in Movie Detail panel (currently missing)
+
 ### Bucket 4 — Multi-Platform Reach (Phase 3)
 
 Order: Electron (done) → Android phone → Android TV → iOS → Tizen → PWA.
@@ -99,6 +103,10 @@ Three-tier split (same React codebase, feature flags):
 | `XtreamCodesAPI.md` | Xtream Codes API reference |
 
 ---
+
+## g2 — queued
+
+- **VoD enrichment (movies + series)** — keyless sources only (Wikipedia REST summary + Wikidata + IMDb suggest). Versioned extraction algo (`v1`), candidate rows in `movie_enrichment_g2` / `series_enrichment_g2`, `selected_enrichment_id` + `enrichment_disabled` on the content row, button-triggered from source card, per-field fallback in detail panels, "Not this film?" pill opens candidate picker. TMDB-with-key deferred to a future generation. Full plan: `/Users/numan/.claude/plans/quiet-frolicking-hopcroft.md`.
 
 ## g2 — shipped so far (branch: g2, 2026-04-15)
 

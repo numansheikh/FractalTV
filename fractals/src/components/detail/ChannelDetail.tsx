@@ -152,6 +152,7 @@ export function ChannelDetail({ item, onPlay, onClose, onNavigate, isPlaying }: 
       </button>
       <DetailMiniPlayer
         contentId={c.id}
+        contentType="live"
         autoplay={autoplay}
         promptSeen={promptSeen}
         onPromptSeen={() => setPromptSeen(true)}

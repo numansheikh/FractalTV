@@ -1001,7 +1001,8 @@ export function registerHandlers() {
         VALUES (?, ?, ?, unixepoch())
         ON CONFLICT(profile_id, movie_id) DO UPDATE SET
           watch_position  = excluded.watch_position,
-          last_watched_at = excluded.last_watched_at
+          last_watched_at = excluded.last_watched_at,
+          completed       = 0
       `).run(DEFAULT_PROFILE, args.contentId, args.position)
       return { success: true }
     }
@@ -1011,7 +1012,8 @@ export function registerHandlers() {
         VALUES (?, ?, ?, unixepoch())
         ON CONFLICT(profile_id, episode_id) DO UPDATE SET
           watch_position  = excluded.watch_position,
-          last_watched_at = excluded.last_watched_at
+          last_watched_at = excluded.last_watched_at,
+          completed       = 0
       `).run(DEFAULT_PROFILE, args.contentId, args.position)
       return { success: true }
     }

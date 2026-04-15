@@ -99,6 +99,7 @@ export function MovieDetail({ item, onPlay, onClose, onNavigate, isPlaying }: Pr
       </button>
       <DetailMiniPlayer
         contentId={c.id}
+        contentType="movie"
         autoplay={autoplay}
         promptSeen={promptSeen}
         onPromptSeen={() => setPromptSeen(true)}

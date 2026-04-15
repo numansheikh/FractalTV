@@ -6,6 +6,7 @@ import { AutoplayPrompt } from './AutoplayPrompt'
 
 interface Props {
   contentId: string
+  contentType: 'live' | 'movie' | 'series'
   autoplay: boolean
   promptSeen: boolean
   onPromptSeen: () => void
@@ -62,7 +63,7 @@ function MiniAudioBars() {
   )
 }
 
-export function DetailMiniPlayer({ contentId, autoplay, promptSeen, onPromptSeen }: Props) {
+export function DetailMiniPlayer({ contentId, contentType, autoplay, promptSeen, onPromptSeen }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const artRef = useRef<Artplayer | null>(null)
   const autoplayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -113,7 +114,7 @@ export function DetailMiniPlayer({ contentId, autoplay, promptSeen, onPromptSeen
         contextmenu: [],
         pip: false,
         fullscreen: false,
-        hotkey: false,
+        hotkey: contentType !== 'live',
         playbackRate: false,
         aspectRatio: false,
         setting: false,
@@ -125,7 +126,7 @@ export function DetailMiniPlayer({ contentId, autoplay, promptSeen, onPromptSeen
         autoMini: false,
         screenshot: false,
         lock: false,
-        isLive: true,
+        isLive: contentType === 'live',
         theme: 'transparent',
         moreVideoAttr: { crossOrigin: 'anonymous' },
         ...(isHls && Hls.isSupported() && {

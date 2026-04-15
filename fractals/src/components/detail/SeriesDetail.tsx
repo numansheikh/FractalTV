@@ -329,6 +329,7 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
                 {firstEpItem && (
                   <DetailMiniPlayer
                     contentId={firstEpItem.id}
+                    contentType="series"
                     autoplay={autoplay}
                     promptSeen={promptSeen}
                     onPromptSeen={() => setPromptSeen(true)}
