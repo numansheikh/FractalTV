@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ContentItem, BreadcrumbNav } from '@/lib/types'
 import { api } from '@/lib/api'
 import { useSourcesStore } from '@/stores/sources.store'
 import { useUserStore } from '@/stores/user.store'
+import { useAppStore } from '@/stores/app.store'
 import { buildColorMapFromSources } from '@/lib/sourceColors'
 import { SlidePanel } from '@/components/layout/SlidePanel'
 import { EpisodeRow } from '@/components/cards/EpisodeRow'
@@ -11,7 +12,7 @@ import { MetadataBlock } from './MetadataBlock'
 import { ActionButtons } from './ActionButtons'
 import { AboutBlock } from './AboutBlock'
 import { DetailShell, BreadcrumbItem } from './DetailShell'
-import { DetailMiniPlayer } from '@/components/player/DetailMiniPlayer'
+import { EnrichmentPicker } from './EnrichmentPicker'
 
 interface Props {
   item: ContentItem
@@ -21,30 +22,53 @@ interface Props {
   isPlaying?: boolean
 }
 
+// Session-level cache so activeSeason survives panel close/reopen within the same session.
+const activeSeasonCache = new Map<string, string>()
+
 export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: Props) {
-  const [activeSeason, setActiveSeason] = useState<string | null>(null)
-  const [autoplay, setAutoplay] = useState(true)
-  const [promptSeen, setPromptSeen] = useState(false)
+  const [activeSeason, _setActiveSeason] = useState<string | null>(() => activeSeasonCache.get(item.id) ?? null)
+  const setActiveSeason = (s: string | null) => {
+    if (s) activeSeasonCache.set(item.id, s)
+    _setActiveSeason(s)
+  }
+  const [showPicker, setShowPicker] = useState(false)
 
   const { sources } = useSourcesStore()
   const colorMap = buildColorMapFromSources(sources)
   const userStore = useUserStore()
-
-  useEffect(() => {
-    Promise.all([
-      api.settings.get('autoplay_detail'),
-      api.settings.get('autoplay_prompt_shown'),
-    ]).then(([ad, aps]) => {
-      setAutoplay(ad !== '0')
-      setPromptSeen(aps === '1')
-    })
-  }, [])
+  const queryClient = useQueryClient()
 
   const { data: enrichedItem } = useQuery({
     queryKey: ['content', item.id],
     queryFn: () => api.content.get(item.id),
     staleTime: 5 * 60_000,
   })
+
+  const [enrichingSingle, setEnrichingSingle] = useState(false)
+  const enrichTriggered = useRef(false)
+
+  // Reset enrichTriggered when the item changes so a new item can auto-enrich.
+  useEffect(() => { enrichTriggered.current = false }, [item.id])
+
+  const { data: enrichmentData, refetch: refetchEnrichment } = useQuery({
+    queryKey: ['vodEnrich', item.id],
+    queryFn: () => api.vodEnrich.getForContent(item.id),
+    staleTime: 60_000,
+  })
+
+  // Auto-enrich on first open if no data exists
+  useEffect(() => {
+    if (enrichTriggered.current) return
+    if (!enrichmentData) return
+    if (enrichmentData.disabled) return
+    if (enrichmentData.candidates.some((c: any) => c.confidence > 0)) return
+    enrichTriggered.current = true
+    setEnrichingSingle(true)
+    api.vodEnrich.enrichSingle(item.id).finally(() => {
+      setEnrichingSingle(false)
+      refetchEnrichment()
+    })
+  }, [enrichmentData, item.id, refetchEnrichment])
 
   const { data: seriesInfo, isFetching: seriesFetching } = useQuery({
     queryKey: ['series-info', item.id],
@@ -63,6 +87,48 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
   const resumeEntry = continueData[0] ?? null
 
   const c = (enrichedItem as ContentItem | null) ?? item
+
+  // Callback ref fires at DOM commit time — guaranteed non-null, no effect timing issues.
+  // Anchor registration and cleanup are handled here; playback starts in the separate episode effect.
+  const playerZoneCallback = useCallback((el: HTMLDivElement | null) => {
+    if (!el) {
+      const s = useAppStore.getState()
+      s.setEmbeddedAnchor(null)
+      if (s.playerMode === 'embedded') {
+        s.setPlayerMode('hidden')
+        s.setPlayingContent(null)
+      }
+      return
+    }
+    useAppStore.getState().setEmbeddedAnchor(el)
+  }, [])
+
+  // Derive active enrichment candidate
+  const activeEnrichment = (() => {
+    if (!enrichmentData || enrichmentData.disabled) return null
+    const candidates = enrichmentData.candidates ?? []
+    if (!candidates.length) return null
+    if (enrichmentData.selected_id != null) {
+      const pinned = candidates.find((r: any) => r.id === enrichmentData.selected_id)
+      if (pinned && pinned.confidence > 0) return JSON.parse(pinned.raw_json)
+    }
+    const best = candidates[0]
+    if (best && best.confidence > 0 && best.raw_json !== '{}') return JSON.parse(best.raw_json)
+    return null
+  })()
+
+  // Merge enrichment over stream data per-field
+  const displayItem: ContentItem = {
+    ...c,
+    plot: activeEnrichment?.overview ?? c.plot,
+    cast: activeEnrichment?.cast?.length ? JSON.stringify(activeEnrichment.cast) : c.cast,
+    director: activeEnrichment?.directors?.join(', ') ?? c.director,
+    genres: activeEnrichment?.genres?.join(', ') ?? c.genres,
+    posterUrl: activeEnrichment?.poster_url ?? c.posterUrl ?? c.poster_url,
+  }
+
+  const hasCandidates = (enrichmentData?.candidates ?? []).some((r: any) => r.confidence > 0 && r.raw_json !== '{}')
+
   const primarySourceId = c.primarySourceId ?? c.primary_source_id ?? item.primarySourceId ?? item.primary_source_id ?? (item as any).source_ids ?? item.id?.split(':')[0]
   const sourceColor = primarySourceId ? colorMap[primarySourceId] : undefined
   const primarySource = primarySourceId ? sources.find((s) => s.id === primarySourceId) : undefined
@@ -122,6 +188,27 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
         _parent: { id: item.id, title: item.title, type: 'series' },
       }
     : undefined
+
+  // Start embedded playback once the first episode item is ready (or player already running)
+  const firstEpIdRef = useRef<string | undefined>(undefined)
+  useEffect(() => {
+    if (!firstEpItem) return
+    if (firstEpIdRef.current === firstEpItem.id) return
+    firstEpIdRef.current = firstEpItem.id
+    const s = useAppStore.getState()
+    if (s.playingContent?.id === firstEpItem.id && s.playerMode !== 'hidden') {
+      // Player already running with this episode — just re-embed
+      s.setPlayerMode('embedded')
+    } else if (!s.playingContent || s.playerMode === 'hidden') {
+      // Nothing currently playing — autostart after 2s
+      const ep = firstEpItem
+      const timer = setTimeout(() => {
+        useAppStore.getState().setPlayingContent(ep)
+        useAppStore.getState().setPlayerMode('embedded')
+      }, 2000)
+      return () => clearTimeout(timer)
+    }
+  }, [firstEpItem?.id])
 
   const playButtonLabel = resumeEntry && resumeEntry.resume_season_number != null && resumeEntry.resume_episode_number != null
     ? `▶ Resume S${resumeEntry.resume_season_number}·E${resumeEntry.resume_episode_number}`
@@ -326,23 +413,73 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
                     <line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" />
                   </svg>
                 </button>
-                {firstEpItem && (
-                  <DetailMiniPlayer
-                    contentId={firstEpItem.id}
-                    contentType="series"
-                    autoplay={autoplay}
-                    promptSeen={promptSeen}
-                    onPromptSeen={() => setPromptSeen(true)}
-                  />
+                {/* Embedded player placeholder — PlayerOverlay overlays this div in 'embedded' mode */}
+                <div
+                  ref={playerZoneCallback}
+                  style={{ width: '100%', aspectRatio: '16/9', background: '#0a0a0e', borderRadius: 8, flexShrink: 0 }}
+                />
+                {enrichingSingle && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'center', padding: '2px 0' }}>
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ animation: 'spin 1s linear infinite', flexShrink: 0 }}><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
+                    <span style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--font-ui)' }}>Looking up series data…</span>
+                  </div>
+                )}
+                {!enrichingSingle && !hasCandidates && (
+                  <button
+                    onClick={() => {
+                      enrichTriggered.current = false
+                      setEnrichingSingle(true)
+                      api.vodEnrich.enrichSingle(item.id, true).finally(() => {
+                        setEnrichingSingle(false)
+                        refetchEnrichment()
+                      })
+                    }}
+                    style={{
+                      alignSelf: 'center',
+                      background: 'none', border: 'none', cursor: 'pointer',
+                      fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--font-ui)',
+                      padding: '2px 0', transition: 'color 0.12s',
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-1)' }}
+                    onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-3)' }}
+                  >
+                    Retry lookup
+                  </button>
+                )}
+                {hasCandidates && (
+                  <button
+                    onClick={() => setShowPicker(true)}
+                    style={{
+                      alignSelf: 'center',
+                      background: 'none', border: 'none', cursor: 'pointer',
+                      fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--font-ui)',
+                      padding: '2px 0',
+                      transition: 'color 0.12s',
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-1)' }}
+                    onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-3)' }}
+                  >
+                    {enrichmentData?.disabled ? 'Re-enable enrichment' : 'Not this series?'}
+                  </button>
                 )}
               </>
             }
           >
-            <MetadataBlock item={c} isSeries />
-            <AboutBlock item={c} onClose={onClose} />
+            <MetadataBlock item={displayItem} isSeries />
+            <AboutBlock item={displayItem} onClose={onClose} />
           </DetailShell>
         </div>
       </div>
+      {showPicker && (
+        <EnrichmentPicker
+          contentId={c.id}
+          contentType="series"
+          candidates={enrichmentData?.candidates ?? []}
+          onPicked={() => { setShowPicker(false); queryClient.invalidateQueries({ queryKey: ['vodEnrich', c.id] }) }}
+          onDisabled={() => { setShowPicker(false); queryClient.invalidateQueries({ queryKey: ['vodEnrich', c.id] }) }}
+          onClose={() => setShowPicker(false)}
+        />
+      )}
     </SlidePanel>
   )
 }

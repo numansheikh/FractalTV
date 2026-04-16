@@ -55,6 +55,8 @@ export const api = {
       ipcRenderer.invoke('content:get-catchup-url', args),
     browse: (args: { type?: 'live' | 'movie' | 'series'; categoryName?: string; sourceIds?: string[]; sortBy?: string; sortDir?: string; limit?: number; offset?: number }) =>
       ipcRenderer.invoke('content:browse', args),
+    getVodInfo: (args: { contentId: string }) =>
+      ipcRenderer.invoke('content:get-vod-info', args),
   },
 
   // Series
@@ -155,6 +157,17 @@ export const api = {
     pull: () => ipcRenderer.invoke('iptvOrg:pull'),
     status: () => ipcRenderer.invoke('iptvOrg:status'),
     matchSource: (sourceId: string) => ipcRenderer.invoke('iptvOrg:matchSource', sourceId),
+  },
+
+  // VoD enrichment (g2 — keyless)
+  vodEnrich: {
+    status: () => ipcRenderer.invoke('vodEnrich:status'),
+    enrich: (sourceId: string, force?: boolean) => ipcRenderer.invoke('vodEnrich:enrich', sourceId, force ?? false),
+    getForContent: (contentId: string) => ipcRenderer.invoke('vodEnrich:getForContent', contentId),
+    enrichSingle: (contentId: string, force?: boolean) => ipcRenderer.invoke('vodEnrich:enrichSingle', contentId, force ?? false),
+    pickCandidate: (contentId: string, enrichmentId: number) => ipcRenderer.invoke('vodEnrich:pickCandidate', contentId, enrichmentId),
+    disable: (contentId: string) => ipcRenderer.invoke('vodEnrich:disable', contentId),
+    reset: (contentId: string) => ipcRenderer.invoke('vodEnrich:reset', contentId),
   },
 
   // Events from main process

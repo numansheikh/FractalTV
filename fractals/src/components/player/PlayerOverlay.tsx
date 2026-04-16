@@ -13,7 +13,7 @@ import { buildColorMapFromSources } from '@/lib/sourceColors'
 
 interface Props {
   content: ContentItem | null
-  mode: 'hidden' | 'fullscreen' | 'mini'
+  mode: 'hidden' | 'fullscreen' | 'mini' | 'embedded'
   onClose: () => void
   onMinimize: () => void
   onExpand: () => void
@@ -106,11 +106,26 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
   const [showDebug, setShowDebug] = useState(false)
   const completionMarkedRef = useRef(false)
   const suppressRebuildRef = useRef(false)
+  const switchSeqRef = useRef(0)
   const [isOsFullscreen, setIsOsFullscreen] = useState(false)
   const [reconnectAttempt, setReconnectAttempt] = useState<number | null>(null)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const MAX_RECONNECT = 5
   const RECONNECT_BACKOFF = [2000, 4000, 8000, 16000, 32000]
+
+  // Embedded mode — track anchor element rect via ResizeObserver
+  const embeddedAnchor = useAppStore((s) => s.embeddedAnchor)
+  const [embeddedRect, setEmbeddedRect] = useState<DOMRect | null>(null)
+  useEffect(() => {
+    if (mode !== 'embedded' || !embeddedAnchor) { setEmbeddedRect(null); return }
+    const update = () => setEmbeddedRect(embeddedAnchor.getBoundingClientRect())
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(embeddedAnchor)
+    window.addEventListener('resize', update)
+    window.addEventListener('scroll', update, true)
+    return () => { ro.disconnect(); window.removeEventListener('resize', update); window.removeEventListener('scroll', update, true) }
+  }, [mode, embeddedAnchor])
 
   // Loading elapsed timer
   const [loadingElapsed, setLoadingElapsed] = useState(0)
@@ -213,10 +228,13 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
         artRef.current = null
       }
 
+      const savedVolume = parseFloat(localStorage.getItem('fractals-volume') ?? '1')
+
       const art = new Artplayer({
         container: containerRef.current,
         url,
         autoplay: true,
+        volume: isNaN(savedVolume) ? 1 : Math.max(0, Math.min(1, savedVolume)),
         ...({ autoHide: autoHideMs === 0 ? false : autoHideMs } as Record<string, unknown>),
         pip: false,
         fullscreen: false, // OS fullscreen handled via Electron IPC
@@ -365,14 +383,15 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
   }, [content?.id, content?.type])
 
   // ── Resize ArtPlayer on mode change ──────────────────────────────────────
+  // Do NOT pause on mode='hidden' — stream teardown is driven by content→null in the init effect.
+  // Pausing here would stall the stream during the transient hidden→embedded transition
+  // that occurs when minimizing fullscreen back to an anchor panel.
   useEffect(() => {
-    if (mode === 'hidden') {
-      artRef.current?.pause?.()
-      return
-    }
-    const t = setTimeout(() => (artRef.current as any)?.resize?.(), 300)
+    if (mode === 'hidden') return
+    // Resize after layout settles (embedded rect may differ from fullscreen dims)
+    const t = setTimeout(() => (artRef.current as any)?.resize?.(), 100)
     return () => clearTimeout(t)
-  }, [mode])
+  }, [mode, embeddedRect])
 
   // ── Position save + resume + completion (skip live) ──────────────────────
   useEffect(() => {
@@ -383,13 +402,33 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
       qc.invalidateQueries({ queryKey: ['library', 'continue-watching'] })
     }
 
-    // Fetch saved position — only show resume if not completed
-    api.user.getData(content.id).then((data: any) => {
-      if (data?.last_position > 5 && !data?.completed) {
-        setResumePrompt(data.last_position)
-        // Auto-dismiss timer starts in the playerState === 'playing' effect below
+    // _startAt: direct handoff from mini player — seek immediately, no prompt
+    const startAt = (content as any)._startAt as number | undefined
+    if (startAt && startAt > 5) {
+      const trySeek = (attempts = 0) => {
+        const art = artRef.current
+        if (art && art.duration > 0) { art.seek = startAt; return }
+        if (attempts < 20) setTimeout(() => trySeek(attempts + 1), 200)
       }
-    })
+      setTimeout(() => trySeek(), 300)
+    } else {
+      // In embedded mode — silently seek to saved position (no prompt)
+      // In fullscreen mode — show resume prompt
+      api.user.getData(content.id).then((data: any) => {
+        if (!data?.last_position || data.last_position <= 5 || data.completed) return
+        if (useAppStore.getState().playerMode === 'embedded') {
+          const trySeek = (attempts = 0) => {
+            const art = artRef.current
+            if (art && art.duration > 0) { art.seek = data.last_position; return }
+            if (attempts < 20) setTimeout(() => trySeek(attempts + 1), 200)
+          }
+          setTimeout(() => trySeek(), 300)
+        } else {
+          setResumePrompt(data.last_position)
+          // Auto-dismiss timer starts in the playerState === 'playing' effect below
+        }
+      })
+    }
 
     // Save every 10s while playing. Invalidate continue-watching so the strips
     // light up mid-session (user may still be in mini-player watching).
@@ -454,8 +493,12 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
 
   // ── In-place channel switch ───────────────────────────────────────────────
   const doChannelSwitch = useCallback((next: ContentItem) => {
+    const seq = ++switchSeqRef.current
     setLocalContent(next)
     setIsAudioOnly(false); isAudioOnlyRef.current = false
+    setPlayerState('loading')
+    setError(null)
+    setLoadingElapsed(0)
     setShowSurfer(true)
     if (surferTimerRef.current) clearTimeout(surferTimerRef.current)
     surferTimerRef.current = setTimeout(() => setShowSurfer(false), 3000)
@@ -467,6 +510,7 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
     if (!art) return
 
     api.content.getStreamUrl({ contentId: next.id }).then((result: any) => {
+      if (seq !== switchSeqRef.current) return // stale — a newer switch won the race
       if (!result?.url || !artRef.current) return
       const url: string = result.url
       const video = artRef.current.template.$video as HTMLVideoElement
@@ -536,9 +580,9 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
   }, [])
 
   // ── Keyboard handler ──────────────────────────────────────────────────────
-  // Single handler, capture phase. Only active when player is visible.
+  // Single handler, capture phase. Only active when fullscreen or mini.
   useEffect(() => {
-    if (mode === 'hidden') return
+    if (mode === 'hidden' || mode === 'embedded') return
 
     const seekState = { dir: 0 as -1 | 1 | 0, count: 0, timer: null as ReturnType<typeof setTimeout> | null }
     const SEEK_AMOUNTS = [5, 10, 25]
@@ -572,11 +616,7 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
           onClose()
         } else {
           // Windowed fullscreen
-          if (localContent?.type !== 'live') {
-            onMinimize()
-          } else {
-            onClose()
-          }
+          onMinimize()
         }
         return
       }
@@ -631,6 +671,7 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
         e.preventDefault()
         const vol = Math.min(1, art.volume + 0.1)
         art.volume = vol
+        localStorage.setItem('fractals-volume', String(vol))
         showOsd(`${Math.round(vol * 100)}%`, 'vol-up')
         return
       }
@@ -638,6 +679,7 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
         e.preventDefault()
         const vol = Math.max(0, art.volume - 0.1)
         art.volume = vol
+        localStorage.setItem('fractals-volume', String(vol))
         showOsd(vol === 0 ? 'Muted' : `${Math.round(vol * 100)}%`, 'vol-down')
         return
       }
@@ -665,21 +707,51 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
     window.addEventListener('keydown', handler, true)
     return () => {
       window.removeEventListener('keydown', handler, true)
-      if (osdTimer.current) clearTimeout(osdTimer.current)
+      if (osdTimer.current) { clearTimeout(osdTimer.current); osdTimer.current = null }
+      setOsd(null)
       if (seekState.timer) clearTimeout(seekState.timer)
     }
   }, [mode, isOsFullscreen, localContent?.type, isTimeshift, onClose, onMinimize, onSurfChannel, doChannelSwitch, showOsd])
 
   // ── Render ────────────────────────────────────────────────────────────────
-  const containerStyle = mode === 'hidden'
-    ? { display: 'none' } as React.CSSProperties
-    : mode === 'mini' ? MINI_STYLE : FULLSCREEN_STYLE
+  const containerStyle: React.CSSProperties = mode === 'hidden'
+    ? { display: 'none' }
+    : mode === 'mini' ? MINI_STYLE
+    : mode === 'embedded'
+      ? embeddedRect
+        ? { position: 'fixed', top: embeddedRect.top, left: embeddedRect.left, width: embeddedRect.width, height: embeddedRect.height, zIndex: 55, background: '#000', borderRadius: 8, overflow: 'hidden' }
+        : { display: 'none' }
+      : FULLSCREEN_STYLE
 
   const isLoading = playerState === 'loading'
   const isError = playerState === 'error'
 
   return (
     <div style={containerStyle} onMouseMove={mode === 'fullscreen' ? handlePlayerMouseMove : undefined}>
+
+      {/* ── Embedded click-to-expand overlay ── */}
+      {mode === 'embedded' && (
+        <div
+          onClick={onExpand}
+          style={{
+            position: 'absolute', inset: 0, zIndex: 30,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            opacity: 0, transition: 'opacity 0.15s',
+            cursor: 'pointer',
+            background: 'rgba(0,0,0,0.0)',
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.background = 'rgba(0,0,0,0.35)' }}
+          onMouseLeave={(e) => { e.currentTarget.style.opacity = '0'; e.currentTarget.style.background = 'rgba(0,0,0,0.0)' }}
+          title="Click to expand"
+        >
+          <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'rgba(255,255,255,0.18)', border: '1.5px solid rgba(255,255,255,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="15 3 21 3 21 9" /><polyline points="9 21 3 21 3 15" />
+              <line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" />
+            </svg>
+          </div>
+        </div>
+      )}
 
       {/* ── Mini-player top bar ── */}
       {mode === 'mini' && localContent && (
@@ -710,7 +782,7 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
           display: 'flex', alignItems: 'center', gap: 12,
           pointerEvents: 'none',
         }}>
-          <button onClick={onClose} title="Back (Esc)" style={{ ...backBtnStyle, pointerEvents: 'all' }}>
+          <button onClick={onMinimize} title="Back (Esc)" style={{ ...backBtnStyle, pointerEvents: 'all' }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="m12 19-7-7 7-7" /><path d="M19 12H5" /></svg>
           </button>
           {srcColor && <span style={{ width: 7, height: 7, borderRadius: '50%', background: srcColor.accent, flexShrink: 0 }} />}
@@ -742,7 +814,7 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
 
       {/* ── Fullscreen close button (VOD) ── */}
       {mode === 'fullscreen' && localContent?.type !== 'live' && (
-        <button onClick={onClose} title="Close (Esc)" style={{
+        <button onClick={onMinimize} title="Back (Esc)" style={{
           position: 'absolute', top: 14, left: 14, zIndex: 100,
           width: 36, height: 36, borderRadius: '50%',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -954,7 +1026,7 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
           channels={useAppStore.getState().channelSurfList}
           activeId={localContent.id}
           onSwitch={(ch) => {
-            useAppStore.getState().setPlayingContent(ch)
+            doChannelSwitch(ch)
             if (surferTimerRef.current) clearTimeout(surferTimerRef.current)
             surferTimerRef.current = setTimeout(() => setShowSurfer(false), 3000)
           }}

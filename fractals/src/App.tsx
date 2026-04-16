@@ -35,9 +35,102 @@ export function App() {
   )
 }
 
+// ─── Keyboard shortcuts overlay ───────────────────────────────────────────────
+
+const SHORTCUTS = [
+  { keys: ['/', 'Cmd+K'], action: 'Focus search' },
+  { keys: ['Escape'], action: 'Clear search / go back / close' },
+  { keys: ['Cmd+1'], action: 'Home' },
+  { keys: ['Cmd+2'], action: 'Live TV' },
+  { keys: ['Cmd+3'], action: 'Films' },
+  { keys: ['Cmd+4'], action: 'Series' },
+  { keys: ['Cmd+5'], action: 'Library' },
+  { keys: ['Cmd+,'], action: 'Settings' },
+  { keys: ['[', ']'], action: 'Channel surf (Live TV)' },
+  { keys: ['↑', '↓'], action: 'Volume (player)' },
+  { keys: ['←', '→'], action: 'Seek (player)' },
+  { keys: ['Space'], action: 'Play / pause' },
+  { keys: ['F'], action: 'Fullscreen' },
+  { keys: ['M'], action: 'Mute' },
+  { keys: ['?'], action: 'This help' },
+]
+
+function ShortcutsOverlay({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' || e.key === '?') { e.stopImmediatePropagation(); onClose() }
+    }
+    window.addEventListener('keydown', handler, true)
+    return () => window.removeEventListener('keydown', handler, true)
+  }, [onClose])
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 200,
+        background: 'rgba(0,0,0,0.6)',
+        backdropFilter: 'blur(4px)',
+        WebkitBackdropFilter: 'blur(4px)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: 'var(--bg-1)',
+          border: '1px solid var(--border-default)',
+          borderRadius: 12,
+          padding: '20px 24px 24px',
+          width: 400,
+          maxHeight: '80vh',
+          overflowY: 'auto',
+          boxShadow: '0 24px 80px rgba(0,0,0,0.6)',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+          <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-0)', fontFamily: 'var(--font-ui)' }}>
+            Keyboard shortcuts
+          </span>
+          <button
+            onClick={onClose}
+            style={{ background: 'none', border: 'none', color: 'var(--text-2)', cursor: 'pointer', padding: 4, display: 'flex' }}
+          >
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round">
+              <path d="M1 1l10 10M11 1L1 11" />
+            </svg>
+          </button>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          {SHORTCUTS.map(({ keys, action }) => (
+            <div key={action} style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '5px 0',
+              borderBottom: '1px solid var(--border-subtle)',
+            }}>
+              <span style={{ fontSize: 12, color: 'var(--text-1)', fontFamily: 'var(--font-ui)' }}>{action}</span>
+              <div style={{ display: 'flex', gap: 4 }}>
+                {keys.map((k) => (
+                  <span key={k} style={{
+                    fontSize: 11, fontFamily: 'var(--font-mono, monospace)',
+                    background: 'var(--bg-3)', color: 'var(--text-0)',
+                    border: '1px solid var(--border-default)',
+                    borderRadius: 4, padding: '1px 6px',
+                    whiteSpace: 'nowrap',
+                  }}>{k}</span>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function AppShell() {
   const queryClient = useQueryClient()
-  const { setSources, updateSource, setSyncProgress } = useSourcesStore()
+  const { setSources, updateSource, setSyncProgress, setEnrichProgress, setEnrichResult } = useSourcesStore()
   const {
     selectedContent, playingContent, showSettings, showSources,
     liveViewChannel, setLiveViewChannel,
@@ -48,6 +141,10 @@ function AppShell() {
   } = useAppStore()
 
   const [showAddModal, setShowAddModal] = useState(false)
+  const [showShortcuts, setShowShortcuts] = useState(false)
+  const showShortcutsRef = useRef(false)
+  const openShortcuts = () => { showShortcutsRef.current = true; setShowShortcuts(true) }
+  const closeShortcuts = () => { showShortcutsRef.current = false; setShowShortcuts(false) }
 
   // Guard against StrictMode double-mount triggering duplicate syncs
   const syncingIds = useRef(new Set<string>())
@@ -81,6 +178,7 @@ function AppShell() {
       // Escape — universal "back" chain (bubble phase, so overlays win via capture+stopImmediatePropagation)
       // Works even when an input is focused (intentional — clears search query)
       if (e.key === 'Escape') {
+        if (showShortcutsRef.current) { showShortcutsRef.current = false; setShowShortcuts(false); return }
         const s = useSearchStore.getState()
         const a = useAppStore.getState()
         // 1. Clear search query for current view
@@ -91,6 +189,7 @@ function AppShell() {
       }
 
       if (isTyping()) return
+      if (e.key === '?') { openShortcuts(); return }
       if ((e.metaKey || e.ctrlKey) && e.key === '1') { e.preventDefault(); setView('home') }
       if ((e.metaKey || e.ctrlKey) && e.key === '2') { e.preventDefault(); setView('live') }
       if ((e.metaKey || e.ctrlKey) && e.key === '3') { e.preventDefault(); setView('films') }
@@ -145,6 +244,22 @@ function AppShell() {
     })
   }, [setSources, updateSource, setSyncProgress])
 
+  // VoD enrichment progress events (global — survives SourcesPanel open/close)
+  useEffect(() => {
+    return api.on('vodEnrich:progress', (p: any) => {
+      const { sourceId, phase, current, total, message, error } = p
+      if (phase === 'done') {
+        setEnrichProgress(sourceId, null)
+        setEnrichResult(sourceId, { success: true, message: message ?? 'Enrichment complete' })
+      } else if (phase === 'error') {
+        setEnrichProgress(sourceId, null)
+        setEnrichResult(sourceId, { success: false, message: error ?? 'Enrichment failed' })
+      } else {
+        setEnrichProgress(sourceId, { current: current ?? 0, total: total ?? 0, message })
+      }
+    })
+  }, [setEnrichProgress, setEnrichResult])
+
   const handleSync = async (sourceId: string) => {
     if (syncingIds.current.has(sourceId)) return
     syncingIds.current.add(sourceId)
@@ -175,11 +290,6 @@ function AppShell() {
   }
 
   const handleSelectContent = (item: ContentItem) => {
-    // Clear any floating mini-player when opening a detail panel
-    if (playerMode === 'mini') {
-      setPlayingContent(null)
-      setPlayerMode('hidden')
-    }
     if (item.type === 'live') {
       setLiveViewChannel(item)
     } else {
@@ -189,53 +299,76 @@ function AppShell() {
 
   const handlePlay = (item: ContentItem) => {
     if (item.type === 'live') {
-      // Channels always go to Live View — close detail panel, open Live View
+      // Channels always go to Live View.
+      // If this channel isn't in the current surf list (e.g. played from ChannelDetail
+      // rather than from the browse grid), reset the surf context so the Live View
+      // doesn't show a stale channel list from a previous session.
+      const s = useAppStore.getState()
+      if (!s.channelSurfList.some((ch) => ch.id === item.id)) {
+        s.setChannelSurfContext([item], 0, null, null)
+      }
       setSelectedContent(null)
       setLiveViewChannel(item)
     } else {
+      // If this exact content is already embedded, just expand to fullscreen
+      const s = useAppStore.getState()
+      if (s.playerMode === 'embedded' && s.playingContent?.id === item.id) {
+        setPlayerMode('fullscreen')
+        return
+      }
       setPlayingContent(item)
       setPlayerMode('fullscreen')
     }
   }
 
   const handlePlayerClose = () => {
+    const wasLive = playingContent?.type === 'live'
     setPlayingContent(null)
     setPlayerMode('hidden')
+    // Only close LiveView when the closed stream was actually a live channel
+    if (wasLive) setLiveViewChannel(null)
   }
 
   const handlePlayerMinimize = () => {
-    const content = playingContent
-    setPlayingContent(null)
-    setPlayerMode('hidden')
-    if (!selectedContent && content) {
-      // No detail panel open — open it now (escape from fullscreen = detail panel)
-      if (content.type === 'live') {
-        setLiveViewChannel(content)
-      } else {
-        // For episodes, open parent series detail
-        const parent = (content as any)._parent
-        if (parent?.type === 'series') {
-          setSelectedContent({ ...content, id: parent.id, title: parent.title, type: 'series' } as ContentItem)
+    const anchor = useAppStore.getState().embeddedAnchor
+    if (anchor) {
+      // A panel/view is open with an anchor — return to embedded mode
+      setPlayerMode('embedded')
+    } else {
+      // No anchor — open the appropriate detail panel (player stays running)
+      setPlayerMode('hidden')
+      const content = playingContent
+      if (!content) return
+      if (!selectedContent) {
+        // No detail panel open — open one so embedded mode can activate
+        if (content.type === 'live') {
+          setLiveViewChannel(content)
         } else {
-          setSelectedContent(content)
+          const parent = (content as any)._parent
+          if (parent?.type === 'series') {
+            setSelectedContent({ ...content, id: parent.id, title: parent.title, type: 'series' } as ContentItem)
+          } else {
+            setSelectedContent(content)
+          }
         }
       }
+      // Detail panel is open (or will open) — its anchor effect will set playerMode to embedded
     }
-    // If selectedContent is set, detail panel is already open — its mini player takes over
   }
 
   const handlePlayerChipClick = (item: ContentItem) => {
-    // Close the fullscreen player — no floating mini player
-    setPlayingContent(null)
-    setPlayerMode('hidden')
-    setLiveViewChannel(null)
     const parent = (item as any)._parent
     if (parent) {
-      // Episode — open series detail panel (mini player starts there)
+      // Episode — minimize to mini, open series detail panel
+      setPlayerMode('mini')
+      setLiveViewChannel(null)
       setSelectedContent({ ...item, id: parent.id, title: parent.title, type: 'series' } as ContentItem)
     } else {
-      // Navigate to category in the appropriate view
+      // Navigate to category — shrink to mini player, keep stream going
+      setPlayerMode('mini')
+      setLiveViewChannel(null)
       setSelectedContent(null)
+      useSearchStore.getState().setQuery('')
       const cat = (item as any).category_name
       const viewMap = { live: 'live', movie: 'films', series: 'series' } as const
       setView(viewMap[item.type as keyof typeof viewMap] ?? 'films')
@@ -285,7 +418,7 @@ function AppShell() {
         />
       </div>
 
-      {/* Player — always mounted for persistent stream (mini-player support) */}
+      {/* Player — always mounted; drives embedded, fullscreen, and mini modes */}
       <PlayerOverlay
         content={playingContent}
         mode={playerMode}
@@ -319,7 +452,7 @@ function AppShell() {
             onPlay={handlePlay}
             onClose={() => { setSelectedContent(null) }}
             onNavigate={handleBreadcrumbNav}
-            isPlaying={!!playingContent}
+            isPlaying={playerMode === 'fullscreen'}
           />
         )}
         {/* Series detail */}
@@ -329,7 +462,7 @@ function AppShell() {
             onPlay={handlePlay}
             onClose={() => { setSelectedContent(null) }}
             onNavigate={handleBreadcrumbNav}
-            isPlaying={!!playingContent}
+            isPlaying={playerMode === 'fullscreen'}
           />
         )}
         {/* Channel detail */}
@@ -342,13 +475,13 @@ function AppShell() {
             isPlaying={!!playingContent}
           />
         )}
-        {/* Live View */}
-        {liveViewChannel && playerMode === 'hidden' && (
+        {/* Live View — stays mounted during embedded mode; hidden only when fullscreen */}
+        {liveViewChannel && playerMode !== 'fullscreen' && (
           <LiveView
             channel={liveViewChannel}
-            onFullscreen={(ch) => { setPlayingContent(ch); setPlayerMode('fullscreen') }}
+            onFullscreen={() => setPlayerMode('fullscreen')}
             onSwitchChannel={(ch) => setLiveViewChannel(ch)}
-            onClose={() => setLiveViewChannel(null)}
+            onClose={() => { setLiveViewChannel(null) }}
           />
         )}
         {showSettings && (
@@ -371,6 +504,7 @@ function AppShell() {
         )}
       </Suspense>
       <ContextMenu />
+      {showShortcuts && <ShortcutsOverlay onClose={closeShortcuts} />}
     </div>
   )
 }

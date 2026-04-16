@@ -17,7 +17,11 @@ interface Props {
   viewMode?: 'grid' | 'list'
   isLoading?: boolean
   contentType?: 'live' | 'movie' | 'series'
+  scrollKey?: string
 }
+
+// Module-level cache — survives re-renders but resets on full page reload.
+const scrollCache = new Map<string, number>()
 
 // ─── Marquee style (injected once) ───────────────────────────────────────────
 
@@ -245,7 +249,7 @@ function ChannelListCard({ item, onClick }: ChannelListCardProps) {
 
 // ─── Virtual grid ────────────────────────────────────────────────────────────
 
-export function VirtualGrid({ items, onSelect, viewMode = 'grid', isLoading, contentType }: Props) {
+export function VirtualGrid({ items, onSelect, viewMode = 'grid', isLoading, contentType, scrollKey }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [containerWidth, setContainerWidth] = useState(0)
 
@@ -261,6 +265,13 @@ export function VirtualGrid({ items, onSelect, viewMode = 'grid', isLoading, con
     setContainerWidth(el.clientWidth)
     return () => ro.disconnect()
   }, [])
+
+  // Restore scroll position when scrollKey changes or items first load
+  useEffect(() => {
+    if (!scrollKey || !containerRef.current || items.length === 0) return
+    const saved = scrollCache.get(scrollKey)
+    if (saved) containerRef.current.scrollTop = saved
+  }, [scrollKey, items.length > 0])
 
   const isList = viewMode === 'list'
   const isLive = items[0]?.type === 'live'
@@ -353,6 +364,7 @@ export function VirtualGrid({ items, onSelect, viewMode = 'grid', isLoading, con
   return (
     <div
       ref={containerRef}
+      onScroll={scrollKey ? (e) => { scrollCache.set(scrollKey, (e.currentTarget as HTMLDivElement).scrollTop) } : undefined}
       style={{
         width: '100%',
         height: '100%',

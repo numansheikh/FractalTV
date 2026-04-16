@@ -118,7 +118,14 @@ export class XtreamService {
     seriesInfo?: Record<string, any>
   }> {
     const url = this.buildApiUrl(serverUrl, username, password, 'get_series_info', `&series_id=${seriesId}`)
-    const res = await fetch(url)
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 30_000)
+    let res: Response
+    try {
+      res = await fetch(url, { signal: controller.signal })
+    } finally {
+      clearTimeout(timeoutId)
+    }
     const data = await res.json() as any
     const seasons: Record<string, any[]> = {}
     const rawEpisodes = data?.episodes ?? data?.Episodes ?? {}
@@ -139,6 +146,35 @@ export class XtreamService {
       }
     }
     return { seasons, seriesInfo: data?.info ?? {} }
+  }
+
+  async getVodInfo(serverUrl: string, username: string, password: string, vodId: string): Promise<{ runtime: number | null }> {
+    const url = this.buildApiUrl(serverUrl, username, password, 'get_vod_info', `&vod_id=${vodId}`)
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 15_000)
+    try {
+      const res = await fetch(url, { signal: controller.signal })
+      const data = await res.json() as any
+      const info = data?.info ?? {}
+      if (info.duration_secs && Number(info.duration_secs) > 0) {
+        return { runtime: Math.round(Number(info.duration_secs) / 60) }
+      }
+      if (info.duration) {
+        const d = String(info.duration)
+        if (d.includes(':')) {
+          const parts = d.split(':').map(Number)
+          const secs = (parts[0] ?? 0) * 3600 + (parts[1] ?? 0) * 60 + (parts[2] ?? 0)
+          if (secs > 0) return { runtime: Math.round(secs / 60) }
+        }
+        const mins = Number(d)
+        if (mins > 0) return { runtime: mins }
+      }
+      return { runtime: null }
+    } catch {
+      return { runtime: null }
+    } finally {
+      clearTimeout(timeoutId)
+    }
   }
 
   buildCatchupUrl(serverUrl: string, username: string, password: string, streamId: string, start: Date, duration: number): string {

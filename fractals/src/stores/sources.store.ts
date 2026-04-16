@@ -32,15 +32,32 @@ export interface SyncProgress {
   message: string
 }
 
+export interface EnrichProgress {
+  current: number
+  total: number
+  message?: string
+}
+
+export interface EnrichResult {
+  success: boolean
+  message: string
+}
+
 interface SourcesState {
   sources: Source[]
   /** Which source IDs are selected for filtering. Empty = all enabled sources. */
   selectedSourceIds: string[]
   /** Live sync progress per source, keyed by sourceId. Null = not syncing. */
   syncProgress: Record<string, SyncProgress | null>
+  /** Live enrichment progress per source. Null = not enriching. */
+  enrichProgress: Record<string, EnrichProgress | null>
+  /** Last enrichment result per source (persists until next run). */
+  enrichResult: Record<string, EnrichResult | null>
   setSources: (sources: Source[]) => void
   updateSource: (id: string, patch: Partial<Source>) => void
   setSyncProgress: (sourceId: string, progress: SyncProgress | null) => void
+  setEnrichProgress: (sourceId: string, progress: EnrichProgress | null) => void
+  setEnrichResult: (sourceId: string, result: EnrichResult | null) => void
   toggleSourceFilter: (id: string) => void
   clearSourceFilter: () => void
 }
@@ -49,11 +66,17 @@ export const useSourcesStore = create<SourcesState>((set) => ({
   sources: [],
   selectedSourceIds: [],
   syncProgress: {},
+  enrichProgress: {},
+  enrichResult: {},
   setSources: (sources) => set({ sources }),
   updateSource: (id, patch) =>
     set((s) => ({ sources: s.sources.map((src) => (src.id === id ? { ...src, ...patch } : src)) })),
   setSyncProgress: (sourceId, progress) =>
     set((s) => ({ syncProgress: { ...s.syncProgress, [sourceId]: progress } })),
+  setEnrichProgress: (sourceId, progress) =>
+    set((s) => ({ enrichProgress: { ...s.enrichProgress, [sourceId]: progress } })),
+  setEnrichResult: (sourceId, result) =>
+    set((s) => ({ enrichResult: { ...s.enrichResult, [sourceId]: result } })),
   toggleSourceFilter: (id) =>
     set((s) => {
       const has = s.selectedSourceIds.includes(id)

@@ -50,8 +50,11 @@ const PHASE_LABELS: Record<string, string> = {
 }
 
 export function SourceCard({ source, onSync, onRemove }: Props) {
-  const { sources, syncProgress } = useSourcesStore()
+  const { sources, syncProgress, enrichProgress: allEnrichProgress, enrichResult: allEnrichResult, setEnrichResult } = useSourcesStore()
   const progress = syncProgress[source.id] ?? null
+  const enrichProgress = allEnrichProgress[source.id] ?? null
+  const enrichResult = allEnrichResult[source.id] ?? null
+  const enriching = enrichProgress !== null
 
   // Resolve color: use stored colorIndex if set, else auto-assign by position
   const autoIndex = sources.findIndex(s => s.id === source.id)
@@ -91,6 +94,12 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
     } finally {
       setEpgSyncing(false)
     }
+  }
+
+  // g2: VoD enrichment (per-source, manual) — state lives in store, survives panel close
+  const handleEnrichVod = () => {
+    setEnrichResult(source.id, null)
+    api.vodEnrich.enrich(source.id)
   }
 
   // g2: iptv-org tvg-id matching (per-source, manual)
@@ -436,6 +445,68 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
           color: matchResult.success ? 'var(--accent-success)' : 'var(--accent-danger)',
         }}>
           {matchResult.success ? '✓' : '✗'} {matchResult.message}
+        </div>
+      )}
+
+      {/* g2: VoD enrichment (movies + series, keyless) */}
+      {!editMode && (
+        <button
+          onClick={handleEnrichVod}
+          disabled={!syncedOrEpg || enriching}
+          title={!syncedOrEpg ? 'Sync the source first' : 'Enrich movies + series with Wikipedia / Wikidata metadata'}
+          style={{
+            padding: '5px 8px', borderRadius: 6,
+            fontSize: 11, fontWeight: 500,
+            background: 'transparent',
+            border: '1px solid var(--border-default)',
+            color: (syncedOrEpg && !enriching) ? 'var(--text-1)' : 'var(--text-3)',
+            cursor: (syncedOrEpg && !enriching) ? 'pointer' : 'default',
+            opacity: (syncedOrEpg && !enriching) ? 1 : 0.6,
+            fontFamily: 'var(--font-ui)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+            transition: 'background 0.1s, color 0.1s',
+          }}
+          onMouseEnter={(e) => { if (syncedOrEpg && !enriching) { e.currentTarget.style.background = 'var(--bg-4)'; e.currentTarget.style.color = 'var(--text-0)' } }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = (syncedOrEpg && !enriching) ? 'var(--text-1)' : 'var(--text-3)' }}
+        >
+          {enriching && (
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ animation: 'spin 1s linear infinite' }}><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
+          )}
+          {enriching ? 'Enriching VoD…' : 'Enrich VoD metadata'}
+        </button>
+      )}
+
+      {!editMode && enriching && enrichProgress && enrichProgress.total > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 10, color: 'var(--text-1)', fontFamily: 'var(--font-ui)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {enrichProgress.message ?? 'Enriching…'}
+            </span>
+            <span style={{ fontSize: 10, color: 'var(--text-2)', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>
+              {enrichProgress.current}/{enrichProgress.total}
+            </span>
+          </div>
+          <div style={{ height: 3, borderRadius: 99, overflow: 'hidden', background: 'var(--bg-3)', width: '100%' }}>
+            <div style={{
+              height: '100%', background: 'var(--accent-film)',
+              width: `${Math.min(100, Math.round((enrichProgress.current / enrichProgress.total) * 100))}%`,
+              transition: 'width 0.4s',
+              borderRadius: 99,
+            }} />
+          </div>
+        </div>
+      )}
+
+      {!editMode && enrichResult && (
+        <div style={{
+          padding: '5px 8px', borderRadius: 5, fontSize: 10,
+          background: enrichResult.success
+            ? 'color-mix(in srgb, var(--accent-success) 10%, transparent)'
+            : 'color-mix(in srgb, var(--accent-danger) 10%, transparent)',
+          border: `1px solid color-mix(in srgb, ${enrichResult.success ? 'var(--accent-success)' : 'var(--accent-danger)'} 25%, transparent)`,
+          color: enrichResult.success ? 'var(--accent-success)' : 'var(--accent-danger)',
+        }}>
+          {enrichResult.success ? '✓' : '✗'} VoD {enrichResult.message}
         </div>
       )}
 

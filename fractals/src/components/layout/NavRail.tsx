@@ -28,7 +28,10 @@ export function NavRail({ onOpenSources, onOpenSettings }: Props) {
   const { activeView, setView } = useAppStore()
   const { theme, setTheme } = useTheme()
   const syncProgress = useSourcesStore((s) => s.syncProgress)
+  const enrichProgress = useSourcesStore((s) => s.enrichProgress)
   const isSyncing = Object.values(syncProgress).some((p) => p && p.phase !== 'done' && p.phase !== 'error')
+  const isEnriching = Object.values(enrichProgress).some((p) => p !== null)
+  const isBusy = isSyncing || isEnriching
 
   return (
     <div style={{
@@ -59,7 +62,14 @@ export function NavRail({ onOpenSources, onOpenSettings }: Props) {
             inactiveColor={accent}
             onClick={() => {
               setView(item.id)
-              if (item.id !== 'live') useAppStore.getState().setLiveViewChannel(null)
+              if (item.id !== 'live') {
+                const s = useAppStore.getState()
+                s.setLiveViewChannel(null)
+                if (s.playerMode === 'fullscreen') {
+                  s.setPlayerMode('hidden')
+                  s.setPlayingContent(null)
+                }
+              }
             }}
           >
             <NavIcon id={item.id} />
@@ -75,7 +85,7 @@ export function NavRail({ onOpenSources, onOpenSettings }: Props) {
       </RailButton>
 
       <RailButton label="Sources" shortcut="" isActive={false} activeColor="var(--accent-interactive)" onClick={onOpenSources}>
-        <span style={{ color: isSyncing ? 'var(--accent-interactive)' : 'var(--text-2)', animation: isSyncing ? 'nav-pulse 2s ease-in-out infinite' : 'none' }}>
+        <span style={{ color: isBusy ? 'var(--accent-interactive)' : 'var(--text-2)', animation: isBusy ? 'nav-pulse 2s ease-in-out infinite' : 'none' }}>
           <LayersIcon />
         </span>
       </RailButton>

@@ -1,9 +1,8 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import Hls from 'hls.js'
-import Artplayer from 'artplayer'
 import { ContentItem } from '@/lib/types'
 import { useAppStore } from '@/stores/app.store'
+import { useSearchStore } from '@/stores/search.store'
 import { useSourcesStore } from '@/stores/sources.store'
 import { useUserStore } from '@/stores/user.store'
 import { buildColorMapFromSources } from '@/lib/sourceColors'
@@ -13,7 +12,7 @@ import { EpgGuide } from './EpgGuide'
 
 interface Props {
   channel: ContentItem
-  onFullscreen: (ch: ContentItem) => void
+  onFullscreen: () => void
   onSwitchChannel: (ch: ContentItem) => void
   onClose: () => void
 }
@@ -56,12 +55,41 @@ export function LiveView({ channel, onFullscreen, onSwitchChannel, onClose }: Pr
 
   const handleBrowseCategory = () => {
     if (!categoryName) return
+    useSearchStore.getState().setQuery('')
     setView('live')
     setCategoryFilter(categoryName)
     onClose()
   }
   const activeChannelRef = useRef<HTMLDivElement>(null)
   const isFirstMount = useRef(true)
+  const playerZoneRef = useRef<HTMLDivElement>(null)
+
+  // Register this view's player zone as the embedded anchor and start playback.
+  // Runs once on mount; channel changes go through setPlayingContent only.
+  useEffect(() => {
+    const el = playerZoneRef.current
+    if (!el) return
+    const { setEmbeddedAnchor, setPlayingContent, setPlayerMode } = useAppStore.getState()
+    setEmbeddedAnchor(el)
+    setPlayingContent(channel)
+    setPlayerMode('embedded')
+    return () => {
+      const s = useAppStore.getState()
+      s.setEmbeddedAnchor(null)
+      // Only stop stream if embedded (fullscreen transition keeps playing;
+      // NavRail handles the fullscreen-nav-away case separately)
+      if (s.playerMode === 'embedded') {
+        s.setPlayerMode('hidden')
+        s.setPlayingContent(null)
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Update playing content when channel changes (channel surf, list click)
+  useEffect(() => {
+    useAppStore.getState().setPlayingContent(channel)
+  }, [channel.id])
 
   const { loadBulk, data: userData, setFavorite } = useUserStore()
 
@@ -97,7 +125,7 @@ export function LiveView({ channel, onFullscreen, onSwitchChannel, onClose }: Pr
       }
       // All other shortcuts are suppressed while typing
       if (isTyping()) return
-      if (e.key === 'f' || e.key === 'F') { e.stopImmediatePropagation(); onFullscreen(channel); return }
+      if (e.key === 'f' || e.key === 'F') { e.stopImmediatePropagation(); onFullscreen(); return }
       // Channel surf: PgUp/PgDn or Cmd+↑↓
       const isSurfUp = e.key === 'PageUp' || (e.metaKey && e.key === 'ArrowUp')
       const isSurfDown = e.key === 'PageDown' || (e.metaKey && e.key === 'ArrowDown')
@@ -261,7 +289,7 @@ export function LiveView({ channel, onFullscreen, onSwitchChannel, onClose }: Pr
                 onToggleFav={handleToggleFav}
                 onClick={() => {
                   if (ch.id === channel.id) {
-                    onFullscreen(ch)
+                    onFullscreen()
                   } else {
                     onSwitchChannel(ch)
                   }
@@ -275,7 +303,7 @@ export function LiveView({ channel, onFullscreen, onSwitchChannel, onClose }: Pr
             borderTop: '1px solid var(--border-default)', padding: '7px 12px',
             display: 'flex', gap: 6,
           }}>
-            <HintBtn label="Full screen" shortcut="F" onClick={() => onFullscreen(channel)} />
+            <HintBtn label="Full screen" shortcut="F" onClick={() => onFullscreen()} />
             <HintBtn label="Close" shortcut="Esc" onClick={onClose} />
           </div>
         </div>
@@ -283,16 +311,16 @@ export function LiveView({ channel, onFullscreen, onSwitchChannel, onClose }: Pr
         {/* ── Right: player + EPG ── */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
 
-          {/* Player zone */}
+          {/* Player zone — PlayerOverlay overlays playerZoneRef in 'embedded' mode */}
           <div
             style={{ flex: 1, position: 'relative', background: '#000', overflow: 'hidden', cursor: 'pointer', minHeight: 0 }}
             onClick={(e) => {
               if ((e.target as HTMLElement).closest('.art-bottom, .art-controls, .art-volume, .art-control')) return
-              onFullscreen(channel)
+              onFullscreen()
             }}
             title="Click to go fullscreen"
           >
-            <MiniPlayer key={channel.id} channel={channel} />
+            <div ref={playerZoneRef} style={{ width: '100%', height: '100%' }} />
 
             {/* Top overlay — channel name + live badge only, no interactive elements */}
             <div style={{
@@ -359,154 +387,9 @@ export function LiveView({ channel, onFullscreen, onSwitchChannel, onClose }: Pr
           channels={channelSurfList}
           activeChannel={channel}
           onSwitchChannel={(ch) => { onSwitchChannel(ch); setShowGuide(false) }}
-          onFullscreen={(ch) => { onFullscreen(ch); setShowGuide(false) }}
+          onFullscreen={(ch) => { useAppStore.getState().setPlayingContent(ch); onFullscreen(); setShowGuide(false) }}
           onClose={() => setShowGuide(false)}
         />
-      )}
-    </div>
-  )
-}
-
-// ── Mini player (ArtPlayer, no controls) ─────────────────────────────────────
-
-function MiniPlayer({ channel }: { channel: ContentItem }) {
-  const containerRef = useRef<HTMLDivElement>(null)
-  const artRef = useRef<Artplayer | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [isAudioOnly, setIsAudioOnly] = useState(false)
-
-  useEffect(() => {
-    let cancelled = false
-
-    setLoading(true)
-    setError(null)
-    setIsAudioOnly(false)
-
-    api.content.getStreamUrl({ contentId: channel.id }).then((result: any) => {
-      if (cancelled || !containerRef.current) return
-
-      if (!result?.url) {
-        setError(result?.error ?? 'Could not get stream URL')
-        setLoading(false)
-        return
-      }
-
-      const url: string = result.url
-      const isHls = url.includes('.m3u8') || url.includes('m3u8')
-
-      const art = new Artplayer({
-        container: containerRef.current!,
-        url,
-        autoplay: true,
-        controls: [],
-        settings: [],
-        contextmenu: [],
-        pip: false,
-        fullscreen: false,
-        hotkey: false,
-        playbackRate: false,
-        aspectRatio: false,
-        setting: false,
-        flip: false,
-        miniProgressBar: false,
-        mutex: true,
-        backdrop: false,
-        playsInline: true,
-        autoMini: false,
-        screenshot: false,
-        lock: false,
-        isLive: true,
-        theme: 'transparent',
-        moreVideoAttr: { crossOrigin: 'anonymous' },
-        ...(isHls && Hls.isSupported() && {
-          customType: {
-            m3u8: (video: HTMLVideoElement, src: string) => {
-              const hls = new Hls({ enableWorker: true, lowLatencyMode: true })
-              ;(art as any).hls = hls
-              hls.loadSource(src)
-              hls.attachMedia(video)
-              hls.on(Hls.Events.ERROR, (_e: any, data: any) => {
-                if (data.fatal && !cancelled) {
-                  setError('Stream unavailable')
-                  setLoading(false)
-                }
-              })
-            },
-          },
-        }),
-      })
-
-      artRef.current = art
-      art.on('ready', () => {
-        if (!cancelled) setLoading(false)
-        const video = art.template.$video as HTMLVideoElement
-        if (video) {
-          const checkAudioOnly = () => {
-            if (cancelled) return
-            if (video.videoWidth === 0 && video.videoHeight === 0) {
-              setIsAudioOnly(true)
-            } else {
-              setIsAudioOnly(false)
-            }
-          }
-          video.addEventListener('loadedmetadata', checkAudioOnly, { once: true })
-          art.on('video:playing', checkAudioOnly)
-          setTimeout(checkAudioOnly, 3000)
-          setTimeout(checkAudioOnly, 6000)
-        }
-      })
-      art.on('error', () => { if (!cancelled) { setError('Playback error'); setLoading(false) } })
-    })
-
-    return () => {
-      cancelled = true
-      if (artRef.current) {
-        try {
-          ;(artRef.current as any).hls?.destroy()
-          artRef.current.destroy(true)
-        } catch {}
-        artRef.current = null
-      }
-    }
-  }, [channel.id])
-
-  return (
-    <div style={{ width: '100%', height: '100%', position: 'relative' }}>
-      <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
-      {/* Audio-only overlay (radio stations) */}
-      {isAudioOnly && !loading && !error && (
-        <div style={{
-          position: 'absolute', inset: 0, zIndex: 5,
-          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-          background: 'radial-gradient(ellipse at center, rgba(20,10,40,0.95) 0%, rgba(5,5,15,0.98) 100%)',
-          pointerEvents: 'none', gap: 10,
-        }}>
-          {(channel.posterUrl || channel.poster_url) && (
-            <img src={channel.posterUrl ?? channel.poster_url} alt="" style={{
-              width: 52, height: 52, borderRadius: 10, objectFit: 'cover',
-              boxShadow: '0 4px 16px rgba(124,77,255,0.3)',
-              border: '1px solid rgba(124,77,255,0.25)',
-            }} />
-          )}
-          <MiniAudioBars />
-        </div>
-      )}
-      {loading && !error && (
-        <div style={{
-          position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-          background: 'rgba(0,0,0,0.6)',
-        }}>
-          <div style={{ width: 28, height: 28, border: '2px solid rgba(255,255,255,0.15)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
-        </div>
-      )}
-      {error && (
-        <div style={{
-          position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-          background: 'rgba(0,0,0,0.8)', gap: 8,
-        }}>
-          <span style={{ fontSize: 13, color: 'var(--text-2)' }}>{error}</span>
-        </div>
       )}
     </div>
   )
@@ -921,11 +804,20 @@ function FullscreenHint() {
   return (
     <div className="fullscreen-hint" style={{
       position: 'absolute', inset: 0,
-      background: 'rgba(0,0,0,0.35)',
+      background: 'rgba(0,0,0,0)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      opacity: 0, transition: 'opacity 0.15s', zIndex: 3, pointerEvents: 'none',
+      opacity: 0, transition: 'opacity 0.15s, background 0.15s', zIndex: 3,
     }}
-    onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.opacity = '1' }}
+    onMouseEnter={(e) => {
+      const el = e.currentTarget as HTMLElement
+      el.style.opacity = '1'
+      el.style.background = 'rgba(0,0,0,0.35)'
+    }}
+    onMouseLeave={(e) => {
+      const el = e.currentTarget as HTMLElement
+      el.style.opacity = '0'
+      el.style.background = 'rgba(0,0,0,0)'
+    }}
     >
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
         <div style={{
@@ -1003,49 +895,3 @@ function SearchIconSm() {
   )
 }
 
-function MiniAudioBars() {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const rafRef = useRef<number>(0)
-
-  useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-
-    const BAR_COUNT = 24
-    const BAR_GAP = 2
-    const BAR_RADIUS = 1.5
-    const phases = Array.from({ length: BAR_COUNT }, () => Math.random() * Math.PI * 2)
-    const speeds = Array.from({ length: BAR_COUNT }, () => 1.5 + Math.random() * 2.5)
-
-    const draw = (t: number) => {
-      rafRef.current = requestAnimationFrame(draw)
-      const dpr = window.devicePixelRatio || 1
-      const w = canvas.clientWidth
-      const h = canvas.clientHeight
-      canvas.width = w * dpr
-      canvas.height = h * dpr
-      ctx.scale(dpr, dpr)
-      ctx.clearRect(0, 0, w, h)
-      const barW = (w - (BAR_COUNT - 1) * BAR_GAP) / BAR_COUNT
-      for (let i = 0; i < BAR_COUNT; i++) {
-        const val = 0.3 + 0.7 * Math.abs(Math.sin(t * 0.002 * speeds[i] + phases[i]))
-        const barH = Math.max(2, val * h * 0.8)
-        const x = i * (barW + BAR_GAP)
-        const y = (h - barH) / 2
-        const hue = 260 + (i / BAR_COUNT) * 80
-        const lightness = 50 + val * 25
-        ctx.fillStyle = `hsla(${hue}, 80%, ${lightness}%, 0.85)`
-        ctx.beginPath()
-        ctx.roundRect(x, y, barW, barH, BAR_RADIUS)
-        ctx.fill()
-      }
-    }
-
-    rafRef.current = requestAnimationFrame(draw)
-    return () => cancelAnimationFrame(rafRef.current)
-  }, [])
-
-  return <canvas ref={canvasRef} style={{ width: 120, height: 36 }} />
-}

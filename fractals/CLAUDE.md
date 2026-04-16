@@ -352,16 +352,16 @@ Single layer. What M3U/Xtream APIs return, stored directly into per-type tables:
 - **Tied to subscription** — content goes away when source is removed / expired. Resync wipes user_data via CASCADE (g1c hard cut).
 - **No deduplication** — same content from two sources = two items.
 - **Search target** is `search_title` (persisted normalized column), not `title`. Populated inline at sync INSERT.
-- **Metadata columns** use the `md_` prefix on each content table (`md_country`, `md_language`, `md_year`, `md_origin`, `md_quality`). Shape locked; enrichment population deferred.
+- **Metadata columns** use the `md_` prefix on each content table (`md_country`, `md_language`, `md_year`, `md_origin`, `md_quality`). `md_runtime` added to movies in g2 (lazy-fetched via `get_vod_info` on first detail open).
 
 Canonical identity / deduplication is not on the roadmap — it's a permanent g1c tradeoff.
 
-## Implementation status (as of 2026-04-15)
+## Implementation status (as of 2026-04-16)
 
 **Phase 0–2.5 — Complete.** Core through V3 data model.
 **g1 — Complete (2026-04-12).** Pure provider-data app on 12 tables. LIKE search with debounce. User data survived resync.
 **g1c — Complete (2026-04-14).** Per-type 15-table split. LIKE on `search_title` (any-ascii + lowercase, inline at sync). Two-button pipeline (Test → Sync; EPG auto-chains inside Sync for Xtream). FTS5 tried and removed. Enrichment pipeline (iptv-org / Wikidata / IMDb-suggest / indexing worker) deleted.
-**g2+ — Future.** Search improvements (see `PLAN.md`). No commitments.
+**g2 — In progress (branch: g2).** iptv-org ingestion, unified detail panels, mini player, NSFW filtering, EPG sync button, VoD enrichment (keyless), movie duration. See PLAN.md for full shipped list.
 **Phase 3 — Not started.** Capacitor for Android/iOS/TV, Tizen.
 
 ### g1c features (current state)
@@ -409,16 +409,20 @@ Canonical identity / deduplication is not on the roadmap — it's a permanent g1
 - Position saved on pause, 10s interval, and close
 - `minWatchSeconds` threshold (default 5s)
 - EPG now/next overlay on fullscreen live (auto-hides with controls)
-- Category pill chip navigates back to browse category
+- Category pill chip → mini player + navigate to browse category
+- Volume persisted to localStorage across sessions
+- Escape from fullscreen → mini player (not close); back button consistent
+- Embedded overlay z-index 30 (above ArtPlayer `.art-mask` at 20)
+- Reconnect overlay: 5-attempt exponential backoff with spinner + attempt counter
 
 **Detail panels**
 - Unified spine via `DetailShell` (close + type badge + source indicator + breadcrumbs + scrollable body). All three types share the same chrome.
 - Channel: 380px, logo + title + EPG schedule + tvg-id block
-- Movie: 380px, hero strip + metadata + actions + opportunistic plot/cast (`AboutBlock`)
-- Series: 700px (380 right + 320 left), left column season coins + episode list, right column shares the movie spine
+- Movie: 380px, hero strip + metadata + actions + plot/cast; VoD enrichment (auto-enrich on open, "Not this film?" picker); duration from `md_runtime`
+- Series: 700px (380 right + 320 left), left column season coins + episode list, right column shares the movie spine; `activeSeason` persisted across reopens
 - Hero strip: backdrop when present, else blurred poster scaled to fit, else a type-accent gradient with title initials. Broken image URLs fall back to the gradient.
 - Action buttons per-type: live = play + favorite; movie = full set (play/resume, favorite, watchlist, rating, clear history); series = play + favorite + watchlist + rating
-- External player + enrichment sections hidden (deferred)
+- 2s autoplay embedded mini player in all three panel types
 
 **Settings**
 - Appearance: theme picker, font picker
@@ -455,7 +459,8 @@ Canonical identity / deduplication is not on the roadmap — it's a permanent g1
 
 ## Known limitations & open work
 
-- **No FTS / enrichment / canonical (g1c)** — Search is LIKE only on `search_title`. No TMDB metadata. No deduplication across sources. FTS was tried and removed; canonical is a permanent g1c tradeoff.
+- **No FTS / canonical** — Search is LIKE only on `search_title`. No deduplication across sources. FTS was tried and removed; canonical is a permanent g1c tradeoff. VoD enrichment (keyless) ships in g2.
+- **ADV search parser not built** — `@` prefix and `isAdvanced` IPC flag wired; backend falls through to plain LIKE (stopgap). Parser + `md_*` column population audit queued.
 
 - **International character search** — European diacritics + ligatures handled bidirectionally via any-ascii. Arabic, Hebrew, Cyrillic, CJK pass through any-ascii to their closest Latin form; effectiveness varies.
 

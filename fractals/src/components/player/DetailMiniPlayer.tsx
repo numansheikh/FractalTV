@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react'
 import Hls from 'hls.js'
 import Artplayer from 'artplayer'
 import { api } from '@/lib/api'
@@ -10,6 +10,7 @@ interface Props {
   autoplay: boolean
   promptSeen: boolean
   onPromptSeen: () => void
+  isPlaying?: boolean  // true when fullscreen player is active
 }
 
 function MiniAudioBars() {
@@ -63,11 +64,22 @@ function MiniAudioBars() {
   )
 }
 
-export function DetailMiniPlayer({ contentId, contentType, autoplay, promptSeen, onPromptSeen }: Props) {
+export interface DetailMiniPlayerHandle {
+  getCurrentTime: () => number
+}
+
+export const DetailMiniPlayer = forwardRef<DetailMiniPlayerHandle, Props>(function DetailMiniPlayer(
+  { contentId, contentType, autoplay, promptSeen, onPromptSeen, isPlaying }, ref
+) {
   const containerRef = useRef<HTMLDivElement>(null)
   const artRef = useRef<Artplayer | null>(null)
   const autoplayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const prevIsPlayingRef = useRef(isPlaying ?? false)
+
+  useImperativeHandle(ref, () => ({
+    getCurrentTime: () => artRef.current?.currentTime ?? 0,
+  }))
 
   const [started, setStarted] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -168,6 +180,16 @@ export function DetailMiniPlayer({ contentId, contentType, autoplay, promptSeen,
 
       art.on('ready', () => {
         if (!cancelled) setLoading(false)
+
+        // Resume from last watched position for VoD
+        if (contentType !== 'live') {
+          api.user.getData(id).then((userData: any) => {
+            if (!cancelled && artRef.current && userData?.watch_position > 30 && !userData?.completed) {
+              artRef.current.currentTime = userData.watch_position
+            }
+          }).catch(() => {})
+        }
+
         const video = art.template.$video as HTMLVideoElement
         if (video) {
           const checkAudioOnly = () => {
@@ -226,6 +248,47 @@ export function DetailMiniPlayer({ contentId, contentType, autoplay, promptSeen,
     setPaused(false)
     setIsAudioOnly(false)
   }
+
+  // Periodic position save (5s) so DB is always fresh for fullscreen handoff
+  useEffect(() => {
+    if (contentType === 'live') return
+    const interval = setInterval(() => {
+      const art = artRef.current
+      if (art && art.playing) {
+        const t = Math.floor(art.currentTime)
+        if (t >= 5) api.user.setPosition(contentId, t)
+      }
+    }, 5000)
+    return () => clearInterval(interval)
+  }, [contentId, contentType])
+
+  // Handoff: save position when fullscreen opens; re-read when fullscreen closes
+  useEffect(() => {
+    if (contentType === 'live') return
+    const prev = prevIsPlayingRef.current
+    const curr = isPlaying ?? false
+    prevIsPlayingRef.current = curr
+
+    if (curr && !prev) {
+      // Fullscreen opening — save position then pause mini player
+      const art = artRef.current
+      if (art) {
+        const pos = art.currentTime
+        if (pos >= 5) api.user.setPosition(contentId, Math.floor(pos))
+        try { art.pause() } catch {}
+        setPaused(true)
+      }
+    } else if (!curr && prev) {
+      // Fullscreen closed — sync position from DB (don't auto-resume)
+      const art = artRef.current
+      if (!art) return
+      api.user.getData(contentId).then((userData: any) => {
+        if (art && userData?.watch_position > 5 && !userData?.completed) {
+          art.currentTime = userData.watch_position
+        }
+      }).catch(() => {})
+    }
+  }, [isPlaying, contentId, contentType])
 
   // 2s autoplay delay; reset on contentId change
   useEffect(() => {
@@ -416,4 +479,4 @@ export function DetailMiniPlayer({ contentId, contentType, autoplay, promptSeen,
       {showPrompt && <AutoplayPrompt onDone={handlePromptDone} />}
     </div>
   )
-}
+})

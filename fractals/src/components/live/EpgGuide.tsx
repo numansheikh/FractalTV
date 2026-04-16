@@ -4,6 +4,7 @@ import { ContentItem } from '@/lib/types'
 import { api } from '@/lib/api'
 import { fmtTime } from '@/lib/time'
 import { useSourcesStore } from '@/stores/sources.store'
+import { useAppStore } from '@/stores/app.store'
 import { buildColorMapFromSources } from '@/lib/sourceColors'
 
 // ── Layout constants ──────────────────────────────────────────────────────────
@@ -44,6 +45,13 @@ interface Props {
 export function EpgGuide({ channels, activeChannel, onSwitchChannel, onFullscreen, onClose }: Props) {
   const { sources } = useSourcesStore()
   const colorMap = buildColorMapFromSources(sources)
+  const storedTz = useAppStore((s) => s.timezone)
+  const tzLabel = (() => {
+    const tz = storedTz ?? Intl.DateTimeFormat().resolvedOptions().timeZone
+    try {
+      return new Intl.DateTimeFormat([], { timeZoneName: 'short', timeZone: tz }).formatToParts(new Date()).find((p) => p.type === 'timeZoneName')?.value ?? tz
+    } catch { return tz }
+  })()
 
   // ── Data ──────────────────────────────────────────────────────────────────
   const nowSec = Math.floor(Date.now() / 1000)
@@ -237,6 +245,7 @@ export function EpgGuide({ channels, activeChannel, onSwitchChannel, onFullscree
         }}>
           <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-0)' }}>EPG Guide</span>
           <span style={{ fontSize: 11, color: 'var(--text-2)', fontFamily: 'var(--font-mono)' }}>{dateLabel}</span>
+          <span style={{ fontSize: 10, color: 'var(--text-3)', fontFamily: 'var(--font-mono)', padding: '2px 5px', borderRadius: 4, background: 'var(--bg-3)' }}>{tzLabel}</span>
           <div style={{ flex: 1 }} />
           <button onClick={() => shiftScroll(-2)} style={navBtnStyle}>‹</button>
           <button onClick={() => shiftScroll(2)} style={navBtnStyle}>›</button>

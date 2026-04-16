@@ -317,7 +317,7 @@ export function ContentArea({ sort, onSelectContent, onAddSource }: Props) {
             <>
               <div style={{ flex: 1, minHeight: 0 }}>
                 {ready && VirtualGrid
-                  ? <VirtualGrid items={items} onSelect={handleSelect} viewMode={activeView === 'live' ? viewMode : 'grid'} isLoading={isLoading} contentType={contentType} />
+                  ? <VirtualGrid items={items} onSelect={handleSelect} viewMode={activeView === 'live' ? viewMode : 'grid'} isLoading={isLoading} contentType={contentType} scrollKey={`${activeView}-${categoryFilter ?? ''}`} />
                   : <FallbackGrid items={items} onSelect={handleSelect} />
                 }
               </div>

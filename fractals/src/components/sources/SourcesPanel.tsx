@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { SlidePanel } from '@/components/layout/SlidePanel'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { useSourcesStore } from '@/stores/sources.store'
+import { api } from '@/lib/api'
 import { SourceCard } from './SourceCard'
 import { AddSourceModal } from './AddSourceForm'
 
@@ -13,8 +14,29 @@ interface Props {
 }
 
 export function SourcesPanel({ onClose, onSync, onRemove, onAdded }: Props) {
-  const { sources } = useSourcesStore()
+  const { sources, updateSource } = useSourcesStore()
   const [showAddModal, setShowAddModal] = useState(false)
+
+  const handleEnableAll = async () => {
+    for (const src of sources) {
+      if (src.disabled) {
+        await api.sources.toggleDisabled(src.id)
+        updateSource(src.id, { disabled: false })
+      }
+    }
+  }
+
+  const handleDisableAll = async () => {
+    for (const src of sources) {
+      if (!src.disabled) {
+        await api.sources.toggleDisabled(src.id)
+        updateSource(src.id, { disabled: true })
+      }
+    }
+  }
+
+  const allEnabled = sources.length > 0 && sources.every((s) => !s.disabled)
+  const allDisabled = sources.length > 0 && sources.every((s) => s.disabled)
 
   const handleAdded = (sourceId: string) => {
     setShowAddModal(false)
@@ -37,6 +59,43 @@ export function SourcesPanel({ onClose, onSync, onRemove, onAdded }: Props) {
           }}>
             Sources
           </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {sources.length > 1 && (
+              <>
+                <button
+                  onClick={handleEnableAll}
+                  disabled={allEnabled}
+                  title="Enable all sources"
+                  style={{
+                    fontSize: 11, fontWeight: 600, fontFamily: 'var(--font-ui)',
+                    padding: '3px 8px', borderRadius: 5, cursor: allEnabled ? 'default' : 'pointer',
+                    background: 'transparent', border: '1px solid var(--border-default)',
+                    color: allEnabled ? 'var(--text-3)' : 'var(--text-1)',
+                    transition: 'all 0.1s',
+                  }}
+                  onMouseEnter={(e) => { if (!allEnabled) e.currentTarget.style.color = 'var(--text-0)' }}
+                  onMouseLeave={(e) => { if (!allEnabled) e.currentTarget.style.color = 'var(--text-1)' }}
+                >
+                  Enable all
+                </button>
+                <button
+                  onClick={handleDisableAll}
+                  disabled={allDisabled}
+                  title="Disable all sources"
+                  style={{
+                    fontSize: 11, fontWeight: 600, fontFamily: 'var(--font-ui)',
+                    padding: '3px 8px', borderRadius: 5, cursor: allDisabled ? 'default' : 'pointer',
+                    background: 'transparent', border: '1px solid var(--border-default)',
+                    color: allDisabled ? 'var(--text-3)' : 'var(--text-1)',
+                    transition: 'all 0.1s',
+                  }}
+                  onMouseEnter={(e) => { if (!allDisabled) e.currentTarget.style.color = 'var(--text-0)' }}
+                  onMouseLeave={(e) => { if (!allDisabled) e.currentTarget.style.color = 'var(--text-1)' }}
+                >
+                  Disable all
+                </button>
+              </>
+            )}
           <button
             onClick={onClose}
             style={{
@@ -58,6 +117,7 @@ export function SourcesPanel({ onClose, onSync, onRemove, onAdded }: Props) {
               <path d="M1 1l10 10M11 1L1 11" />
             </svg>
           </button>
+          </div>
         </div>
 
         {/* Scrollable body */}

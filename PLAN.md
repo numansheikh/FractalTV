@@ -74,17 +74,13 @@ FTS5 is **not** on this list — tried twice, rejected both times at this catalo
 
 ### Bucket 3 — Tech Health
 
-- [ ] 130+ `as any` casts across IPC layer — triage sprint (worst: `lib/api.ts`, `PlayerOverlay`, `ipc/handlers.ts`)
-
-### Bucket 5 — Detail Panel Polish
-
-- [ ] Show film duration in Movie Detail panel (currently missing)
+See `TODO.md` for actionable items.
 
 ### Bucket 4 — Multi-Platform Reach (Phase 3)
 
 Order: Electron (done) → Android phone → Android TV → iOS → Tizen → PWA.
 
-### Bucket 5 — Product Shape
+### Bucket 5 — Product Shape (Phase 3+)
 
 Three-tier split (same React codebase, feature flags):
 - **M3U Player** — free, all platforms, channel organizer
@@ -104,10 +100,6 @@ Three-tier split (same React codebase, feature flags):
 
 ---
 
-## g2 — queued
-
-- **VoD enrichment (movies + series)** — keyless sources only (Wikipedia REST summary + Wikidata + IMDb suggest). Versioned extraction algo (`v1`), candidate rows in `movie_enrichment_g2` / `series_enrichment_g2`, `selected_enrichment_id` + `enrichment_disabled` on the content row, button-triggered from source card, per-field fallback in detail panels, "Not this film?" pill opens candidate picker. TMDB-with-key deferred to a future generation. Full plan: `/Users/numan/.claude/plans/quiet-frolicking-hopcroft.md`.
-
 ## g2 — shipped so far (branch: g2, 2026-04-15)
 
 - **iptv-org channel DB ingestion** — 39K channel snapshot, tvg-id matching, country/category/NSFW flags
@@ -119,12 +111,19 @@ Three-tier split (same React codebase, feature flags):
 - **EPG Sync button** — explicit "EPG" pipeline step in SourceCard (Xtream only); 24h auto-refresh on startup (silent)
 - **Bottom panel collapse rule** — LiveView bottom panel expanded only if EPG or iptv-org data present
 - **Adult content (NSFW) filtering** — `is_nsfw` on 3 category + 3 content tables; right-click category → mark/unmark; "Allow adult content" toggle in Settings; flag propagates to content rows on mark and post-sync
+- **VoD enrichment (movies + series)** — keyless (Wikipedia REST + Wikidata + IMDb suggest); algo v1 + v2; candidate rows in `movie_enrichment_g2` / `series_enrichment_g2`; `selected_enrichment_id` + `enrichment_disabled` on content rows; auto-enrich on first detail open; per-field fallback merge in MovieDetail/SeriesDetail; "Not this film?" picker (`EnrichmentPicker`); source-level enrich button
+- **Movie detail duration** — `md_runtime` column on movies, lazy-fetched via `get_vod_info` on first open, persisted, `staleTime: Infinity` for instant reloads; displayed in MetadataBlock strip
 
-## Snapshot (2026-04-15)
+## Snapshot (2026-04-16)
 
-- Phase state: **g1c shipped** (simplified past the original design — FTS removed, Index step merged into sync, pipeline reduced to 2 buttons; VoD card redesign, vocabulary sweep, Channel Detail panel with Schedule section + Details buttons on all VoD/Channel cards; continue-watching invalidation bug fixed)
-- Active branch: `g1c` (kept as source of truth; `master` fast-forwarded alongside)
-- DB: 15 tables — per-type split for content/categories/user-data, no canonical, no FTS
-- Search: LIKE on `search_title` (populated inline at sync via any-ascii + lowercase). No ranking, no FTS.
+- Phase state: **g2 in progress** (g1c shipped, g2 builds on top)
+- Active branch: `g2`
+- DB: 15 tables + enrichment tables (`movie_enrichment_g2`, `series_enrichment_g2`). Per-type split for content/categories/user-data, no canonical, no FTS.
+- Search: LIKE on `search_title` (populated inline at sync via any-ascii + lowercase). No ranking, no FTS. ADV search (`@` prefix) strips to plain LIKE (stopgap — parser not built).
 - Pipeline: Test → Sync. Ingest states `added → tested → synced → epg_fetched`. EPG auto-chains for Xtream sources.
-- Security: Electron sandbox enabled, contextIsolation on, nodeIntegration off.
+- Security: Electron sandbox enabled, contextIsolation on, nodeIntegration off. NSFW default-off (opt-in).
+
+## g2 — queued
+
+- **ADV search + `md_*` column population** — (1) audit sync gaps in `md_*` columns; (2) fill from Xtream API response; (3) ADV parser (`field:value` → WHERE on `md_*`). Frontend `@` chip + `isAdvanced` IPC flag already wired.
+- **M3U source parity review** — audit feature gaps vs. Xtream (sync, `md_*`, EPG, VoD enrichment applicability), then targeted fixes.

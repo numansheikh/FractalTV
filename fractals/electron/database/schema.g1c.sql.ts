@@ -140,6 +140,7 @@ export const G1C_SCHEMA_SQL = `
     md_year             INTEGER,
     md_origin           TEXT,
     md_quality          TEXT,
+    md_runtime          INTEGER,            -- minutes, populated on first detail open
 
     added_at            INTEGER NOT NULL DEFAULT (unixepoch())
   );
@@ -301,6 +302,36 @@ export const G1C_SCHEMA_SQL = `
   );
 
   CREATE INDEX IF NOT EXISTS idx_iptv_channels_country ON iptv_channels(country);
+
+  -- ─── VoD enrichment (g2 — keyless, Wikipedia + Wikidata + IMDb suggest) ──
+
+  CREATE TABLE IF NOT EXISTS movie_enrichment_g2 (
+    id            INTEGER PRIMARY KEY,
+    movie_id      TEXT    NOT NULL REFERENCES movies(id) ON DELETE CASCADE,
+    algo_version  TEXT    NOT NULL,           -- 'v1'
+    imdb_id       TEXT,
+    tmdb_id       TEXT,
+    wikidata_qid  TEXT,
+    confidence    REAL    NOT NULL DEFAULT 0, -- 0.0..1.0
+    fetched_at    INTEGER NOT NULL DEFAULT (unixepoch()),
+    raw_json      TEXT    NOT NULL DEFAULT '{}' -- VodEnrichmentCandidate JSON
+  );
+  CREATE INDEX IF NOT EXISTS idx_movie_enrich_movie ON movie_enrichment_g2(movie_id);
+  CREATE INDEX IF NOT EXISTS idx_movie_enrich_imdb  ON movie_enrichment_g2(imdb_id);
+
+  CREATE TABLE IF NOT EXISTS series_enrichment_g2 (
+    id            INTEGER PRIMARY KEY,
+    series_id     TEXT    NOT NULL REFERENCES series(id) ON DELETE CASCADE,
+    algo_version  TEXT    NOT NULL,
+    imdb_id       TEXT,
+    tmdb_id       TEXT,
+    wikidata_qid  TEXT,
+    confidence    REAL    NOT NULL DEFAULT 0,
+    fetched_at    INTEGER NOT NULL DEFAULT (unixepoch()),
+    raw_json      TEXT    NOT NULL DEFAULT '{}'
+  );
+  CREATE INDEX IF NOT EXISTS idx_series_enrich_series ON series_enrichment_g2(series_id);
+  CREATE INDEX IF NOT EXISTS idx_series_enrich_imdb   ON series_enrichment_g2(imdb_id);
 
   CREATE INDEX IF NOT EXISTS idx_channel_ud_favorites      ON channel_user_data(profile_id, is_favorite);
   CREATE INDEX IF NOT EXISTS idx_movie_ud_favorites        ON movie_user_data(profile_id, is_favorite);

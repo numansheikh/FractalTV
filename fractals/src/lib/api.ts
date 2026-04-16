@@ -87,6 +87,9 @@ export const api = {
 
     browse: (args: { type?: 'live' | 'movie' | 'series'; categoryName?: string; sourceIds?: string[]; sortBy?: string; sortDir?: string; limit?: number; offset?: number }) =>
       isElectron ? window.api.content.browse(args) : Promise.resolve({ items: [], total: 0 }),
+
+    getVodInfo: (contentId: string): Promise<{ runtime: number | null }> =>
+      isElectron ? (window.api as any).content.getVodInfo({ contentId }) : Promise.resolve({ runtime: null }),
   },
 
   user: {
@@ -162,6 +165,23 @@ export const api = {
       isElectron ? window.api.enrichment.status() : Promise.resolve({ total: 0, enriched: 0, pending: 0 }),
     start: () =>
       isElectron ? window.api.enrichment.start() : Promise.resolve({ success: false }),
+  },
+
+  vodEnrich: {
+    status: (): Promise<{ ok: boolean; movies_enriched: number; series_enriched: number }> =>
+      isElectron ? (window.api as any).vodEnrich.status() : Promise.resolve({ ok: false, movies_enriched: 0, series_enriched: 0 }),
+    enrich: (sourceId: string, force?: boolean): Promise<{ ok: boolean; movies?: number; series?: number; error?: string }> =>
+      isElectron ? (window.api as any).vodEnrich.enrich(sourceId, force) : Promise.resolve({ ok: false }),
+    getForContent: (contentId: string): Promise<{ disabled: boolean; selected_id: number | null; candidates: any[] }> =>
+      isElectron ? (window.api as any).vodEnrich.getForContent(contentId) : Promise.resolve({ disabled: false, selected_id: null, candidates: [] }),
+    enrichSingle: (contentId: string, force?: boolean): Promise<{ disabled: boolean; selected_id: number | null; candidates: any[] }> =>
+      isElectron ? (window.api as any).vodEnrich.enrichSingle(contentId, force ?? false) : Promise.resolve({ disabled: false, selected_id: null, candidates: [] }),
+    pickCandidate: (contentId: string, enrichmentId: number): Promise<{ ok: boolean }> =>
+      isElectron ? (window.api as any).vodEnrich.pickCandidate(contentId, enrichmentId) : Promise.resolve({ ok: false }),
+    disable: (contentId: string): Promise<{ ok: boolean }> =>
+      isElectron ? (window.api as any).vodEnrich.disable(contentId) : Promise.resolve({ ok: false }),
+    reset: (contentId: string): Promise<{ ok: boolean }> =>
+      isElectron ? (window.api as any).vodEnrich.reset(contentId) : Promise.resolve({ ok: false }),
   },
 
   epg: {

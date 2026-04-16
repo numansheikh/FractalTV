@@ -5,7 +5,7 @@ import { ContentItem, ActiveView, ContentType } from '@/lib/types'
 interface AppState {
   // Navigation
   activeView: ActiveView
-  previousView: ActiveView | null
+  viewHistory: ActiveView[]
 
   // Panel stack — topmost is active
   selectedContent: ContentItem | null
@@ -46,7 +46,11 @@ interface AppState {
   controlsMode: 'never' | 'auto-2' | 'auto-3' | 'auto-5' | 'always'
 
   // Player mode (persistent mount — controlled separately from playingContent)
-  playerMode: 'hidden' | 'fullscreen' | 'mini'
+  playerMode: 'hidden' | 'fullscreen' | 'mini' | 'embedded'
+
+  // Embedded player anchor — the DOM element the player should overlay when in 'embedded' mode.
+  // Not persisted (DOM references can't be serialized).
+  embeddedAnchor: HTMLElement | null
 
   // Actions
   setView: (view: ActiveView) => void
@@ -73,14 +77,15 @@ interface AppState {
   setTimezone: (tz: string | null) => void
   setMinWatchSeconds: (n: number) => void
   setControlsMode: (m: 'never' | 'auto-2' | 'auto-3' | 'auto-5' | 'always') => void
-  setPlayerMode: (m: 'hidden' | 'fullscreen' | 'mini') => void
+  setPlayerMode: (m: 'hidden' | 'fullscreen' | 'mini' | 'embedded') => void
+  setEmbeddedAnchor: (el: HTMLElement | null) => void
 }
 
 export const useAppStore = create<AppState>()(
   persist(
     (set) => ({
       activeView: 'home',
-      previousView: null,
+      viewHistory: [],
       selectedContent: null,
       playingContent: null,
       showSettings: false,
@@ -103,14 +108,19 @@ export const useAppStore = create<AppState>()(
       minWatchSeconds: 5,
       controlsMode: 'auto-3',
       playerMode: 'hidden',
+      embeddedAnchor: null,
 
-      setView: (activeView) => set((s) => ({ activeView, previousView: s.activeView })),
-      goBack: () => set((s) => ({ activeView: s.previousView ?? 'home', previousView: null })),
+      setView: (activeView) => set((s) => ({ activeView, viewHistory: [...s.viewHistory, s.activeView] })),
+      goBack: () => set((s) => {
+        const history = [...s.viewHistory]
+        const prev = history.pop() ?? 'home'
+        return { activeView: prev, viewHistory: history }
+      }),
       setViewMode: (viewMode) => set({ viewMode }),
       setPageSize: (pageSize) => set({ pageSize }),
       setSort: (sort) => set({ sort }),
       setSelectedContent: (selectedContent) => set({ selectedContent }),
-      setPlayingContent: (playingContent) => set({ playingContent }),
+      setPlayingContent: (playingContent) => set(playingContent === null ? { playingContent, embeddedAnchor: null } : { playingContent }),
       setShowSettings: (showSettings) => set({ showSettings }),
       setLiveViewChannel: (liveViewChannel) => set({ liveViewChannel }),
       setChannelSurfContext: (channelSurfList, channelSurfIndex, action, searchQuery) => set({ channelSurfList, channelSurfIndex, surfContextAction: action ?? null, surfSearchQuery: searchQuery ?? null }),
@@ -145,6 +155,7 @@ export const useAppStore = create<AppState>()(
       setMinWatchSeconds: (minWatchSeconds) => set({ minWatchSeconds }),
       setControlsMode: (controlsMode) => set({ controlsMode }),
       setPlayerMode: (playerMode) => set({ playerMode }),
+      setEmbeddedAnchor: (embeddedAnchor) => set({ embeddedAnchor }),
     }),
     {
       name: 'fractals-app',

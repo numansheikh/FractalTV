@@ -11,6 +11,15 @@ import { m3uService } from '../services/m3u.service'
 import { syncEpg, getNowNext } from '../services/epg.service'
 import { normalizeForSearch } from '../lib/normalize'
 import { pullAll as iptvOrgPullAll, getStatus as iptvOrgGetStatus, matchChannelsForSource as iptvOrgMatchSource } from '../services/iptv-org'
+import {
+  enrichForSource as vodEnrichForSource,
+  enrichSingle as vodEnrichSingle,
+  getForContent as vodGetForContent,
+  pickCandidate as vodPickCandidate,
+  disableEnrichment as vodDisableEnrichment,
+  resetEnrichment as vodResetEnrichment,
+  getEnrichStatus as vodGetEnrichStatus,
+} from '../services/enrichment-vod'
 
 // ─── Minimal row interfaces ─────────────────────────────────────────────────
 
@@ -146,7 +155,7 @@ const MOVIE_SELECT = `
   NULL                       AS director,
   NULL                       AS cast,
   NULL                       AS keywords,
-  NULL                       AS runtime,
+  m.md_runtime               AS runtime,
   NULL                       AS tmdb_id,
   0                          AS enriched,
   NULL                       AS enriched_at,
@@ -545,9 +554,20 @@ export function registerHandlers() {
     if (!isM3u && !source.server_url) return { success: false, error: 'Source not found' }
     if (isM3u && !source.m3u_url) return { success: false, error: 'M3U URL not found' }
 
+    const SYNC_TIMEOUT_MS = 15 * 60 * 1000 // 15 minutes
+
     return new Promise((resolve) => {
       const worker = new Worker(workerPath, { workerData: wData })
       activeSyncWorkers.set(sourceId, worker)
+
+      const syncTimeout = setTimeout(() => {
+        worker.terminate()
+        activeSyncWorkers.delete(sourceId)
+        win?.webContents.send('sync:progress', {
+          sourceId, phase: 'error', current: 0, total: 0, message: 'Sync timed out after 15 minutes',
+        })
+        resolve({ success: false, error: 'Sync timed out' })
+      }, SYNC_TIMEOUT_MS)
 
       worker.on('message', (msg: any) => {
         if (msg.type === 'progress') {
@@ -555,6 +575,7 @@ export function registerHandlers() {
             sourceId, phase: msg.phase, current: msg.current, total: msg.total, message: msg.message,
           })
         } else if (msg.type === 'done') {
+          clearTimeout(syncTimeout)
           activeSyncWorkers.delete(sourceId)
           sqlite.prepare(`UPDATE sources SET ingest_state = 'synced' WHERE id = ?`).run(sourceId)
 
@@ -598,6 +619,7 @@ export function registerHandlers() {
             sourceId, phase: 'warning', current: 0, total: 0, message: msg.message,
           })
         } else if (msg.type === 'error') {
+          clearTimeout(syncTimeout)
           win?.webContents.send('sync:progress', {
             sourceId, phase: 'error', current: 0, total: 0, message: msg.message,
           })
@@ -606,6 +628,7 @@ export function registerHandlers() {
       })
 
       worker.on('error', (err) => {
+        clearTimeout(syncTimeout)
         activeSyncWorkers.delete(sourceId)
         win?.webContents.send('sync:progress', {
           sourceId, phase: 'error', current: 0, total: 0, message: String(err),
@@ -614,6 +637,7 @@ export function registerHandlers() {
       })
 
       worker.on('exit', (code) => {
+        clearTimeout(syncTimeout)
         activeSyncWorkers.delete(sourceId)
         if (code !== 0) resolve({ success: false, error: `Worker exited with code ${code}` })
       })
@@ -776,6 +800,8 @@ export function registerHandlers() {
     const sqlite = getSqlite()
     const { categoryName, sourceIds, limit = 50, offset = 0, skipCount = false } = args
     const rawQuery = (args.query ?? '').trim()
+    const isAdvanced = rawQuery.startsWith('@')
+    const searchQuery = isAdvanced ? rawQuery.slice(1).trim() : rawQuery
 
     const enabledSources = (sqlite.prepare(`SELECT id FROM sources WHERE disabled = 0`).all() as { id: string }[]).map(r => r.id)
     const filterIds = sourceIds && sourceIds.length > 0
@@ -786,30 +812,33 @@ export function registerHandlers() {
     const effectiveType = args.type
 
     // Empty query → browse path.
-    if (!rawQuery) {
+    if (!searchQuery) {
       return runBrowseSearch(effectiveType, categoryName, filterIds, limit, offset)
     }
+
+    // TODO: when isAdvanced is true, route to a parsed-query search path
+    // instead of plain LIKE. For now, strip the @ and do plain search.
 
     // Typed search: single table — one COUNT + one SELECT LIMIT/OFFSET.
     // skipCount short-circuits the COUNT for callers that only need items
     // (e.g. Home, which displays a fixed cap and never shows a total).
     if (effectiveType === 'movie') {
-      return g1cSearchMovies(rawQuery, categoryName, filterIds, limit, offset, skipCount)
+      return g1cSearchMovies(searchQuery, categoryName, filterIds, limit, offset, skipCount)
     }
     if (effectiveType === 'live') {
-      return g1cSearchChannels(rawQuery, categoryName, filterIds, limit, offset, skipCount)
+      return g1cSearchChannels(searchQuery, categoryName, filterIds, limit, offset, skipCount)
     }
     if (effectiveType === 'series') {
-      return g1cSearchSeries(rawQuery, categoryName, filterIds, limit, offset, skipCount)
+      return g1cSearchSeries(searchQuery, categoryName, filterIds, limit, offset, skipCount)
     }
 
     // All-types fan-out: concatenate live+movie+series, paginate across
     // the merged sequence. We over-fetch (limit+offset) per type so we can
     // pick a consistent slice; each type's total is summed for the grand total.
     const cap = limit + offset
-    const live   = g1cSearchChannels(rawQuery, categoryName, filterIds, cap, 0, skipCount)
-    const movies = g1cSearchMovies  (rawQuery, categoryName, filterIds, cap, 0, skipCount)
-    const series = g1cSearchSeries  (rawQuery, categoryName, filterIds, cap, 0, skipCount)
+    const live   = g1cSearchChannels(searchQuery, categoryName, filterIds, cap, 0, skipCount)
+    const movies = g1cSearchMovies  (searchQuery, categoryName, filterIds, cap, 0, skipCount)
+    const series = g1cSearchSeries  (searchQuery, categoryName, filterIds, cap, 0, skipCount)
     const merged = [...live.items, ...movies.items, ...series.items]
     return {
       items: merged.slice(offset, offset + limit),
@@ -978,6 +1007,26 @@ export function registerHandlers() {
     } catch (err) {
       return { error: String(err) }
     }
+  })
+
+  ipcMain.handle('content:get-vod-info', async (_event, args: { contentId: string }) => {
+    const db = getDb()
+    const sqlite = getSqlite()
+
+    const movieRow = sqlite.prepare('SELECT * FROM movies WHERE id = ?').get(args.contentId) as any
+    if (!movieRow) return { runtime: null }
+
+    // Return cached value if already persisted
+    if (movieRow.md_runtime != null) return { runtime: movieRow.md_runtime }
+
+    const [source] = await db.select().from(sources).where(eq(sources.id, movieRow.source_id))
+    if (!source?.serverUrl || !source.username || !source.password) return { runtime: null }
+
+    const result = await xtreamService.getVodInfo(source.serverUrl, source.username, source.password, movieRow.external_id)
+    if (result.runtime != null) {
+      sqlite.prepare('UPDATE movies SET md_runtime = ? WHERE id = ?').run(result.runtime, args.contentId)
+    }
+    return result
   })
 
   // ── User data ──────────────────────────────────────────────────────────
@@ -1330,6 +1379,58 @@ export function registerHandlers() {
     }
   })
 
+  // ── VoD enrichment (g2 — keyless: Wikipedia + Wikidata + IMDb suggest) ──
+
+  // Tracks which sources are currently being enriched — prevents concurrent runs per source
+  const vodEnrichingJobs = new Set<string>()
+
+  ipcMain.handle('vodEnrich:status', () => {
+    try { return { ok: true, ...vodGetEnrichStatus() } } catch { return { ok: false, movies_enriched: 0, series_enriched: 0 } }
+  })
+
+  ipcMain.handle('vodEnrich:enrich', (_event, sourceId: string, force = false) => {
+    if (vodEnrichingJobs.has(sourceId)) {
+      return { ok: false, alreadyRunning: true, error: 'Enrichment already running for this source' }
+    }
+    vodEnrichingJobs.add(sourceId)
+
+    // Broadcast to all windows — survives SourcesPanel close/reopen
+    const broadcast = (p: any) =>
+      BrowserWindow.getAllWindows()[0]?.webContents.send('vodEnrich:progress', { sourceId, ...p })
+
+    // Fire and forget — returns immediately, job continues in background
+    vodEnrichForSource(sourceId, broadcast, force)
+      .catch((e) => {
+        const message = e instanceof Error ? e.message : String(e)
+        broadcast({ phase: 'error', current: 0, total: 0, error: message })
+      })
+      .finally(() => {
+        vodEnrichingJobs.delete(sourceId)
+      })
+
+    return { ok: true, started: true }
+  })
+
+  ipcMain.handle('vodEnrich:getForContent', (_event, contentId: string) => {
+    try { return vodGetForContent(contentId) } catch { return { disabled: false, selected_id: null, candidates: [] } }
+  })
+
+  ipcMain.handle('vodEnrich:enrichSingle', async (_event, contentId: string, force = false) => {
+    try { return await vodEnrichSingle(contentId, force) } catch { return { disabled: false, selected_id: null, candidates: [] } }
+  })
+
+  ipcMain.handle('vodEnrich:pickCandidate', (_event, contentId: string, enrichmentId: number) => {
+    try { vodPickCandidate(contentId, enrichmentId); return { ok: true } } catch (e) { return { ok: false, error: String(e) } }
+  })
+
+  ipcMain.handle('vodEnrich:disable', (_event, contentId: string) => {
+    try { vodDisableEnrichment(contentId); return { ok: true } } catch (e) { return { ok: false, error: String(e) } }
+  })
+
+  ipcMain.handle('vodEnrich:reset', (_event, contentId: string) => {
+    try { vodResetEnrichment(contentId); return { ok: true } } catch (e) { return { ok: false, error: String(e) } }
+  })
+
   // ── Enrichment — deprecated stubs (no canonical layer in g1c) ─────────
   const deprecatedEnrichment = (opName: string) => () => ({
     success: false,
@@ -1384,7 +1485,7 @@ export function registerHandlers() {
       { table: 'series_categories',  content: 'series',   type: 'series' as const },
     ]
 
-    const allowAdult = getSetting('allow_adult') !== '0'
+    const allowAdult = getSetting('allow_adult') === '1'
 
     const rows: any[] = []
     for (const q of queries) {
@@ -1495,7 +1596,7 @@ function g1cSearchChannels(
     ? `JOIN channel_categories cat ON cat.id = c.category_id AND cat.name = ?`
     : ''
   const catParams: unknown[] = categoryName ? [categoryName] : []
-  const nsfwWhere = getSetting('allow_adult') !== '0' ? '' : 'AND c.is_nsfw = 0'
+  const nsfwWhere = getSetting('allow_adult') === '1' ? '' : 'AND c.is_nsfw = 0'
   const normalized = normalizeForSearch(query)
   if (!normalized) return { items: [], total: 0 }
   const like = `%${normalized}%`
@@ -1530,7 +1631,7 @@ function g1cSearchMovies(
     ? `JOIN movie_categories cat ON cat.id = m.category_id AND cat.name = ?`
     : ''
   const catParams: unknown[] = categoryName ? [categoryName] : []
-  const nsfwWhere = getSetting('allow_adult') !== '0' ? '' : 'AND m.is_nsfw = 0'
+  const nsfwWhere = getSetting('allow_adult') === '1' ? '' : 'AND m.is_nsfw = 0'
   const normalized = normalizeForSearch(query)
   if (!normalized) return { items: [], total: 0 }
   const like = `%${normalized}%`
@@ -1565,7 +1666,7 @@ function g1cSearchSeries(
     ? `JOIN series_categories cat ON cat.id = sr.category_id AND cat.name = ?`
     : ''
   const catParams: unknown[] = categoryName ? [categoryName] : []
-  const nsfwWhere = getSetting('allow_adult') !== '0' ? '' : 'AND sr.is_nsfw = 0'
+  const nsfwWhere = getSetting('allow_adult') === '1' ? '' : 'AND sr.is_nsfw = 0'
   const normalized = normalizeForSearch(query)
   if (!normalized) return { items: [], total: 0 }
   const like = `%${normalized}%`
@@ -1603,7 +1704,7 @@ function runBrowseSearch(
   const sourceList = filterIds.map(() => '?').join(',')
   const dir = sortDir === 'asc' ? 'ASC' : 'DESC'
 
-  const allowAdult = getSetting('allow_adult') !== '0'
+  const allowAdult = getSetting('allow_adult') === '1'
 
   if (type === 'live') {
     const sortCol: Record<string, string> = { title: 'c.title', year: 'c.md_year', rating: 'c.added_at', updated: 'c.added_at' }
