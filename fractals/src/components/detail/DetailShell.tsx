@@ -130,9 +130,12 @@ export function DetailShell({
         <div style={{
           flexShrink: 0,
           borderTop: '1px solid var(--border-subtle)',
+          borderBottom: '1px solid var(--border-subtle)',
           maxHeight: 132,
           overflowY: 'auto',
-          padding: '8px 12px',
+          padding: '10px 12px',
+          background: 'var(--bg-1)',
+          boxShadow: 'inset 0 3px 10px rgba(0,0,0,0.2)',
         }}>
           {castPanel}
         </div>
