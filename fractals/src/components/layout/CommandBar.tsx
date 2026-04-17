@@ -4,7 +4,10 @@ import { useSourcesStore } from '@/stores/sources.store'
 import { useSearchStore } from '@/stores/search.store'
 import { buildColorMapFromSources } from '@/lib/sourceColors'
 
-const ADV_ACCENT = '#7733ff'
+// ADV chip uses the app's accent-interactive token so it adapts to theme changes.
+// Active state: semi-transparent accent fill + white text. Hover: accent outline hint.
+const ADV_ACTIVE_BG = 'color-mix(in srgb, var(--accent-interactive) 50%, transparent)'
+const ADV_GLOW = 'color-mix(in srgb, var(--accent-interactive) 20%, transparent)'
 
 function CmdSearchInput({ query, setQuery, inputRef }: {
   query: string
@@ -65,18 +68,18 @@ function CmdSearchInput({ query, setQuery, inputRef }: {
           height: 20, padding: '0 7px',
           display: 'flex', alignItems: 'center', gap: 4,
           borderRadius: 4,
-          border: `1px solid ${isAdvanced ? ADV_ACCENT : 'var(--border-strong)'}`,
-          background: isAdvanced ? `${ADV_ACCENT}78` : 'transparent',
+          border: `1px solid ${isAdvanced ? 'var(--accent-interactive)' : 'var(--border-strong)'}`,
+          background: isAdvanced ? ADV_ACTIVE_BG : 'transparent',
           color: isAdvanced ? '#fff' : 'var(--text-3)',
           fontSize: 9, fontWeight: 800, fontFamily: 'var(--font-mono)',
           letterSpacing: '0.06em', cursor: 'pointer', userSelect: 'none',
-          boxShadow: isAdvanced ? `0 0 0 2px color-mix(in srgb, ${ADV_ACCENT} 20%, transparent)` : 'none',
+          boxShadow: isAdvanced ? `0 0 0 2px ${ADV_GLOW}` : 'none',
           transition: 'color 0.12s, border-color 0.12s, background 0.12s, box-shadow 0.12s',
         }}
         onMouseEnter={(e) => {
           if (!isAdvanced) {
-            e.currentTarget.style.color = ADV_ACCENT
-            e.currentTarget.style.borderColor = ADV_ACCENT
+            e.currentTarget.style.color = 'var(--accent-interactive)'
+            e.currentTarget.style.borderColor = 'var(--accent-interactive)'
           }
         }}
         onMouseLeave={(e) => {
@@ -159,10 +162,9 @@ function CmdSearchInput({ query, setQuery, inputRef }: {
       {/* ADV legend — shown below the search bar when @ mode is active */}
       {isAdvanced && (
         <div style={{
-          position: 'absolute', left: 0, top: '100%', marginTop: 4,
+          position: 'absolute', right: 0, top: '100%', marginTop: 8,
           fontSize: 10, color: 'var(--text-3)', fontFamily: 'var(--font-mono)',
           pointerEvents: 'none', whiteSpace: 'nowrap',
-          paddingLeft: LEFT_PAD,
         }}>
           year:2024 &nbsp; lang:en &nbsp; quality:4K &nbsp; prefix:GR &nbsp; country:US
         </div>
