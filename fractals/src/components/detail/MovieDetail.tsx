@@ -8,7 +8,7 @@ import { buildColorMapFromSources } from '@/lib/sourceColors'
 import { SlidePanel } from '@/components/layout/SlidePanel'
 import { MetadataBlock } from './MetadataBlock'
 import { ActionButtons } from './ActionButtons'
-import { AboutBlock } from './AboutBlock'
+import { AboutBlock, parseCast, CastPanel } from './AboutBlock'
 import { DetailShell, BreadcrumbItem } from './DetailShell'
 import { EnrichmentPicker } from './EnrichmentPicker'
 
@@ -220,10 +220,11 @@ export function MovieDetail({ item, onPlay, onClose, onNavigate, isPlaying }: Pr
         allSourceIds={allSourceIds}
         sourceColorMap={colorMap}
         onClose={onClose}
+        castPanel={<CastPanel cast={parseCast(displayItem.cast)} />}
         footer={footer}
       >
         <MetadataBlock item={displayItem} />
-        <AboutBlock item={displayItem} onClose={onClose} />
+        <AboutBlock item={displayItem} />
       </DetailShell>
       {showPicker && (
         <EnrichmentPicker

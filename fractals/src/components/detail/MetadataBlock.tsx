@@ -113,20 +113,6 @@ export function MetadataBlock({ item, isSeries, hideHero }: Props) {
     if (lang && lang !== mdPrefix.toUpperCase()) sourceTags.push(lang)
   }
 
-  const genrePills = genres.length > 0 ? (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-      {genres.map((g) => (
-        <span key={g} style={{
-          fontSize: 11, padding: '4px 8px', borderRadius: 4,
-          background: 'var(--bg-3)', color: 'var(--text-1)',
-          fontFamily: 'var(--font-ui)',
-        }}>
-          {g}
-        </span>
-      ))}
-    </div>
-  ) : null
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       {!hideHero && !heroSrc && (
@@ -155,17 +141,10 @@ export function MetadataBlock({ item, isSeries, hideHero }: Props) {
             background: 'linear-gradient(to bottom, transparent, var(--bg-2))',
             pointerEvents: 'none',
           }} />
-          {genrePills && (
-            <div style={{ position: 'absolute', top: 8, left: 8, right: 8, zIndex: 1 }}>
-              {genrePills}
-            </div>
-          )}
         </div>
       )}
       {!hideHero && heroSrc && (
         <div style={{ position: 'relative', borderRadius: 8, overflow: 'hidden', height: 180, background: 'var(--bg-2)' }}>
-          {/* Blurred fill — when only a portrait poster is available, scale-up + blur
-              it so it can fill a wide hero strip without black bars. */}
           {heroIsPosterFallback && (
             <img
               src={heroSrc}
@@ -182,8 +161,6 @@ export function MetadataBlock({ item, isSeries, hideHero }: Props) {
               }}
             />
           )}
-          {/* Sharp image: contain-fit for poster fallback (keeps portrait intact),
-              cover-fit for a proper landscape backdrop. */}
           <img
             src={heroSrc}
             alt=""
@@ -195,7 +172,6 @@ export function MetadataBlock({ item, isSeries, hideHero }: Props) {
               display: 'block',
             }}
           />
-          {/* Gradient fade to --bg-1 at bottom */}
           <div style={{
             position: 'absolute',
             bottom: 0, left: 0, right: 0,
@@ -203,11 +179,6 @@ export function MetadataBlock({ item, isSeries, hideHero }: Props) {
             background: 'linear-gradient(to bottom, transparent, var(--bg-2))',
             pointerEvents: 'none',
           }} />
-          {genrePills && (
-            <div style={{ position: 'absolute', top: 8, left: 8, right: 8, zIndex: 1 }}>
-              {genrePills}
-            </div>
-          )}
         </div>
       )}
 
@@ -241,17 +212,31 @@ export function MetadataBlock({ item, isSeries, hideHero }: Props) {
         </p>
       )}
 
-      {/* Meta line — content facts + source tags inline */}
-      {(contentMeta.length > 0 || sourceTags.length > 0) && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-          {contentMeta.length > 0 && (
-            <span style={{
-              fontSize: 13, color: 'var(--text-1)',
-              fontFamily: 'var(--font-ui)', lineHeight: 1.4,
+      {/* Meta line */}
+      {contentMeta.length > 0 && (
+        <span style={{
+          fontSize: 13, color: 'var(--text-1)',
+          fontFamily: 'var(--font-ui)', lineHeight: 1.4,
+        }}>
+          {contentMeta.join(' · ')}
+        </span>
+      )}
+
+      {/* Genre pills — in place of source category tags */}
+      {genres.length > 0 ? (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+          {genres.map((g) => (
+            <span key={g} style={{
+              fontSize: 11, padding: '4px 8px', borderRadius: 4,
+              background: 'var(--bg-3)', color: 'var(--text-1)',
+              fontFamily: 'var(--font-ui)',
             }}>
-              {contentMeta.join(' · ')}
+              {g}
             </span>
-          )}
+          ))}
+        </div>
+      ) : sourceTags.length > 0 ? (
+        <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
           {sourceTags.map((tag) => (
             <span key={tag} style={{
               fontSize: 10, fontWeight: 500,
@@ -266,12 +251,7 @@ export function MetadataBlock({ item, isSeries, hideHero }: Props) {
             </span>
           ))}
         </div>
-      )}
-
-      {/* Genre pills — shown inline if hero is hidden */}
-      {hideHero && genrePills}
-
-      {/* No metadata note — hidden until g2+ TMDB integration */}
+      ) : null}
     </div>
   )
 }

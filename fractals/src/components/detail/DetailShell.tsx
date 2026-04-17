@@ -24,6 +24,7 @@ interface Props {
   sourceColorMap?: Record<string, SourceColor>
   onClose: () => void
   children: ReactNode
+  castPanel?: ReactNode
   footer?: ReactNode
 }
 
@@ -37,6 +38,7 @@ export function DetailShell({
   sourceColorMap,
   onClose,
   children,
+  castPanel,
   footer,
 }: Props) {
   const hasMultiSource = (allSourceIds?.length ?? 0) > 1
@@ -122,6 +124,19 @@ export function DetailShell({
       }}>
         {children}
       </div>
+
+      {/* Cast panel — fixed strip above footer, vertically scrollable */}
+      {castPanel && (
+        <div style={{
+          flexShrink: 0,
+          borderTop: '1px solid var(--border-subtle)',
+          maxHeight: 132,
+          overflowY: 'auto',
+          padding: '8px 12px',
+        }}>
+          {castPanel}
+        </div>
+      )}
 
       {/* Sticky footer — [breadcrumbs · actionsRow] + other footer content */}
       {(footer || breadcrumbs.length > 0 || actionsRow) && (
