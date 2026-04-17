@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { ContentItem } from '@/lib/types'
 import { useSearchStore } from '@/stores/search.store'
 
@@ -13,7 +12,6 @@ function parseCast(raw: string | undefined): string[] {
 }
 
 export function AboutBlock({ item, onClose }: Props) {
-  const [plotExpanded, setPlotExpanded] = useState(false)
   const setQuery = useSearchStore((s) => s.setQuery)
 
   const plot = item.plot ?? ''
@@ -64,39 +62,15 @@ export function AboutBlock({ item, onClose }: Props) {
       )}
 
       {plot && (
-        <div>
-          <p style={{
-            fontSize: 13,
-            color: 'var(--text-1)',
-            lineHeight: 1.6,
-            margin: 0,
-            fontFamily: 'var(--font-ui)',
-            ...(plotExpanded ? {} : {
-              display: '-webkit-box',
-              WebkitLineClamp: 6,
-              WebkitBoxOrient: 'vertical',
-              overflow: 'hidden',
-            }),
-          }}>
-            {plot}
-          </p>
-          {plot.length > 320 && (
-            <button
-              onClick={() => setPlotExpanded((v) => !v)}
-              style={{
-                background: 'none', border: 'none',
-                padding: '4px 0 0',
-                fontSize: 11, color: 'var(--accent-interactive)',
-                cursor: 'pointer', fontFamily: 'var(--font-ui)',
-                transition: 'opacity 0.12s',
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.75' }}
-              onMouseLeave={(e) => { e.currentTarget.style.opacity = '1' }}
-            >
-              {plotExpanded ? 'Show less' : 'Show more'}
-            </button>
-          )}
-        </div>
+        <p style={{
+          fontSize: 13,
+          color: 'var(--text-1)',
+          lineHeight: 1.6,
+          margin: 0,
+          fontFamily: 'var(--font-ui)',
+        }}>
+          {plot}
+        </p>
       )}
     </>
   )
