@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ContentItem, BreadcrumbNav } from '@/lib/types'
 import { api } from '@/lib/api'
@@ -39,7 +39,6 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
   const queryClient = useQueryClient()
   const playingContent = useAppStore((s) => s.playingContent)
   const playerMode = useAppStore((s) => s.playerMode)
-  const setPlayerMode = useAppStore((s) => s.setPlayerMode)
 
   const { data: enrichedItem } = useQuery({
     queryKey: ['content', item.id],
@@ -57,7 +56,6 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
   useEffect(() => {
     _setActiveSeason(activeSeasonCache.get(item.id) ?? null)
     setHasAutoSelectedSeason(false)
-    firstEpIdRef.current = undefined
     useAppStore.getState().setEpisodeSurfContext([], -1)
   }, [item.id])
 
@@ -87,7 +85,7 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
     staleTime: 5 * 60_000,
   })
 
-  const { data: continueData = [], isFetched: continueFetched } = useQuery<ContentItem[]>({
+  const { data: continueData = [] } = useQuery<ContentItem[]>({
     queryKey: ['series-continue', item.id],
     queryFn: async () => {
       const all = await api.user.continueWatching({ type: 'series' }) as ContentItem[]
@@ -98,21 +96,6 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
   const resumeEntry = continueData[0] ?? null
 
   const c = (enrichedItem as ContentItem | null) ?? item
-
-  // Callback ref fires at DOM commit time — guaranteed non-null, no effect timing issues.
-  // Anchor registration and cleanup are handled here; playback starts in the separate episode effect.
-  const playerZoneCallback = useCallback((el: HTMLDivElement | null) => {
-    if (!el) {
-      const s = useAppStore.getState()
-      s.setEmbeddedAnchor(null)
-      if (s.playerMode === 'embedded') {
-        s.setPlayerMode('hidden')
-        s.setPlayingContent(null)
-      }
-      return
-    }
-    useAppStore.getState().setEmbeddedAnchor(el)
-  }, [])
 
   // Derive active enrichment candidate
   const activeEnrichment = (() => {
@@ -235,36 +218,14 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
       }
     : undefined
 
-  // Start embedded playback once resume data is settled and the episode item is ready
-  const firstEpIdRef = useRef<string | undefined>(undefined)
-  useEffect(() => {
-    if (!firstEpItem) return
-    if (!continueFetched) return
-    if (firstEpIdRef.current === firstEpItem.id) return
-    firstEpIdRef.current = firstEpItem.id
-    const s = useAppStore.getState()
-    if (s.playingContent?.id === firstEpItem.id && s.playerMode !== 'hidden') {
-      // Player already running with this episode — just re-embed
-      s.setPlayerMode('embedded')
-    } else if (!s.playingContent || s.playerMode === 'hidden') {
-      // Nothing currently playing — autostart after 2s
-      const ep = firstEpItem
-      const timer = setTimeout(() => {
-        useAppStore.getState().setPlayingContent(ep)
-        useAppStore.getState().setPlayerMode('embedded')
-      }, 2000)
-      return () => clearTimeout(timer)
-    }
-  }, [firstEpItem?.id, continueFetched])
-
   const playButtonLabel = resumeEntry && resumeEntry.resume_season_number != null && resumeEntry.resume_episode_number != null
     ? `▶ Resume S${resumeEntry.resume_season_number}·E${resumeEntry.resume_episode_number}`
     : firstEpisode ? '▶ Play from S1·E1' : '▶ Play'
 
-  const embeddedEpLabel = playerMode === 'embedded' && playingContent?._parent?.id === item.id
+  const playingEpLabel = playerMode !== 'hidden' && playingContent?._parent?.id === item.id
     ? playingContent!.title.split(' · ')[0]
     : null
-  const topButtonLabel = embeddedEpLabel ? `▶ ${embeddedEpLabel}` : playButtonLabel
+  const topButtonLabel = playingEpLabel ? `▶ ${playingEpLabel}` : playButtonLabel
 
   const breadcrumbs: BreadcrumbItem[] = [
     ...(primarySource && sourceColor ? [{
@@ -451,7 +412,7 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
             footer={
               <>
                 <button
-                  onClick={() => embeddedEpLabel ? setPlayerMode('fullscreen') : onPlay(firstEpItem ?? c)}
+                  onClick={() => onPlay(firstEpItem ?? c)}
                   style={{
                     width: '100%', height: 36, borderRadius: 6,
                     background: 'var(--accent-series)', color: '#fff',
@@ -464,16 +425,7 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
                   onMouseLeave={(e) => { e.currentTarget.style.opacity = '1' }}
                 >
                   <span>{topButtonLabel}</span>
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-                    <polyline points="15 3 21 3 21 9" /><polyline points="9 21 3 21 3 15" />
-                    <line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" />
-                  </svg>
                 </button>
-                {/* Embedded player placeholder — PlayerOverlay overlays this div in 'embedded' mode */}
-                <div
-                  ref={playerZoneCallback}
-                  style={{ width: '100%', aspectRatio: '16/9', background: '#0a0a0e', borderRadius: 8, flexShrink: 0 }}
-                />
                 {enrichingSingle && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'center', padding: '2px 0' }}>
                     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ animation: 'spin 1s linear infinite', flexShrink: 0 }}><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>

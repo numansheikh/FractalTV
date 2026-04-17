@@ -337,14 +337,9 @@ function AppShell() {
       setSelectedContent(null)
       setLiveViewChannel(item)
     } else {
-      // If this exact content is already embedded, just expand to fullscreen
-      const s = useAppStore.getState()
-      if (s.playerMode === 'embedded' && s.playingContent?.id === item.id) {
-        setPlayerMode('fullscreen')
-        return
-      }
+      // VoD — start in mini player; expand button in mini player goes fullscreen
       setPlayingContent(item)
-      setPlayerMode(useAppStore.getState().embeddedAnchor ? 'embedded' : 'fullscreen')
+      setPlayerMode('mini')
     }
   }
 
@@ -357,29 +352,14 @@ function AppShell() {
   }
 
   const handlePlayerMinimize = () => {
-    const anchor = useAppStore.getState().embeddedAnchor
-    if (anchor) {
-      // A panel/view is open with an anchor — return to embedded mode
-      setPlayerMode('embedded')
-    } else {
-      // No anchor — open the appropriate detail panel (player stays running)
+    const content = playingContent
+    if (!content) { setPlayerMode('hidden'); return }
+    if (content.type === 'live') {
+      // Return to live view rather than mini player
       setPlayerMode('hidden')
-      const content = playingContent
-      if (!content) return
-      if (!selectedContent) {
-        // No detail panel open — open one so embedded mode can activate
-        if (content.type === 'live') {
-          setLiveViewChannel(content)
-        } else {
-          const parent = (content as any)._parent
-          if (parent?.type === 'series') {
-            setSelectedContent({ ...content, id: parent.id, title: parent.title, type: 'series' } as ContentItem)
-          } else {
-            setSelectedContent(content)
-          }
-        }
-      }
-      // Detail panel is open (or will open) — its anchor effect will set playerMode to embedded
+      if (!liveViewChannel) setLiveViewChannel(content)
+    } else {
+      setPlayerMode('mini')
     }
   }
 

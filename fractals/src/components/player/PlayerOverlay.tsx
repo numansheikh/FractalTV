@@ -1,4 +1,13 @@
 import { useEffect, useRef, useState, useCallback, useMemo, type CSSProperties } from 'react'
+
+const MINI_STORAGE_KEY = 'fractals:mini-player-pos'
+function loadMiniPos(): { top: number; right: number } {
+  try {
+    const raw = localStorage.getItem(MINI_STORAGE_KEY)
+    if (raw) return JSON.parse(raw)
+  } catch {}
+  return { top: -1, right: 20 }  // -1 = use bottom default (set in first render)
+}
 import { useQueryClient } from '@tanstack/react-query'
 import Hls from 'hls.js'
 import Artplayer from 'artplayer'
@@ -27,16 +36,57 @@ const FULLSCREEN_STYLE: React.CSSProperties = {
   zIndex: 60, background: '#000', isolation: 'isolate',
 }
 
-const MINI_STYLE: React.CSSProperties = {
-  position: 'fixed', bottom: 20, right: 20,
-  width: 400, height: 225,
-  zIndex: 200, borderRadius: 12, overflow: 'hidden',
-  boxShadow: '0 8px 40px rgba(0,0,0,0.7)',
-  border: '1px solid rgba(255,255,255,0.12)',
-  background: '#000',
-}
+// MINI_STYLE is now generated dynamically from drag state — see miniPlayerStyle()
 
 export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, onSurfChannel, onSurfEpisode, onChipClick }: Props) {
+  // ── Draggable mini player ─────────────────────────────────────────────────
+  const [miniPos, setMiniPos] = useState<{ top: number; right: number } | null>(null)
+  // Initialize from localStorage on first render
+  useEffect(() => {
+    const saved = loadMiniPos()
+    if (saved.top < 0) {
+      // Default: bottom-right (20px from bottom, 20px from right)
+      setMiniPos({ top: window.innerHeight - 225 - 20, right: 20 })
+    } else {
+      setMiniPos(saved)
+    }
+  }, [])
+  // Reset to bottom-right when mini player first appears
+  useEffect(() => {
+    if (mode === 'mini' && !miniPos) {
+      setMiniPos({ top: window.innerHeight - 225 - 20, right: 20 })
+    }
+  }, [mode, miniPos])
+
+  const handleDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    const pos = miniPos ?? { top: window.innerHeight - 225 - 20, right: 20 }
+    const startX = e.clientX
+    const startY = e.clientY
+    const startTop = pos.top
+    const startRight = pos.right
+    let lastTop = startTop
+    let lastRight = startRight
+    const onMove = (me: MouseEvent) => {
+      const dx = me.clientX - startX
+      const dy = me.clientY - startY
+      lastTop = Math.max(0, Math.min(window.innerHeight - 225, startTop + dy))
+      lastRight = Math.max(0, Math.min(window.innerWidth - 400, startRight - dx))
+      setMiniPos({ top: lastTop, right: lastRight })
+    }
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      try { localStorage.setItem(MINI_STORAGE_KEY, JSON.stringify({ top: lastTop, right: lastRight })) } catch {}
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }, [miniPos])
+
+  const miniPlayerStyle: CSSProperties = miniPos
+    ? { position: 'fixed', top: miniPos.top, right: miniPos.right, width: 400, height: 225, zIndex: 200, borderRadius: 12, overflow: 'hidden', boxShadow: '0 8px 40px rgba(0,0,0,0.7)', border: '1px solid rgba(255,255,255,0.12)', background: '#000' }
+    : { position: 'fixed', bottom: 20, right: 20, width: 400, height: 225, zIndex: 200, borderRadius: 12, overflow: 'hidden', boxShadow: '0 8px 40px rgba(0,0,0,0.7)', border: '1px solid rgba(255,255,255,0.12)', background: '#000' }
+
   const containerRef = useRef<HTMLDivElement>(null)
   const artRef = useRef<Artplayer | null>(null)
   const qc = useQueryClient()
@@ -744,7 +794,7 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
   // ── Render ────────────────────────────────────────────────────────────────
   const containerStyle: React.CSSProperties = mode === 'hidden'
     ? { display: 'none' }
-    : mode === 'mini' ? MINI_STYLE
+    : mode === 'mini' ? miniPlayerStyle
     : mode === 'embedded'
       ? embeddedRect
         ? { position: 'fixed', top: embeddedRect.top, left: embeddedRect.left, width: embeddedRect.width, height: embeddedRect.height, zIndex: 55, background: '#000', borderRadius: 8, overflow: 'hidden' }
@@ -788,14 +838,23 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
           height: 28, background: 'rgba(0,0,0,0.6)',
           display: 'flex', alignItems: 'center', gap: 6, padding: '0 8px',
           borderBottom: '1px solid rgba(255,255,255,0.08)',
-        }}>
+          cursor: 'grab',
+          userSelect: 'none',
+        }}
+          onMouseDown={handleDragStart}
+        >
+          {/* Drag handle dots */}
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="rgba(255,255,255,0.35)" style={{ flexShrink: 0, pointerEvents: 'none' }}>
+            <circle cx="2" cy="2" r="1.2" /><circle cx="5" cy="2" r="1.2" /><circle cx="8" cy="2" r="1.2" />
+            <circle cx="2" cy="7" r="1.2" /><circle cx="5" cy="7" r="1.2" /><circle cx="8" cy="7" r="1.2" />
+          </svg>
           <span style={{ flex: 1, fontSize: 10, fontWeight: 600, color: 'rgba(255,255,255,0.8)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'var(--font-ui)' }}>
             {localContent.title}
           </span>
-          <button onClick={onExpand} title="Expand" style={miniIconBtn}>
+          <button onClick={(e) => { e.stopPropagation(); onExpand() }} title="Expand" style={{ ...miniIconBtn, cursor: 'pointer' }} onMouseDown={(e) => e.stopPropagation()}>
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" /></svg>
           </button>
-          <button onClick={onClose} title="Close" style={miniIconBtn}>
+          <button onClick={(e) => { e.stopPropagation(); onClose() }} title="Close" style={{ ...miniIconBtn, cursor: 'pointer' }} onMouseDown={(e) => e.stopPropagation()}>
             <svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M1 1l10 10M11 1L1 11" /></svg>
           </button>
         </div>

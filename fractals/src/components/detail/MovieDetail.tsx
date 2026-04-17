@@ -1,9 +1,8 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ContentItem, BreadcrumbNav } from '@/lib/types'
 import { api } from '@/lib/api'
 import { useSourcesStore } from '@/stores/sources.store'
-import { useAppStore } from '@/stores/app.store'
 import { useUserStore } from '@/stores/user.store'
 import { buildColorMapFromSources } from '@/lib/sourceColors'
 import { SlidePanel } from '@/components/layout/SlidePanel'
@@ -26,39 +25,6 @@ export function MovieDetail({ item, onPlay, onClose, onNavigate, isPlaying }: Pr
   const colorMap = buildColorMapFromSources(sources)
   const queryClient = useQueryClient()
   const [showPicker, setShowPicker] = useState(false)
-
-  // Callback ref fires at DOM commit time — guaranteed non-null, no effect timing issues.
-  // Handles anchor registration and cleanup independently of the autoplay timer.
-  const playerZoneCallback = useCallback((el: HTMLDivElement | null) => {
-    if (!el) {
-      const s = useAppStore.getState()
-      s.setEmbeddedAnchor(null)
-      if (s.playerMode === 'embedded') {
-        s.setPlayerMode('hidden')
-        s.setPlayingContent(null)
-      }
-      return
-    }
-    useAppStore.getState().setEmbeddedAnchor(el)
-  }, [])
-
-  // Autoplay timer — starts 2s after the panel opens.
-  // Separated from anchor registration so a null-ref timing issue can't block both.
-  useEffect(() => {
-    const s0 = useAppStore.getState()
-    if (s0.playingContent?.id === item.id && s0.playerMode !== 'hidden') {
-      s0.setPlayerMode('embedded')
-      return
-    }
-    const capturedItem = item
-    const timer = setTimeout(() => {
-      const s = useAppStore.getState()
-      s.setPlayingContent(capturedItem)
-      s.setPlayerMode('embedded')
-    }, 2000)
-    return () => clearTimeout(timer)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [item.id])
 
   const { data: enrichedItem } = useQuery({
     queryKey: ['content', item.id],
@@ -163,13 +129,6 @@ export function MovieDetail({ item, onPlay, onClose, onNavigate, isPlaying }: Pr
     }] : []),
   ]
 
-  const expandIcon = (
-    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-      <polyline points="15 3 21 3 21 9" /><polyline points="9 21 3 21 3 15" />
-      <line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" />
-    </svg>
-  )
-
   const footer = (
     <>
       <button
@@ -186,13 +145,7 @@ export function MovieDetail({ item, onPlay, onClose, onNavigate, isPlaying }: Pr
         onMouseLeave={(e) => { e.currentTarget.style.opacity = '1' }}
       >
         <span>{watchLabel}</span>
-        {expandIcon}
       </button>
-      {/* Embedded player placeholder — PlayerOverlay overlays this div in 'embedded' mode */}
-      <div
-        ref={playerZoneCallback}
-        style={{ width: '100%', aspectRatio: '16/9', background: '#0a0a0e', borderRadius: 8, flexShrink: 0 }}
-      />
       {enrichingSingle && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'center', padding: '2px 0' }}>
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ animation: 'spin 1s linear infinite', flexShrink: 0 }}><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
