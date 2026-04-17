@@ -10,10 +10,60 @@
 
 import { getSqlite } from '../../database/connection'
 import { enrichTitle, normalizeTitle, ALGO_VERSION } from './algo-v3'
-import type { EnrichProgress, VodEnrichmentForContent, VodEnrichmentRow } from './types'
+import { fetchTvmaze } from './sources/tvmaze'
+import type { EnrichProgress, VodEnrichmentCandidate, VodEnrichmentForContent, VodEnrichmentRow } from './types'
 
 // Minimum ms between title enrichment calls (Wikipedia/Wikidata rate-limit courtesy)
 const REQUEST_DELAY_MS = 600
+
+/** Merge TVmaze data into a candidate. TVmaze wins for cast + genres when it has data. */
+function mergeTvmaze(c: VodEnrichmentCandidate, tvmaze: NonNullable<Awaited<ReturnType<typeof fetchTvmaze>>>): VodEnrichmentCandidate {
+  return {
+    ...c,
+    tvmaze_id: tvmaze.tvmaze_id,
+    status: tvmaze.status,
+    network: tvmaze.network,
+    rating: tvmaze.rating,
+    cast: tvmaze.cast.length > 0 ? tvmaze.cast : c.cast,
+    genres: tvmaze.genres.length > 0 ? tvmaze.genres : c.genres,
+    sources_used: [...(c.sources_used ?? []), 'tvmaze'],
+  }
+}
+
+/**
+ * Augment already-enriched series rows with TVmaze data if not yet fetched.
+ * Non-destructive — updates raw_json in-place, doesn't re-run v3.
+ */
+async function augmentSeriesWithTvmaze(seriesId: string, db: ReturnType<typeof getSqlite>) {
+  const existing = db.prepare(
+    `SELECT id, imdb_id, tvmaze_id, raw_json FROM series_enrichment_g2 WHERE series_id = ? AND confidence > 0`
+  ).all(seriesId) as Array<{ id: number; imdb_id: string | null; tvmaze_id: string | null; raw_json: string }>
+
+  if (!existing.length) return
+  // Already has TVmaze
+  if (existing[0].tvmaze_id) return
+
+  // Load series title for fallback search
+  const seriesRow = db.prepare(`SELECT title, md_year FROM series WHERE id = ?`).get(seriesId) as { title: string; md_year: number | null } | undefined
+  if (!seriesRow) return
+
+  const imdbId = existing[0].imdb_id
+  const tvmaze = await fetchTvmaze(imdbId, seriesRow.title, seriesRow.md_year)
+  if (!tvmaze) return
+
+  const update = db.prepare(
+    `UPDATE series_enrichment_g2 SET tvmaze_id = ?, raw_json = ? WHERE id = ?`
+  )
+  for (const row of existing) {
+    try {
+      const candidate = JSON.parse(row.raw_json) as VodEnrichmentCandidate
+      const merged = mergeTvmaze(candidate, tvmaze)
+      update.run(tvmaze.tvmaze_id, JSON.stringify(merged), row.id)
+    } catch {
+      // Malformed raw_json — skip
+    }
+  }
+}
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -93,8 +143,8 @@ export async function enrichForSource(
   `)
   const insertSeries = db.prepare(`
     INSERT OR REPLACE INTO series_enrichment_g2
-      (series_id, algo_version, imdb_id, tmdb_id, wikidata_qid, confidence, fetched_at, raw_json)
-    VALUES (?, ?, ?, ?, ?, ?, unixepoch(), ?)
+      (series_id, algo_version, imdb_id, tmdb_id, wikidata_qid, tvmaze_id, confidence, fetched_at, raw_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?, unixepoch(), ?)
   `)
 
   for (const item of toEnrich) {
@@ -110,39 +160,48 @@ export async function enrichForSource(
       message: item.title,
     })
 
-    const candidates = await enrichTitle({
-      title: item.title,
-      year: effectiveYear,
-      imdb_id: imdb_id ?? null,
-      tmdb_id: tmdb_id ?? null,
-      search_title: item.search_title ?? null,
-      md_year: item.md_year ?? null,
-      md_language: item.md_language ?? null,
-    })
+    const [candidates, tvmaze] = await Promise.all([
+      enrichTitle({
+        title: item.title,
+        year: effectiveYear,
+        imdb_id: imdb_id ?? null,
+        tmdb_id: tmdb_id ?? null,
+        search_title: item.search_title ?? null,
+        md_year: item.md_year ?? null,
+        md_language: item.md_language ?? null,
+      }),
+      item.kind === 'series'
+        ? fetchTvmaze(imdb_id ?? null, item.title, effectiveYear)
+        : Promise.resolve(null),
+    ])
 
     if (candidates.length === 0) {
       // Sentinel row — prevents re-hitting on every detail open
       const insert = item.kind === 'movie' ? insertMovie : insertSeries
-      const idCol = item.kind === 'movie' ? item.id : item.id
-      insert.run(idCol, ALGO_VERSION, null, null, null, 0, '{}')
+      if (item.kind === 'series') {
+        insert.run(item.id, ALGO_VERSION, null, null, null, tvmaze?.tvmaze_id ?? null, 0, '{}')
+      } else {
+        insert.run(item.id, ALGO_VERSION, null, null, null, 0, '{}')
+      }
     } else {
-      // Insert all candidates (highest confidence first)
       const insert = item.kind === 'movie' ? insertMovie : insertSeries
-      // Delete old rows for this item first (clean re-run)
       const table = item.kind === 'movie' ? 'movie_enrichment_g2' : 'series_enrichment_g2'
       const col = item.kind === 'movie' ? 'movie_id' : 'series_id'
       db.prepare(`DELETE FROM ${table} WHERE ${col} = ?`).run(item.id)
 
       for (const c of candidates) {
-        insert.run(
-          item.id,
-          ALGO_VERSION,
-          c.imdb_id ?? null,
-          c.tmdb_id ?? null,
-          c.wikidata_qid ?? null,
-          c.confidence,
-          JSON.stringify(c),
-        )
+        const merged = tvmaze ? mergeTvmaze(c, tvmaze) : c
+        if (item.kind === 'series') {
+          insertSeries.run(
+            item.id, ALGO_VERSION, merged.imdb_id ?? null, merged.tmdb_id ?? null,
+            merged.wikidata_qid ?? null, merged.tvmaze_id ?? null, merged.confidence, JSON.stringify(merged),
+          )
+        } else {
+          insertMovie.run(
+            item.id, ALGO_VERSION, merged.imdb_id ?? null, merged.tmdb_id ?? null,
+            merged.wikidata_qid ?? null, merged.confidence, JSON.stringify(merged),
+          )
+        }
       }
       if (item.kind === 'movie') doneMovies++
       else doneSeries++
@@ -168,15 +227,19 @@ export async function enrichSingle(contentId: string, force = false): Promise<Vo
   const contentTable = isMovie ? 'movies' : 'series'
 
   if (force) {
-    // Wipe existing rows so a fresh fetch runs regardless of prior results
     db.prepare(`DELETE FROM ${table} WHERE ${col} = ?`).run(contentId)
   } else {
-    // Already enriched with current algo version (real candidates, not just sentinels)
+    // Already enriched with current algo version
     const existing = db.prepare(`SELECT 1 FROM ${table} WHERE ${col} = ? AND algo_version = ? AND confidence > 0 LIMIT 1`).get(contentId, ALGO_VERSION)
-    if (existing) return getForContent(contentId)
+    if (existing) {
+      // For series: augment with TVmaze if not yet fetched
+      if (!isMovie) {
+        await augmentSeriesWithTvmaze(contentId, db)
+      }
+      return getForContent(contentId)
+    }
   }
 
-  // Load title/year/metadata for this item
   const row = db.prepare(`SELECT title, search_title, md_year, md_language, provider_metadata FROM ${contentTable} WHERE id = ?`).get(contentId) as ContentTitleRow | undefined
   if (!row) return getForContent(contentId)
 
@@ -184,28 +247,40 @@ export async function enrichSingle(contentId: string, force = false): Promise<Vo
   const { year } = normalizeTitle(row.title)
   const effectiveYear = row.md_year ?? year
 
-  const candidates = await enrichTitle({
-    title: row.title,
-    year: effectiveYear,
-    imdb_id: imdb_id ?? null,
-    tmdb_id: tmdb_id ?? null,
-    search_title: row.search_title ?? null,
-    md_year: row.md_year ?? null,
-    md_language: row.md_language ?? null,
-  })
-
-  const insert = db.prepare(`
-    INSERT OR REPLACE INTO ${table}
-      (${col}, algo_version, imdb_id, tmdb_id, wikidata_qid, confidence, fetched_at, raw_json)
-    VALUES (?, ?, ?, ?, ?, ?, unixepoch(), ?)
-  `)
+  const [candidates, tvmaze] = await Promise.all([
+    enrichTitle({
+      title: row.title,
+      year: effectiveYear,
+      imdb_id: imdb_id ?? null,
+      tmdb_id: tmdb_id ?? null,
+      search_title: row.search_title ?? null,
+      md_year: row.md_year ?? null,
+      md_language: row.md_language ?? null,
+    }),
+    !isMovie
+      ? fetchTvmaze(imdb_id ?? null, row.title, effectiveYear)
+      : Promise.resolve(null),
+  ])
 
   if (candidates.length === 0) {
-    insert.run(contentId, ALGO_VERSION, null, null, null, 0, '{}')
+    if (isMovie) {
+      db.prepare(`INSERT OR REPLACE INTO ${table} (${col}, algo_version, imdb_id, tmdb_id, wikidata_qid, confidence, fetched_at, raw_json) VALUES (?, ?, ?, ?, ?, ?, unixepoch(), ?)`)
+        .run(contentId, ALGO_VERSION, null, null, null, 0, '{}')
+    } else {
+      db.prepare(`INSERT OR REPLACE INTO ${table} (${col}, algo_version, imdb_id, tmdb_id, wikidata_qid, tvmaze_id, confidence, fetched_at, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?, unixepoch(), ?)`)
+        .run(contentId, ALGO_VERSION, null, null, null, tvmaze?.tvmaze_id ?? null, 0, '{}')
+    }
   } else {
     db.prepare(`DELETE FROM ${table} WHERE ${col} = ?`).run(contentId)
     for (const c of candidates) {
-      insert.run(contentId, ALGO_VERSION, c.imdb_id ?? null, c.tmdb_id ?? null, c.wikidata_qid ?? null, c.confidence, JSON.stringify(c))
+      const merged = tvmaze ? mergeTvmaze(c, tvmaze) : c
+      if (isMovie) {
+        db.prepare(`INSERT OR REPLACE INTO ${table} (${col}, algo_version, imdb_id, tmdb_id, wikidata_qid, confidence, fetched_at, raw_json) VALUES (?, ?, ?, ?, ?, ?, unixepoch(), ?)`)
+          .run(contentId, ALGO_VERSION, merged.imdb_id ?? null, merged.tmdb_id ?? null, merged.wikidata_qid ?? null, merged.confidence, JSON.stringify(merged))
+      } else {
+        db.prepare(`INSERT OR REPLACE INTO ${table} (${col}, algo_version, imdb_id, tmdb_id, wikidata_qid, tvmaze_id, confidence, fetched_at, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?, unixepoch(), ?)`)
+          .run(contentId, ALGO_VERSION, merged.imdb_id ?? null, merged.tmdb_id ?? null, merged.wikidata_qid ?? null, merged.tvmaze_id ?? null, merged.confidence, JSON.stringify(merged))
+      }
     }
   }
 

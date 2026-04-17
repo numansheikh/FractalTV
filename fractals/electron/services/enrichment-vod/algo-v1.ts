@@ -105,6 +105,10 @@ async function buildCandidate(
     awards: details.awards,
 
     poster_url: posterUrl,
+    status: null,
+    network: null,
+    rating: null,
+    tvmaze_id: null,
     wikipedia_url: wiki?.page_url ?? search.wiki_url ?? null,
     sources_used,
   }

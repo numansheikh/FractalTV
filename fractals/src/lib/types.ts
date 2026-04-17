@@ -67,6 +67,11 @@ export interface ContentItem {
   md_quality?: string | null
   is_nsfw?: number
 
+  // TVmaze enrichment fields — series only
+  tvmazeStatus?: string | null
+  tvmazeNetwork?: string | null
+  tvmazeRating?: number | null
+
   // Continue-watching fields — present when returned from user:continue-watching
   last_position?: number
   last_watched_at?: number

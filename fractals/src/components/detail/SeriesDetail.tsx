@@ -136,6 +136,10 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
     director: activeEnrichment?.directors?.join(', ') ?? c.director,
     genres: activeEnrichment?.genres?.join(', ') ?? c.genres,
     posterUrl: activeEnrichment?.poster_url ?? c.posterUrl ?? c.poster_url,
+    // TVmaze fields
+    tvmazeStatus: activeEnrichment?.status ?? null,
+    tvmazeNetwork: activeEnrichment?.network ?? null,
+    tvmazeRating: activeEnrichment?.rating ?? null,
   }
 
   const hasCandidates = (enrichmentData?.candidates ?? []).some((r: any) => r.confidence > 0 && r.raw_json !== '{}')

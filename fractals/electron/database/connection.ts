@@ -79,6 +79,7 @@ function createTables(db: Database.Database) {
   addMovieRuntimeColumn(db)
   renameMdOriginToPrefix(db)
   addEpgUrlColumn(db)
+  addTvmazeIdColumn(db)
 
   // Drop FTS tables from older g1c builds — search is now plain LIKE on
   // `search_title`, FTS is gone.
@@ -172,6 +173,15 @@ function addEpgUrlColumn(db: Database.Database) {
   if (cols.some((c) => c.name === 'epg_url')) return
   console.log('[DB] migrating: adding sources.epg_url')
   db.exec(`ALTER TABLE sources ADD COLUMN epg_url TEXT`)
+}
+
+/** g3: add tvmaze_id column to series_enrichment_g2. */
+function addTvmazeIdColumn(db: Database.Database) {
+  const cols = db.prepare(`PRAGMA table_info(series_enrichment_g2)`).all() as { name: string }[]
+  if (!cols.length) return
+  if (cols.some((c) => c.name === 'tvmaze_id')) return
+  console.log('[DB] migrating: adding series_enrichment_g2.tvmaze_id')
+  db.exec(`ALTER TABLE series_enrichment_g2 ADD COLUMN tvmaze_id TEXT`)
 }
 
 /** One-shot: wipe all enrichment rows so v2 algo starts from scratch. Runs once per key. */

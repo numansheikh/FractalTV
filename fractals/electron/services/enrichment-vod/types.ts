@@ -40,6 +40,12 @@ export interface VodEnrichmentCandidate {
   // Images
   poster_url: string | null  // best available (wikipedia thumbnail or wikidata P18 or imdb)
 
+  // Series-specific (from TVmaze)
+  status: string | null       // "Running" | "Ended" | "To Be Determined" | null
+  network: string | null      // "AMC" | "Netflix" | null
+  rating: number | null       // 0.0..10.0 (TVmaze rating.average)
+  tvmaze_id: string | null
+
   // Links
   wikipedia_url: string | null
   sources_used: string[]  // which sources contributed data

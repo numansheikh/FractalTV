@@ -304,6 +304,10 @@ async function buildCandidateFromFmdb(
     production_companies: details?.production_companies ?? [],
     awards: details?.awards ?? [],
     poster_url: poster,
+    status: null,
+    network: null,
+    rating: null,
+    tvmaze_id: null,
     wikipedia_url: wiki?.page_url ?? wdResult?.wiki_url ?? null,
     sources_used,
   }
@@ -349,6 +353,10 @@ async function buildCandidateFromWikidata(
     production_companies: details.production_companies,
     awards: details.awards,
     poster_url: wiki?.thumbnail_url ?? details.image_url ?? null,
+    status: null,
+    network: null,
+    rating: null,
+    tvmaze_id: null,
     wikipedia_url: wiki?.page_url ?? search.wiki_url ?? null,
     sources_used,
   }
