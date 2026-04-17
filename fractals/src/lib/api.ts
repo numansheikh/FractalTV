@@ -90,6 +90,8 @@ export const api = {
 
     getVodInfo: (contentId: string): Promise<{ runtime: number | null }> =>
       isElectron ? (window.api as any).content.getVodInfo({ contentId }) : Promise.resolve({ runtime: null }),
+    populateMetadata: (sourceId: string): Promise<{ ok: boolean; alreadyRunning?: boolean; started?: boolean }> =>
+      isElectron ? (window.api as any).content.populateMetadata(sourceId) : Promise.resolve({ ok: false }),
   },
 
   user: {
@@ -154,7 +156,7 @@ export const api = {
   },
 
   player: {
-    openExternal: (args: { player: 'mpv' | 'vlc'; url: string; title: string; customPath?: string }) =>
+    openExternal: (args: { player: 'mpv' | 'vlc'; url: string; title: string; customPath?: string; headers?: Record<string, string> }) =>
       isElectron ? window.api.player.openExternal(args) : Promise.resolve({ success: false }),
     detectExternal: () =>
       isElectron ? window.api.player.detectExternal() : Promise.resolve({ mpv: 'mpv', vlc: 'vlc' }),

@@ -61,6 +61,12 @@ export interface ContentItem {
   // EPG — computed from DB, 1 if EPG data exists for this channel
   has_epg_data?: number
 
+  // g2 title-parsed metadata (Tier 1 — deterministic, populated by Populate Metadata)
+  md_prefix?: string | null
+  md_language?: string | null
+  md_quality?: string | null
+  is_nsfw?: number
+
   // Continue-watching fields — present when returned from user:continue-watching
   last_position?: number
   last_watched_at?: number

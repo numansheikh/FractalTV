@@ -236,6 +236,7 @@ const COMMON_TIMEZONES = Intl.supportedValuesOf('timeZone')
 
 function InterfaceTab() {
   const { pageSize, setPageSize, homeMode, setHomeMode, homeStripSize, setHomeStripSize, timezone, setTimezone } = useAppStore()
+  const queryClient = useQueryClient()
   const [allowAdult, setAllowAdult] = useState(true)
   useEffect(() => {
     api.settings.get('allow_adult').then((v) => setAllowAdult(v !== '0'))
@@ -381,6 +382,7 @@ function InterfaceTab() {
               const next = !allowAdult
               setAllowAdult(next)
               await api.settings.set('allow_adult', next ? '1' : '0')
+              queryClient.invalidateQueries()
             }}
             style={{
               width: 36, height: 20, borderRadius: 10, border: 'none', cursor: 'pointer',

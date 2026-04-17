@@ -130,13 +130,13 @@ function ShortcutsOverlay({ onClose }: { onClose: () => void }) {
 
 function AppShell() {
   const queryClient = useQueryClient()
-  const { setSources, updateSource, setSyncProgress, setEnrichProgress, setEnrichResult } = useSourcesStore()
+  const { setSources, updateSource, setSyncProgress, setEnrichProgress, setEnrichResult, setMetadataProgress, setMetadataResult } = useSourcesStore()
   const {
     selectedContent, playingContent, showSettings, showSources,
     liveViewChannel, setLiveViewChannel,
     setSelectedContent, setPlayingContent, setShowSettings, setShowSources,
     setView, setCategoryFilter, clearSourceFilter, toggleSourceFilter,
-    sort, setSort, surfChannel,
+    sort, setSort, surfChannel, surfEpisode,
     playerMode, setPlayerMode,
   } = useAppStore()
 
@@ -260,6 +260,22 @@ function AppShell() {
     })
   }, [setEnrichProgress, setEnrichResult])
 
+  // Metadata population progress events
+  useEffect(() => {
+    return api.on('metadata:progress', (p: any) => {
+      const { sourceId, phase, current, total, label, error } = p
+      if (phase === 'done') {
+        setMetadataProgress(sourceId, null)
+        setMetadataResult(sourceId, { success: true, message: 'Metadata populated' })
+      } else if (phase === 'error') {
+        setMetadataProgress(sourceId, null)
+        setMetadataResult(sourceId, { success: false, message: error ?? 'Failed' })
+      } else {
+        setMetadataProgress(sourceId, { current: current ?? 0, total: total ?? 0, message: label })
+      }
+    })
+  }, [setMetadataProgress, setMetadataResult])
+
   const handleSync = async (sourceId: string) => {
     if (syncingIds.current.has(sourceId)) return
     syncingIds.current.add(sourceId)
@@ -291,21 +307,32 @@ function AppShell() {
 
   const handleSelectContent = (item: ContentItem) => {
     if (item.type === 'live') {
+      setSelectedContent(null)
       setLiveViewChannel(item)
     } else {
       setSelectedContent(item)
     }
   }
 
-  const handlePlay = (item: ContentItem) => {
+  const handlePlay = async (item: ContentItem) => {
     if (item.type === 'live') {
-      // Channels always go to Live View.
-      // If this channel isn't in the current surf list (e.g. played from ChannelDetail
-      // rather than from the browse grid), reset the surf context so the Live View
-      // doesn't show a stale channel list from a previous session.
       const s = useAppStore.getState()
       if (!s.channelSurfList.some((ch) => ch.id === item.id)) {
-        s.setChannelSurfContext([item], 0, null, null)
+        // Channel isn't in the current surf list (e.g. opened from ChannelDetail).
+        // Try to load the full category so LiveView has a proper channel list to surf.
+        const catName = (item as any).category_name ?? (item as any).categoryName ?? null
+        if (catName) {
+          try {
+            const result = await api.content.browse({ type: 'live', categoryName: catName, limit: 500, offset: 0 })
+            const items = (result?.items ?? []) as ContentItem[]
+            const idx = items.findIndex((ch) => ch.id === item.id)
+            s.setChannelSurfContext(items, idx >= 0 ? idx : 0, null, null)
+          } catch {
+            s.setChannelSurfContext([item], 0, null, null)
+          }
+        } else {
+          s.setChannelSurfContext([item], 0, null, null)
+        }
       }
       setSelectedContent(null)
       setLiveViewChannel(item)
@@ -317,7 +344,7 @@ function AppShell() {
         return
       }
       setPlayingContent(item)
-      setPlayerMode('fullscreen')
+      setPlayerMode(useAppStore.getState().embeddedAnchor ? 'embedded' : 'fullscreen')
     }
   }
 
@@ -426,6 +453,11 @@ function AppShell() {
         onMinimize={handlePlayerMinimize}
         onExpand={() => setPlayerMode('fullscreen')}
         onSurfChannel={surfChannel}
+        onSurfEpisode={(dir) => {
+          const next = surfEpisode(dir)
+          if (next) setPlayingContent(next)
+          return next
+        }}
         onChipClick={handlePlayerChipClick}
       />
 
@@ -480,7 +512,7 @@ function AppShell() {
           <LiveView
             channel={liveViewChannel}
             onFullscreen={() => setPlayerMode('fullscreen')}
-            onSwitchChannel={(ch) => setLiveViewChannel(ch)}
+            onSwitchChannel={(ch) => { setSelectedContent(null); setLiveViewChannel(ch) }}
             onClose={() => { setLiveViewChannel(null) }}
           />
         )}

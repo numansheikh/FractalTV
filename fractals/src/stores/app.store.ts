@@ -19,6 +19,10 @@ interface AppState {
   channelSurfIndex: number
   surfSearchQuery: string | null
 
+  // Episode surf context (series episodes in active season)
+  episodeSurfList: ContentItem[]
+  episodeSurfIndex: number
+
   // Filters (persisted per-view)
   typeFilter: ContentType
   categoryFilters: Record<string, string | null>
@@ -65,6 +69,8 @@ interface AppState {
   surfContextAction: 'home-discover' | 'home-channels' | 'browse-favorites' | 'search' | null
   setChannelSurfContext: (list: ContentItem[], index: number, action?: 'home-discover' | 'home-channels' | 'browse-favorites' | 'search' | null, searchQuery?: string | null) => void
   surfChannel: (dir: 1 | -1) => ContentItem | null
+  setEpisodeSurfContext: (list: ContentItem[], index: number) => void
+  surfEpisode: (dir: 1 | -1) => ContentItem | null
   setShowSources: (v: boolean) => void
   setTypeFilter: (type: ContentType) => void
   setCategoryFilter: (cat: string | null) => void
@@ -95,6 +101,8 @@ export const useAppStore = create<AppState>()(
       channelSurfIndex: -1,
       surfContextAction: null,
       surfSearchQuery: null,
+      episodeSurfList: [],
+      episodeSurfIndex: -1,
       typeFilter: 'all',
       categoryFilters: {},
       selectedSourceIds: [],
@@ -134,6 +142,21 @@ export const useAppStore = create<AppState>()(
           const next = (idx + dir + s.channelSurfList.length) % s.channelSurfList.length
           result = s.channelSurfList[next]
           return { channelSurfIndex: next }
+        })
+        return result
+      },
+      setEpisodeSurfContext: (episodeSurfList, episodeSurfIndex) => set({ episodeSurfList, episodeSurfIndex }),
+      surfEpisode: (dir) => {
+        let result: ContentItem | null = null
+        set((s) => {
+          if (s.episodeSurfList.length === 0) return s
+          const currentId = s.playingContent?.id
+          let idx = s.episodeSurfList.findIndex((e) => e.id === currentId)
+          if (idx === -1) idx = s.episodeSurfIndex
+          const next = idx + dir
+          if (next < 0 || next >= s.episodeSurfList.length) return s
+          result = s.episodeSurfList[next]
+          return { episodeSurfIndex: next }
         })
         return result
       },

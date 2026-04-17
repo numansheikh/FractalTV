@@ -9,7 +9,7 @@
  */
 
 import { getSqlite } from '../../database/connection'
-import { enrichTitle, normalizeTitle, ALGO_VERSION } from './algo-v2'
+import { enrichTitle, normalizeTitle, ALGO_VERSION } from './algo-v3'
 import type { EnrichProgress, VodEnrichmentForContent, VodEnrichmentRow } from './types'
 
 // Minimum ms between title enrichment calls (Wikipedia/Wikidata rate-limit courtesy)
@@ -22,7 +22,9 @@ function delay(ms: number): Promise<void> {
 interface ContentTitleRow {
   id: string
   title: string
+  search_title: string | null
   md_year: number | null
+  md_language: string | null
   provider_metadata: string | null
 }
 
@@ -53,12 +55,12 @@ export async function enrichForSource(
 
   // Load all movies + series for source (include provider_metadata for imdb_id hints)
   const movies = db.prepare(`
-    SELECT id, title, md_year, provider_metadata
+    SELECT id, title, search_title, md_year, md_language, provider_metadata
     FROM movies WHERE source_id = ? ORDER BY title
   `).all(sourceId) as ContentTitleRow[]
 
   const seriesItems = db.prepare(`
-    SELECT id, title, md_year, provider_metadata
+    SELECT id, title, search_title, md_year, md_language, provider_metadata
     FROM series WHERE source_id = ? ORDER BY title
   `).all(sourceId) as ContentTitleRow[]
 
@@ -113,6 +115,9 @@ export async function enrichForSource(
       year: effectiveYear,
       imdb_id: imdb_id ?? null,
       tmdb_id: tmdb_id ?? null,
+      search_title: item.search_title ?? null,
+      md_year: item.md_year ?? null,
+      md_language: item.md_language ?? null,
     })
 
     if (candidates.length === 0) {
@@ -172,7 +177,7 @@ export async function enrichSingle(contentId: string, force = false): Promise<Vo
   }
 
   // Load title/year/metadata for this item
-  const row = db.prepare(`SELECT title, md_year, provider_metadata FROM ${contentTable} WHERE id = ?`).get(contentId) as ContentTitleRow | undefined
+  const row = db.prepare(`SELECT title, search_title, md_year, md_language, provider_metadata FROM ${contentTable} WHERE id = ?`).get(contentId) as ContentTitleRow | undefined
   if (!row) return getForContent(contentId)
 
   const { imdb_id, tmdb_id } = extractImdbFromMetadata(row.provider_metadata)
@@ -184,6 +189,9 @@ export async function enrichSingle(contentId: string, force = false): Promise<Vo
     year: effectiveYear,
     imdb_id: imdb_id ?? null,
     tmdb_id: tmdb_id ?? null,
+    search_title: row.search_title ?? null,
+    md_year: row.md_year ?? null,
+    md_language: row.md_language ?? null,
   })
 
   const insert = db.prepare(`

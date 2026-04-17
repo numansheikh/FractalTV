@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { Source, useSourcesStore } from '@/stores/sources.store'
 import { useAppStore } from '@/stores/app.store'
 import { getSourceColor, PALETTE_HEX } from '@/lib/sourceColors'
@@ -50,11 +51,19 @@ const PHASE_LABELS: Record<string, string> = {
 }
 
 export function SourceCard({ source, onSync, onRemove }: Props) {
-  const { sources, syncProgress, enrichProgress: allEnrichProgress, enrichResult: allEnrichResult, setEnrichResult } = useSourcesStore()
+  const queryClient = useQueryClient()
+  const {
+    sources, syncProgress,
+    enrichProgress: allEnrichProgress, enrichResult: allEnrichResult, setEnrichResult,
+    metadataProgress: allMetadataProgress, metadataResult: allMetadataResult, setMetadataResult,
+  } = useSourcesStore()
   const progress = syncProgress[source.id] ?? null
   const enrichProgress = allEnrichProgress[source.id] ?? null
   const enrichResult = allEnrichResult[source.id] ?? null
   const enriching = enrichProgress !== null
+  const metadataProgress = allMetadataProgress[source.id] ?? null
+  const metadataResult = allMetadataResult[source.id] ?? null
+  const populatingMetadata = metadataProgress !== null
 
   // Resolve color: use stored colorIndex if set, else auto-assign by position
   const autoIndex = sources.findIndex(s => s.id === source.id)
@@ -100,6 +109,12 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
   const handleEnrichVod = () => {
     setEnrichResult(source.id, null)
     api.vodEnrich.enrich(source.id)
+  }
+
+  // g2: populate md_* metadata from title parsing (per-source, manual)
+  const handlePopulateMetadata = () => {
+    setMetadataResult(source.id, null)
+    api.content.populateMetadata(source.id)
   }
 
   // g2: iptv-org tvg-id matching (per-source, manual)
@@ -241,6 +256,8 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
       const { selectedSourceIds, toggleSourceFilter } = useAppStore.getState()
       if (selectedSourceIds.includes(source.id)) toggleSourceFilter(source.id)
     }
+    // Source enable/disable changes visible content across every view
+    queryClient.invalidateQueries()
   }
 
   const [deleting, setDeleting] = useState(false)
@@ -376,7 +393,7 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
             loading={isSyncing}
             onClick={() => onSync(source.id)}
           />
-          {source.type === 'xtream' && (
+          {(source.type === 'xtream' || source.epgUrl) && (
             <PipelineButton
               step={3}
               label={epgSyncing ? 'EPG…' : 'EPG'}
@@ -445,6 +462,68 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
           color: matchResult.success ? 'var(--accent-success)' : 'var(--accent-danger)',
         }}>
           {matchResult.success ? '✓' : '✗'} {matchResult.message}
+        </div>
+      )}
+
+      {/* g2: Populate md_* metadata from title parsing */}
+      {!editMode && (
+        <button
+          onClick={handlePopulateMetadata}
+          disabled={!syncedOrEpg || populatingMetadata}
+          title={!syncedOrEpg ? 'Sync the source first' : 'Extract year, quality, language and NSFW flags from stream titles'}
+          style={{
+            padding: '5px 8px', borderRadius: 6,
+            fontSize: 11, fontWeight: 500,
+            background: 'transparent',
+            border: '1px solid var(--border-default)',
+            color: (syncedOrEpg && !populatingMetadata) ? 'var(--text-1)' : 'var(--text-3)',
+            cursor: (syncedOrEpg && !populatingMetadata) ? 'pointer' : 'default',
+            opacity: (syncedOrEpg && !populatingMetadata) ? 1 : 0.6,
+            fontFamily: 'var(--font-ui)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+            transition: 'background 0.1s, color 0.1s',
+          }}
+          onMouseEnter={(e) => { if (syncedOrEpg && !populatingMetadata) { e.currentTarget.style.background = 'var(--bg-4)'; e.currentTarget.style.color = 'var(--text-0)' } }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = (syncedOrEpg && !populatingMetadata) ? 'var(--text-1)' : 'var(--text-3)' }}
+        >
+          {populatingMetadata && (
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ animation: 'spin 1s linear infinite' }}><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
+          )}
+          {populatingMetadata ? 'Populating metadata…' : 'Populate metadata'}
+        </button>
+      )}
+
+      {!editMode && populatingMetadata && metadataProgress && metadataProgress.total > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 10, color: 'var(--text-1)', fontFamily: 'var(--font-ui)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {metadataProgress.message ? `Scanning ${metadataProgress.message}…` : 'Processing…'}
+            </span>
+            <span style={{ fontSize: 10, color: 'var(--text-2)', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>
+              {metadataProgress.current}/{metadataProgress.total}
+            </span>
+          </div>
+          <div style={{ height: 3, borderRadius: 99, overflow: 'hidden', background: 'var(--bg-3)', width: '100%' }}>
+            <div style={{
+              height: '100%', background: 'var(--accent-series)',
+              width: `${Math.min(100, Math.round((metadataProgress.current / metadataProgress.total) * 100))}%`,
+              transition: 'width 0.4s',
+              borderRadius: 99,
+            }} />
+          </div>
+        </div>
+      )}
+
+      {!editMode && metadataResult && (
+        <div style={{
+          padding: '5px 8px', borderRadius: 5, fontSize: 10,
+          background: metadataResult.success
+            ? 'color-mix(in srgb, var(--accent-success) 10%, transparent)'
+            : 'color-mix(in srgb, var(--accent-danger) 10%, transparent)',
+          border: `1px solid color-mix(in srgb, ${metadataResult.success ? 'var(--accent-success)' : 'var(--accent-danger)'} 25%, transparent)`,
+          color: metadataResult.success ? 'var(--accent-success)' : 'var(--accent-danger)',
+        }}>
+          {metadataResult.success ? '✓' : '✗'} {metadataResult.message}
         </div>
       )}
 

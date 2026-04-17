@@ -92,19 +92,35 @@ export function MoviePosterCard({ item, onClick }: Props) {
             <PosterPlaceholder id={item.id} title={item.title} style={{ position: 'absolute', inset: 0 }} />
           )}
 
-          {/* Top-left: type pill (M) */}
+          {/* Top-left: type pill + NSFW badge stack */}
           <div style={{
             position: 'absolute', top: 3, left: 3,
-            minWidth: 16, height: 16, padding: '0 4px',
-            borderRadius: 4,
-            background: 'var(--accent-film)',
-            color: '#fff',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 10, fontWeight: 700, letterSpacing: '0.02em',
-            fontFamily: 'var(--font-ui)',
-            zIndex: 1,
+            display: 'flex', flexDirection: 'column', gap: 3, zIndex: 1,
           }}>
-            M
+            <div style={{
+              minWidth: 16, height: 16, padding: '0 4px',
+              borderRadius: 4,
+              background: 'var(--accent-film)',
+              color: '#fff',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 10, fontWeight: 700, letterSpacing: '0.02em',
+              fontFamily: 'var(--font-ui)',
+            }}>
+              M
+            </div>
+            {(item as any).is_nsfw === 1 && (
+              <div style={{
+                padding: '1px 4px', borderRadius: 4,
+                background: 'rgba(180,0,0,0.85)',
+                color: '#fff',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 9, fontWeight: 700, letterSpacing: '0.04em',
+                fontFamily: 'var(--font-ui)',
+                border: '1px solid rgba(255,80,80,0.35)',
+              }}>
+                18+
+              </div>
+            )}
           </div>
 
           {/* Top-right cluster: completed checkmark + favorite heart (when not hovered) */}

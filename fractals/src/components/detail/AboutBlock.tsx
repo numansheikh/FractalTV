@@ -23,6 +23,46 @@ export function AboutBlock({ item, onClose }: Props) {
 
   return (
     <>
+      {cast.length > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{
+            fontSize: 10, fontWeight: 600,
+            textTransform: 'uppercase', letterSpacing: '0.06em',
+            color: 'var(--text-3)', flexShrink: 0,
+            fontFamily: 'var(--font-ui)',
+          }}>
+            Cast
+          </span>
+          <div style={{ display: 'flex', gap: 5, overflowX: 'auto', paddingBottom: 2 }}>
+            {cast.slice(0, 12).map((name) => (
+              <button
+                key={name}
+                onClick={() => { setQuery(name); onClose() }}
+                style={{
+                  padding: '4px 10px', borderRadius: 20,
+                  background: 'var(--bg-3)',
+                  border: '1px solid var(--border-subtle)',
+                  color: 'var(--text-1)',
+                  fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap',
+                  fontFamily: 'var(--font-ui)', flexShrink: 0,
+                  transition: 'background 0.1s, color 0.1s',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'var(--bg-4)'
+                  e.currentTarget.style.color = 'var(--text-0)'
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'var(--bg-3)'
+                  e.currentTarget.style.color = 'var(--text-1)'
+                }}
+              >
+                {name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {plot && (
         <div>
           <p style={{
@@ -56,46 +96,6 @@ export function AboutBlock({ item, onClose }: Props) {
               {plotExpanded ? 'Show less' : 'Show more'}
             </button>
           )}
-        </div>
-      )}
-
-      {cast.length > 0 && (
-        <div>
-          <p style={{
-            fontSize: 10, fontWeight: 600,
-            textTransform: 'uppercase', letterSpacing: '0.06em',
-            color: 'var(--text-3)',
-            margin: '0 0 6px', fontFamily: 'var(--font-ui)',
-          }}>
-            Cast
-          </p>
-          <div style={{ display: 'flex', gap: 5, overflowX: 'auto', paddingBottom: 2 }}>
-            {cast.slice(0, 12).map((name) => (
-              <button
-                key={name}
-                onClick={() => { setQuery(name); onClose() }}
-                style={{
-                  padding: '4px 10px', borderRadius: 20,
-                  background: 'var(--bg-3)',
-                  border: '1px solid var(--border-subtle)',
-                  color: 'var(--text-1)',
-                  fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap',
-                  fontFamily: 'var(--font-ui)', flexShrink: 0,
-                  transition: 'background 0.1s, color 0.1s',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = 'var(--bg-4)'
-                  e.currentTarget.style.color = 'var(--text-0)'
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'var(--bg-3)'
-                  e.currentTarget.style.color = 'var(--text-1)'
-                }}
-              >
-                {name}
-              </button>
-            ))}
-          </div>
         </div>
       )}
     </>

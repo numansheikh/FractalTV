@@ -18,6 +18,7 @@ export interface Source {
   subscriptionType?: string | null
   // M3U-specific
   m3uUrl?: string
+  epgUrl?: string | null
   // UI color — index into the 16-color palette (user-assigned or auto by position)
   colorIndex?: number
   // Manual ingestion pipeline state — gates the Test → Sync → EPG buttons on SourceCard.
@@ -53,11 +54,17 @@ interface SourcesState {
   enrichProgress: Record<string, EnrichProgress | null>
   /** Last enrichment result per source (persists until next run). */
   enrichResult: Record<string, EnrichResult | null>
+  /** Live metadata population progress per source. Null = not running. */
+  metadataProgress: Record<string, EnrichProgress | null>
+  /** Last metadata population result per source (persists until next run). */
+  metadataResult: Record<string, EnrichResult | null>
   setSources: (sources: Source[]) => void
   updateSource: (id: string, patch: Partial<Source>) => void
   setSyncProgress: (sourceId: string, progress: SyncProgress | null) => void
   setEnrichProgress: (sourceId: string, progress: EnrichProgress | null) => void
   setEnrichResult: (sourceId: string, result: EnrichResult | null) => void
+  setMetadataProgress: (sourceId: string, progress: EnrichProgress | null) => void
+  setMetadataResult: (sourceId: string, result: EnrichResult | null) => void
   toggleSourceFilter: (id: string) => void
   clearSourceFilter: () => void
 }
@@ -68,6 +75,8 @@ export const useSourcesStore = create<SourcesState>((set) => ({
   syncProgress: {},
   enrichProgress: {},
   enrichResult: {},
+  metadataProgress: {},
+  metadataResult: {},
   setSources: (sources) => set({ sources }),
   updateSource: (id, patch) =>
     set((s) => ({ sources: s.sources.map((src) => (src.id === id ? { ...src, ...patch } : src)) })),
@@ -77,6 +86,10 @@ export const useSourcesStore = create<SourcesState>((set) => ({
     set((s) => ({ enrichProgress: { ...s.enrichProgress, [sourceId]: progress } })),
   setEnrichResult: (sourceId, result) =>
     set((s) => ({ enrichResult: { ...s.enrichResult, [sourceId]: result } })),
+  setMetadataProgress: (sourceId, progress) =>
+    set((s) => ({ metadataProgress: { ...s.metadataProgress, [sourceId]: progress } })),
+  setMetadataResult: (sourceId, result) =>
+    set((s) => ({ metadataResult: { ...s.metadataResult, [sourceId]: result } })),
   toggleSourceFilter: (id) =>
     set((s) => {
       const has = s.selectedSourceIds.includes(id)

@@ -17,6 +17,7 @@ export interface BreadcrumbItem {
 interface Props {
   typeBadge: TypeBadge
   breadcrumbs: BreadcrumbItem[]
+  actionsRow?: ReactNode
   primarySource?: Source
   primarySourceColor?: SourceColor
   allSourceIds?: string[]
@@ -29,6 +30,7 @@ interface Props {
 export function DetailShell({
   typeBadge,
   breadcrumbs,
+  actionsRow,
   primarySource,
   primarySourceColor,
   allSourceIds,
@@ -113,41 +115,6 @@ export function DetailShell({
         )}
       </div>
 
-      {/* Breadcrumbs */}
-      {breadcrumbs.length > 0 && (
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap',
-          padding: '8px 16px',
-          borderBottom: '1px solid var(--border-subtle)',
-          flexShrink: 0,
-        }}>
-          {breadcrumbs.map((b, i) => (
-            <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-              {i > 0 && (
-                <svg width="6" height="6" viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" strokeWidth="2.5" strokeLinecap="round">
-                  <polyline points="9 18 15 12 9 6" />
-                </svg>
-              )}
-              <span
-                onClick={b.onClick}
-                style={{
-                  fontSize: b.bold ? 11 : 10,
-                  fontWeight: b.bold ? 600 : 400,
-                  color: b.color,
-                  cursor: 'pointer',
-                  fontFamily: 'var(--font-ui)',
-                  transition: 'opacity 0.12s',
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.65'; e.currentTarget.style.textDecoration = 'underline' }}
-                onMouseLeave={(e) => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.textDecoration = 'none' }}
-              >
-                {b.label}
-              </span>
-            </span>
-          ))}
-        </div>
-      )}
-
       {/* Scrollable body */}
       <div style={{
         flex: 1, overflowY: 'auto', padding: 16,
@@ -156,17 +123,54 @@ export function DetailShell({
         {children}
       </div>
 
-      {/* Sticky footer — action button + mini player */}
-      {footer && (
+      {/* Sticky footer — [breadcrumbs · actionsRow] + other footer content */}
+      {(footer || breadcrumbs.length > 0 || actionsRow) && (
         <div style={{
           flexShrink: 0,
           borderTop: '1px solid var(--border-subtle)',
-          padding: '10px 12px 12px',
+          padding: '8px 12px 12px',
           display: 'flex',
           flexDirection: 'column',
           gap: 8,
           background: 'var(--bg-2)',
         }}>
+          {(breadcrumbs.length > 0 || actionsRow) && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              paddingBottom: 6,
+              borderBottom: '1px solid var(--border-subtle)',
+            }}>
+              {breadcrumbs.length > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', flex: 1, minWidth: 0 }}>
+                  {breadcrumbs.map((b, i) => (
+                    <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                      {i > 0 && (
+                        <svg width="6" height="6" viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" strokeWidth="2.5" strokeLinecap="round">
+                          <polyline points="9 18 15 12 9 6" />
+                        </svg>
+                      )}
+                      <span
+                        onClick={b.onClick}
+                        style={{
+                          fontSize: b.bold ? 11 : 10,
+                          fontWeight: b.bold ? 600 : 400,
+                          color: b.color,
+                          cursor: 'pointer',
+                          fontFamily: 'var(--font-ui)',
+                          transition: 'opacity 0.12s',
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.65'; e.currentTarget.style.textDecoration = 'underline' }}
+                        onMouseLeave={(e) => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.textDecoration = 'none' }}
+                      >
+                        {b.label}
+                      </span>
+                    </span>
+                  ))}
+                </div>
+              )}
+              {actionsRow}
+            </div>
+          )}
           {footer}
         </div>
       )}

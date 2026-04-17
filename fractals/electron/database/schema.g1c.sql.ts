@@ -92,7 +92,7 @@ export const G1C_SCHEMA_SQL = `
     md_country          TEXT,
     md_language         TEXT,
     md_year             INTEGER,
-    md_origin           TEXT,
+    md_prefix           TEXT,
     md_quality          TEXT,
 
     added_at            INTEGER NOT NULL DEFAULT (unixepoch())
@@ -138,7 +138,7 @@ export const G1C_SCHEMA_SQL = `
     md_country          TEXT,
     md_language         TEXT,
     md_year             INTEGER,
-    md_origin           TEXT,
+    md_prefix           TEXT,
     md_quality          TEXT,
     md_runtime          INTEGER,            -- minutes, populated on first detail open
 
@@ -172,7 +172,7 @@ export const G1C_SCHEMA_SQL = `
     md_country          TEXT,
     md_language         TEXT,
     md_year             INTEGER,
-    md_origin           TEXT,
+    md_prefix           TEXT,
     md_quality          TEXT,
 
     added_at            INTEGER NOT NULL DEFAULT (unixepoch())

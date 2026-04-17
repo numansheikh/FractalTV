@@ -167,17 +167,23 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
   const username: string = (seriesInfo as any)?.username ?? ''
   const password: string = (seriesInfo as any)?.password ?? ''
 
+  // Xtream episodes use _streamId to build URL client-side; M3U episodes
+  // have stream_url in DB and resolve via content:get-stream-url instead.
+  const isXtream = !!serverUrl
+
   useEffect(() => {
-    if (!episodes.length || !primarySourceId || !serverUrl || currentSeason === null) return
+    if (!episodes.length || !primarySourceId || currentSeason === null) return
     const epItems: ContentItem[] = episodes.map((ep) => ({
       ...item,
       id: `${primarySourceId}:episode:${ep.id}`,
       title: `S${String(currentSeason).padStart(2,'0')}E${String(ep.episode_num).padStart(2,'0')} · ${ep.title ?? ''}`,
-      _streamId: String(ep.id),
-      _serverUrl: serverUrl,
-      _username: username,
-      _password: password,
-      _extension: ep.container_extension,
+      ...(isXtream ? {
+        _streamId: String(ep.id),
+        _serverUrl: serverUrl,
+        _username: username,
+        _password: password,
+        _extension: ep.container_extension,
+      } : {}),
       _parent: { id: item.id, title: item.title, type: 'series' },
     } as ContentItem))
     const playingId = useAppStore.getState().playingContent?.id
@@ -214,11 +220,13 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
         ...item,
         id: `${primarySourceId}:episode:${episodeForPlay.id}`,
         title: `S${String(currentSeason ?? 1).padStart(2,'0')}E${String(episodeForPlay.episode_num).padStart(2,'0')} · ${episodeForPlay.title ?? ''}`,
-        _streamId: String(episodeForPlay.id),
-        _serverUrl: serverUrl,
-        _username: username,
-        _password: password,
-        _extension: episodeForPlay.container_extension,
+        ...(isXtream ? {
+          _streamId: String(episodeForPlay.id),
+          _serverUrl: serverUrl,
+          _username: username,
+          _password: password,
+          _extension: episodeForPlay.container_extension,
+        } : {}),
         _parent: { id: item.id, title: item.title, type: 'series' },
       }
     : undefined
@@ -399,11 +407,13 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
                       ...item,
                       id: `${primarySourceId}:episode:${ep.id}`,
                       title: `S${String(currentSeason).padStart(2,'0')}E${String(ep.episode_num).padStart(2,'0')} · ${ep.title ?? ''}`,
-                      _streamId: String(ep.id),
-                      _serverUrl: serverUrl,
-                      _username: username,
-                      _password: password,
-                      _extension: ep.container_extension,
+                      ...(isXtream ? {
+                        _streamId: String(ep.id),
+                        _serverUrl: serverUrl,
+                        _username: username,
+                        _password: password,
+                        _extension: ep.container_extension,
+                      } : {}),
                       _parent: { id: item.id, title: item.title, type: 'series' },
                     }
                     onPlay(epItem)

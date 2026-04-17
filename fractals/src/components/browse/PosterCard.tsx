@@ -119,17 +119,34 @@ export function PosterCard({ item, onClick }: Props) {
           background: 'linear-gradient(to top, rgba(0,0,0,0.82) 0%, rgba(0,0,0,0.15) 45%, transparent 100%)',
         }} />
 
-        {/* Type badge — top left */}
-        {item.type === 'series' && (
+        {/* Badge stack — top left (type + NSFW) */}
+        {(item.type === 'series' || (item as any).is_nsfw === 1) && (
           <div style={{
             position: 'absolute', top: 7, left: 7,
-            padding: '2px 5px', borderRadius: 4,
-            background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(4px)',
-            fontSize: 9, fontWeight: 700, letterSpacing: '0.06em',
-            color: 'rgba(255,255,255,0.75)', lineHeight: 1,
-            border: '1px solid rgba(255,255,255,0.12)',
+            display: 'flex', flexDirection: 'column', gap: 3,
           }}>
-            SERIES
+            {item.type === 'series' && (
+              <div style={{
+                padding: '2px 5px', borderRadius: 4,
+                background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(4px)',
+                fontSize: 9, fontWeight: 700, letterSpacing: '0.06em',
+                color: 'rgba(255,255,255,0.75)', lineHeight: 1,
+                border: '1px solid rgba(255,255,255,0.12)',
+              }}>
+                SERIES
+              </div>
+            )}
+            {(item as any).is_nsfw === 1 && (
+              <div style={{
+                padding: '2px 5px', borderRadius: 4,
+                background: 'rgba(180,0,0,0.82)', backdropFilter: 'blur(4px)',
+                fontSize: 9, fontWeight: 700, letterSpacing: '0.06em',
+                color: '#fff', lineHeight: 1,
+                border: '1px solid rgba(255,80,80,0.35)',
+              }}>
+                18+
+              </div>
+            )}
           </div>
         )}
 
@@ -203,6 +220,7 @@ export function PosterCard({ item, onClick }: Props) {
             boxShadow: `0 0 6px ${sourceColor.glow}`,
           }} />
         )}
+
 
         {/* Title + meta overlay at bottom */}
         <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: '8px 10px' }}>

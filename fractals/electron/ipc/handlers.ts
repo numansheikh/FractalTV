@@ -8,7 +8,7 @@ import { sources } from '../database/schema'
 import { eq } from 'drizzle-orm'
 import { xtreamService } from '../services/xtream.service'
 import { m3uService } from '../services/m3u.service'
-import { syncEpg, getNowNext } from '../services/epg.service'
+import { syncEpg, syncEpgFromUrl, getNowNext } from '../services/epg.service'
 import { normalizeForSearch } from '../lib/normalize'
 import { parseTitle } from '../lib/title-parser'
 import { parseAdvQuery, buildAdvWhere } from '../lib/adv-query-parser'
@@ -260,7 +260,7 @@ export function registerHandlers() {
     const sqlite = getSqlite()
 
     const srcs = sqlite.prepare(`
-      SELECT id, type, name, server_url, username, password, m3u_url, status, disabled, color_index
+      SELECT id, type, name, server_url, username, password, m3u_url, epg_url, status, disabled, color_index
       FROM sources ORDER BY created_at ASC
     `).all()
 
@@ -677,18 +677,25 @@ export function registerHandlers() {
     const sqlite = getSqlite()
     const source = sqlite.prepare('SELECT * FROM sources WHERE id = ?').get(sourceId) as SourceRow | undefined
     if (!source) return { success: false, error: 'Source not found' }
-    if (source.type === 'm3u') return { success: false, error: 'EPG sync is only supported for Xtream sources' }
-    if (!source.server_url) return { success: false, error: 'Source missing server URL' }
+    const onEpgProgress = (m: string) => win?.webContents.send('sync:progress', {
+      sourceId, phase: 'epg', current: 0, total: 0, message: m,
+    })
 
     win?.webContents.send('sync:progress', {
       sourceId, phase: 'epg', current: 0, total: 0, message: 'Fetching EPG…',
     })
-    const result = await syncEpg(
-      sourceId, source.server_url, source.username, source.password,
-      (m) => win?.webContents.send('sync:progress', {
-        sourceId, phase: 'epg', current: 0, total: 0, message: m,
-      })
-    )
+
+    let result: { inserted: number; error?: string }
+    if (source.type === 'm3u') {
+      const epgUrl = (source as any).epg_url as string | null
+      if (!epgUrl) return { success: false, error: 'No EPG URL found in this M3U playlist' }
+      result = await syncEpgFromUrl(sourceId, epgUrl, onEpgProgress)
+    } else {
+      if (!source.server_url) return { success: false, error: 'Source missing server URL' }
+      result = await syncEpg(
+        sourceId, source.server_url, source.username, source.password, onEpgProgress
+      )
+    }
     if (!result.error) {
       sqlite.prepare(
         `UPDATE sources SET last_epg_sync = unixepoch(), ingest_state = 'epg_fetched'
@@ -931,6 +938,7 @@ export function registerHandlers() {
     let externalId: string | null = null
     let containerExtension: string | null = null
     let directStreamUrl: string | null = null
+    let providerMeta: string | null = null
     let xtreamType: 'live' | 'movie' | 'series' = 'movie'
 
     if (kind === 'channel') {
@@ -939,6 +947,7 @@ export function registerHandlers() {
       sourceIdFromRow = ch.source_id
       externalId = ch.external_id
       directStreamUrl = ch.stream_url ?? null
+      providerMeta = ch.provider_metadata ?? null
       xtreamType = 'live'
     } else if (kind === 'movie') {
       const m = sqlite.prepare('SELECT * FROM movies WHERE id = ?').get(args.contentId) as MovieRow | undefined
@@ -947,17 +956,19 @@ export function registerHandlers() {
       externalId = m.external_id
       containerExtension = m.container_extension ?? null
       directStreamUrl = m.stream_url ?? null
+      providerMeta = m.provider_metadata ?? null
       xtreamType = 'movie'
     } else if (kind === 'episode') {
       const ep = sqlite.prepare('SELECT * FROM episodes WHERE id = ?').get(args.contentId) as EpisodeRow | undefined
       if (!ep) return { error: 'Content not found' }
-      // Episodes link to series, which owns source_id.
-      const ser = sqlite.prepare('SELECT source_id FROM series WHERE id = ?').get(ep.series_id) as { source_id: string } | undefined
+      // Episodes link to series, which owns source_id + provider_metadata (headers).
+      const ser = sqlite.prepare('SELECT source_id, provider_metadata FROM series WHERE id = ?').get(ep.series_id) as { source_id: string; provider_metadata?: string } | undefined
       if (!ser) return { error: 'Parent series not found' }
       sourceIdFromRow = ser.source_id
       externalId = ep.external_id
       containerExtension = ep.container_extension ?? null
       directStreamUrl = ep.stream_url ?? null
+      providerMeta = ser.provider_metadata ?? null
       xtreamType = 'series'
     } else {
       return { error: 'Series parents are not playable' }
@@ -970,7 +981,12 @@ export function registerHandlers() {
     // M3U sources: stream_url is stored directly on the content row.
     if (source.type === 'm3u') {
       if (!directStreamUrl) return { error: 'Stream URL missing for M3U content' }
-      return { url: directStreamUrl, sourceId: source.id }
+      // Include HTTP headers from provider_metadata if present
+      let headers: Record<string, string> | undefined
+      if (providerMeta) {
+        try { headers = JSON.parse(providerMeta).httpHeaders } catch {}
+      }
+      return { url: directStreamUrl, sourceId: source.id, ...(headers && { headers }) }
     }
 
     if (!source.serverUrl || !source.username || !source.password) return { error: 'Source credentials missing' }
@@ -984,6 +1000,7 @@ export function registerHandlers() {
 
   // series:get-info — lazy-fetches season/episode list from Xtream and
   // persists episodes into the episodes table with FK series_id.
+  // M3U sources: episodes are already in DB from sync — returns them directly.
   ipcMain.handle('series:get-info', async (_event, args: { contentId: string }) => {
     const db = getDb()
     const sqlite = getSqlite()
@@ -992,7 +1009,35 @@ export function registerHandlers() {
     if (!seriesRow) return { error: 'Content not found' }
 
     const [source] = await db.select().from(sources).where(eq(sources.id, seriesRow.source_id))
-    if (!source?.serverUrl || !source.username || !source.password) return { error: 'Source credentials missing' }
+    if (!source) return { error: 'Source not found' }
+
+    // M3U: episodes pre-populated at sync — group by season and return
+    if (source.type === 'm3u') {
+      const eps = sqlite.prepare(
+        'SELECT * FROM episodes WHERE series_id = ? ORDER BY season, episode_num'
+      ).all(seriesRow.id) as Array<{
+        id: string; external_id: string; title: string; stream_url: string;
+        container_extension: string | null; season: number; episode_num: number;
+      }>
+
+      const seasons: Record<string, any[]> = {}
+      for (const ep of eps) {
+        const sKey = String(ep.season ?? 1)
+        if (!seasons[sKey]) seasons[sKey] = []
+        seasons[sKey].push({
+          id: ep.external_id,
+          title: ep.title,
+          season: ep.season,
+          episode_num: ep.episode_num,
+          container_extension: ep.container_extension,
+          stream_url: ep.stream_url,
+        })
+      }
+
+      return { seasons, sourceId: source.id }
+    }
+
+    if (!source.serverUrl || !source.username || !source.password) return { error: 'Source credentials missing' }
 
     try {
       const info = await xtreamService.getSeriesInfo(source.serverUrl, source.username, source.password, seriesRow.external_id)
@@ -1633,12 +1678,28 @@ export function registerHandlers() {
   // ── External player ───────────────────────────────────────────────────
   ipcMain.handle('player:open-external', async (_event, args: {
     player: 'mpv' | 'vlc'; url: string; title: string; customPath?: string
+    headers?: Record<string, string>
   }) => {
-    const { player, url, title, customPath } = args
+    const { player, url, title, customPath, headers } = args
     const execPath = customPath || (player === 'mpv' ? findMpv() : findVlc())
-    const spawnArgs = player === 'mpv'
-      ? [`--force-media-title=${title}`, url]
-      : [url, `:meta-title=${title}`]
+
+    const spawnArgs: string[] = []
+    if (player === 'mpv') {
+      spawnArgs.push(`--force-media-title=${title}`)
+      // mpv: --http-header-fields="User-Agent: ...,Referer: ..."
+      if (headers && Object.keys(headers).length > 0) {
+        const fields = Object.entries(headers).map(([k, v]) => `${k}: ${v}`).join(',')
+        spawnArgs.push(`--http-header-fields=${fields}`)
+      }
+      spawnArgs.push(url)
+    } else {
+      spawnArgs.push(url, `:meta-title=${title}`)
+      // VLC: :http-user-agent=... :http-referrer=...
+      if (headers) {
+        if (headers['User-Agent']) spawnArgs.push(`:http-user-agent=${headers['User-Agent']}`)
+        if (headers['Referer']) spawnArgs.push(`:http-referrer=${headers['Referer']}`)
+      }
+    }
 
     try {
       const proc = spawn(execPath, spawnArgs, { detached: true, stdio: 'ignore' })

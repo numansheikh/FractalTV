@@ -210,3 +210,89 @@ export function parseTitle(raw: string): ParsedTitle {
 
   return { searchTitle, mdPrefix, mdLanguage, mdYear, mdQuality, isNsfw }
 }
+
+// ─── Series title parser ─────────────────────────────────────────────────────
+
+export interface SeriesParseResult {
+  baseTitle: string       // clean title without S/E and year
+  season: number | null
+  episode: number | null
+  year: number | null
+  isSeries: boolean       // true if S##E## pattern found
+}
+
+/**
+ * Parse a raw M3U title for series season/episode info.
+ * Examples:
+ *   "Breaking Bad (2008) S01 E01"  → { baseTitle: "Breaking Bad", season: 1, episode: 1, year: 2008, isSeries: true }
+ *   "The Matrix (1999)"           → { baseTitle: "The Matrix", season: null, episode: null, year: 1999, isSeries: false }
+ */
+export function parseSeriesTitle(raw: string): SeriesParseResult {
+  let s = raw.trim()
+
+  // Strip prefix (same logic as parseTitle)
+  const dashIdx = s.indexOf(' - ')
+  if (dashIdx > 0 && dashIdx <= 14) {
+    s = s.slice(dashIdx + 3).trim()
+  } else {
+    const colonMatch = s.match(/^([A-Z]{2,6}):\s+/)
+    if (colonMatch) s = s.slice(colonMatch[0].length).trim()
+  }
+
+  // Extract year — (YYYY)
+  let year: number | null = null
+  const yearMatch = s.match(/\(([12][0-9]{3})\)/)
+  if (yearMatch) {
+    const y = Number(yearMatch[1])
+    if (y >= 1888 && y <= 2026) {
+      year = y
+      s = s.replace(yearMatch[0], '').trim()
+    }
+  }
+
+  // Try S##E## patterns (ordered by specificity)
+  let season: number | null = null
+  let episode: number | null = null
+  let isSeries = false
+
+  // S01 E08, S01E08, s1e8, S01 E08
+  const seMatch = s.match(/[Ss](\d{1,2})\s*[Ee](\d{1,3})/i)
+  if (seMatch) {
+    season = Number(seMatch[1])
+    episode = Number(seMatch[2])
+    isSeries = true
+    s = s.slice(0, seMatch.index!).trim()
+  } else {
+    // Season 1 Episode 8
+    const verboseMatch = s.match(/Season\s*(\d{1,2})\s*Episode\s*(\d{1,3})/i)
+    if (verboseMatch) {
+      season = Number(verboseMatch[1])
+      episode = Number(verboseMatch[2])
+      isSeries = true
+      s = s.slice(0, verboseMatch.index!).trim()
+    } else {
+      // 1x08
+      const xMatch = s.match(/(\d{1,2})x(\d{1,3})/)
+      if (xMatch) {
+        season = Number(xMatch[1])
+        episode = Number(xMatch[2])
+        isSeries = true
+        s = s.slice(0, xMatch.index!).trim()
+      } else {
+        // S01 only (no episode)
+        const sOnly = s.match(/[Ss](\d{1,2})(?:\s|$)/)
+        if (sOnly) {
+          season = Number(sOnly[1])
+          episode = null
+          isSeries = true
+          s = s.slice(0, sOnly.index!).trim()
+        }
+      }
+    }
+  }
+
+  // Clean trailing noise
+  s = s.replace(/\s*\[.*?\]/g, '').replace(/\*$/, '').replace(/[-–—:,]\s*$/, '').trim()
+
+  return { baseTitle: s || raw.trim(), season, episode, year, isSeries }
+}

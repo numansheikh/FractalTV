@@ -133,7 +133,6 @@ export function ChannelDetail({ item, onPlay, onClose, onNavigate, isPlaying }: 
 
   const channelFooter = (
     <>
-      <ActionButtons item={c} onPlay={onPlay} hidePrimary />
       <button
         onClick={() => onPlay(c)}
         style={{
@@ -199,6 +198,7 @@ export function ChannelDetail({ item, onPlay, onClose, onNavigate, isPlaying }: 
         <DetailShell
           typeBadge={{ label: 'CHANNEL', accent: 'var(--accent-live)' }}
           breadcrumbs={breadcrumbs}
+          actionsRow={<ActionButtons item={c} onPlay={onPlay} hidePrimary />}
           primarySource={primarySource}
           primarySourceColor={sourceColor}
           onClose={onClose}

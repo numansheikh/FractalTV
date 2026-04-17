@@ -29,9 +29,11 @@ export function NavRail({ onOpenSources, onOpenSettings }: Props) {
   const { theme, setTheme } = useTheme()
   const syncProgress = useSourcesStore((s) => s.syncProgress)
   const enrichProgress = useSourcesStore((s) => s.enrichProgress)
+  const metadataProgress = useSourcesStore((s) => s.metadataProgress)
   const isSyncing = Object.values(syncProgress).some((p) => p && p.phase !== 'done' && p.phase !== 'error')
   const isEnriching = Object.values(enrichProgress).some((p) => p !== null)
-  const isBusy = isSyncing || isEnriching
+  const isPopulatingMetadata = Object.values(metadataProgress).some((p) => p !== null)
+  const isBusy = isSyncing || isEnriching || isPopulatingMetadata
 
   return (
     <div style={{

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { SlidePanel } from '@/components/layout/SlidePanel'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { useSourcesStore } from '@/stores/sources.store'
@@ -14,8 +15,13 @@ interface Props {
 }
 
 export function SourcesPanel({ onClose, onSync, onRemove, onAdded }: Props) {
+  const queryClient = useQueryClient()
   const { sources, updateSource } = useSourcesStore()
   const [showAddModal, setShowAddModal] = useState(false)
+
+  // Source enable/disable changes visible content across every view —
+  // invalidate all queries rather than chasing individual keys.
+  const invalidateAll = () => queryClient.invalidateQueries()
 
   const handleEnableAll = async () => {
     for (const src of sources) {
@@ -24,6 +30,7 @@ export function SourcesPanel({ onClose, onSync, onRemove, onAdded }: Props) {
         updateSource(src.id, { disabled: false })
       }
     }
+    invalidateAll()
   }
 
   const handleDisableAll = async () => {
@@ -33,6 +40,7 @@ export function SourcesPanel({ onClose, onSync, onRemove, onAdded }: Props) {
         updateSource(src.id, { disabled: true })
       }
     }
+    invalidateAll()
   }
 
   const allEnabled = sources.length > 0 && sources.every((s) => !s.disabled)

@@ -57,6 +57,8 @@ export const api = {
       ipcRenderer.invoke('content:browse', args),
     getVodInfo: (args: { contentId: string }) =>
       ipcRenderer.invoke('content:get-vod-info', args),
+    populateMetadata: (sourceId: string) =>
+      ipcRenderer.invoke('content:populate-metadata', sourceId),
   },
 
   // Series
@@ -108,7 +110,7 @@ export const api = {
 
   // External player
   player: {
-    openExternal: (args: { player: 'mpv' | 'vlc'; url: string; title: string; customPath?: string }) =>
+    openExternal: (args: { player: 'mpv' | 'vlc'; url: string; title: string; customPath?: string; headers?: Record<string, string> }) =>
       ipcRenderer.invoke('player:open-external', args),
     detectExternal: () => ipcRenderer.invoke('player:detect-external'),
   },

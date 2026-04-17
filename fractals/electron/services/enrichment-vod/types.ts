@@ -8,10 +8,14 @@ export interface VodEnrichmentInput {
   year?: number | null
   imdb_id?: string | null  // from Xtream provider_metadata if available
   tmdb_id?: string | null  // from Xtream provider_metadata if available
+  // md population fields — used by v3 for cleaner title/year inputs
+  search_title?: string | null
+  md_year?: number | null
+  md_language?: string | null
 }
 
 export interface VodEnrichmentCandidate {
-  algo_version: 'v1'
+  algo_version: 'v1' | 'v2' | 'v3'
   imdb_id: string | null
   tmdb_id: string | null
   wikidata_qid: string | null

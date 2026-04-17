@@ -16,8 +16,9 @@ Architecture, tech stack, schema, conventions, design language: see `fractals/CL
 | 2.5 | Complete | V3 data model + search (canonical split, association layer, MetadataProvider, advanced search, two-phase sync) |
 | g1 | Complete | Strip to pure provider-data app. 12 tables. LIKE search + debounce. |
 | g1c | **Complete** | 15-table per-type split. LIKE on `search_title` (inline at sync). Test → Sync pipeline (EPG auto-chains). VoD card redesign, vocabulary sweep, Channel Detail panel (logo/title/actions + Schedule section + EPG identity) + card Details buttons. Continue-watching invalidation bug fixed (2026-04-15). Tech cleanup: `tsconfig.node.json` fixed, Electron sandbox enabled. |
-| g2 | **In progress** | iptv-org ingestion, detail panels, mini player, NSFW filtering, EPG sync |
-| 3 | Not started | Capacitor (Android/iOS/TV), Tizen |
+| g2 | **In progress** | iptv-org ingestion, detail panels, mini player, NSFW filtering, EPG sync, M3U parity, ADV search |
+| g3 | Not started | TMDB enrichment, design overhaul, settings live-apply |
+| g4 | Not started | Capacitor (Android/iOS/TV), Tizen, three-tier product split |
 
 ---
 
@@ -70,22 +71,25 @@ FTS5 is **not** on this list — tried twice, rejected both times at this catalo
 
 ---
 
-## Future / Parked Buckets
+## Generation roadmap
 
-### Bucket 3 — Tech Health
+### g3 — Product polish & enrichment
 
-See `TODO.md` for actionable items.
+- TMDB/OMDb enrichment — optional API key in Settings, supplements keyless pipeline
+- Design system overhaul — borders + lavender, token refresh, contrast
+- Settings live-apply — no page refresh required
+- Mark all episodes watched — batch episode_user_data
+- Content type correction — flag non-film in movies table (~7.3%)
 
-### Bucket 4 — Multi-Platform Reach (Phase 3)
+### g4 — Multi-platform & product tiers
 
-Order: Electron (done) → Android phone → Android TV → iOS → Tizen → PWA.
-
-### Bucket 5 — Product Shape (Phase 3+)
-
-Three-tier split (same React codebase, feature flags):
-- **M3U Player** — free, all platforms, channel organizer
-- **Xtream Lite** — free, Android only, single source, TMDB enrichment
-- **Fractals Pro** — paid, all platforms, multi-source, full features
+- Capacitor: Android phone → Android TV → iOS → Tizen → PWA
+- `DataService` interface swap (Electron IPC → direct HTTP + `@capacitor-community/sqlite`)
+- D-pad navigation, focus management, 1.5x TV spacing
+- Three-tier product split (feature flags, same codebase):
+  - **M3U Player** — free, all platforms, channel organizer
+  - **Xtream Lite** — free, Android only, single source, TMDB enrichment
+  - **Fractals Pro** — paid, all platforms, multi-source, full features
 
 ---
 
@@ -94,8 +98,7 @@ Three-tier split (same React codebase, feature flags):
 | Doc | Purpose |
 |---|---|
 | `fractals/CLAUDE.md` | Architecture, tech stack, schema, conventions, design language |
-| `fractals/docs/business-plan.md` | Bucket 5 — three-tier split, competitors, monetization |
-| `fractals/docs/multi-platform-strategy.md` | Bucket 4 — platform priority, abstractions |
+| `metadata-extraction-strategy.md` | VOD title analysis — prefix taxonomy, extraction rules, implemented as `parseTitle()` |
 | `XtreamCodesAPI.md` | Xtream Codes API reference |
 
 ---
@@ -119,18 +122,21 @@ Three-tier split (same React codebase, feature flags):
 - **Populate metadata handler** — `content:populate-metadata` IPC handler wired to `parseTitle()` in `title-parser.ts`. Batched UPDATE (1000 rows/txn) for `md_prefix`, `md_language`, `md_year`, `md_quality`, `is_nsfw` across channels/movies/series. Progress broadcast via `metadata:progress`.
 - **ADV search (`@` prefix)** — tokenized query parser (`adv-query-parser.ts`). Auto-detects year (4-digit), language (English names + ISO codes), quality keywords, IPTV prefix codes. Each recognized token → `(md_* = value OR search_title LIKE '%token%')`. Unrecognized → title LIKE only. `field:value` syntax for power users (no OR fallback). All tokens AND together. ~90-entry hardcoded lookup table. Plain search (no `@`) unchanged.
 - **Bug fixes** — SeriesPosterCard double-wrapped `resume_episode_id`, LibraryView unsafe `clearId` fallback, SeriesDetail dead code in resume match, MovieDetail resume label on play button.
+- **M3U source parity** — two-pass series detection in sync worker (`parseSeriesTitle` + URL `/series/` classification); `series:get-info` M3U early return (DB query, no Xtream API); `content:get-stream-url` returns headers for M3U; SeriesDetail conditional Xtream vs M3U; guessType priority fix (URL path over duration); M3U EPG support (`epg_url` from `url-tvg`/`x-tvg-url`); `#EXTVLCOPT` parsing (User-Agent, Referer, Origin → `provider_metadata`); HTTP headers to HLS.js + mpv + VLC; parser consolidated to `electron/lib/m3u-parser.ts`.
+- **Source toggle refresh** — individual + bulk enable/disable → `queryClient.invalidateQueries()` refreshes all views.
 
 ## Snapshot (2026-04-17)
 
 - Phase state: **g2 in progress** (g1c shipped, g2 builds on top)
 - Active branch: `g2`
 - DB: 15 tables + enrichment tables (`movie_enrichment_g2`, `series_enrichment_g2`). Per-type split for content/categories/user-data, no canonical, no FTS.
-- Search: LIKE on `search_title` (no `@`). ADV search (`@` prefix): tokenized parser with auto-detected `md_*` filters + title LIKE fallback. No FTS.
+- Search: LIKE on `search_title` (plain). ADV search (`@` prefix): tokenized parser with auto-detected `md_*` filters + title LIKE fallback. No FTS.
 - Pipeline: Test → Sync → Populate Metadata (manual). Ingest states `added → tested → synced → epg_fetched`. EPG auto-chains for Xtream sources.
 - Security: Electron sandbox enabled, contextIsolation on, nodeIntegration off. NSFW default-off (opt-in).
 - Player: episode surf (PgUp/PgDn + Cmd+↑/↓, Prev/Next pills), episode click→embedded in detail panels, resume-aware autoplay.
+- M3U sources: full parity with Xtream (channels, movies, series+episodes, EPG, HTTP headers).
 
 ## g2 — queued
 
-- **M3U source parity review** — audit feature gaps vs. Xtream (sync, `md_*`, EPG, VoD enrichment applicability), then targeted fixes.
-- **Sync workers for manual steps** — automate populate-metadata (title parsing) and other manual data collection into sync pipeline.
+- **Full code sweep** — ~143 `as any` casts, dead code, stale comments, accumulated g2 debt.
+- **Daisy-chain sync worker** — auto-run Populate Metadata after sync (like EPG auto-chains).

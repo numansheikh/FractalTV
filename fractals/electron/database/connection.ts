@@ -77,6 +77,8 @@ function createTables(db: Database.Database) {
   // so the enrichment tables already exist as FK targets).
   addVodEnrichmentColumns(db)
   addMovieRuntimeColumn(db)
+  renameMdOriginToPrefix(db)
+  addEpgUrlColumn(db)
 
   // Drop FTS tables from older g1c builds — search is now plain LIKE on
   // `search_title`, FTS is gone.
@@ -143,6 +145,17 @@ function addVodEnrichmentColumns(db: Database.Database) {
   }
 }
 
+/** Rename md_origin → md_prefix on movies, series, channels on pre-existing DBs. */
+function renameMdOriginToPrefix(db: Database.Database) {
+  for (const table of ['movies', 'series', 'channels']) {
+    const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]
+    if (!cols.length) continue
+    if (!cols.some((c) => c.name === 'md_origin')) continue
+    console.log(`[DB] migrating: renaming ${table}.md_origin → md_prefix`)
+    db.exec(`ALTER TABLE ${table} RENAME COLUMN md_origin TO md_prefix`)
+  }
+}
+
 /** Add md_runtime column to movies on pre-existing DBs. */
 function addMovieRuntimeColumn(db: Database.Database) {
   const cols = db.prepare(`PRAGMA table_info(movies)`).all() as { name: string }[]
@@ -150,6 +163,15 @@ function addMovieRuntimeColumn(db: Database.Database) {
   if (cols.some((c) => c.name === 'md_runtime')) return
   console.log('[DB] migrating: adding movies.md_runtime')
   db.exec(`ALTER TABLE movies ADD COLUMN md_runtime INTEGER`)
+}
+
+/** g2: add epg_url column to sources for M3U EPG support. */
+function addEpgUrlColumn(db: Database.Database) {
+  const cols = db.prepare(`PRAGMA table_info(sources)`).all() as { name: string }[]
+  if (!cols.length) return
+  if (cols.some((c) => c.name === 'epg_url')) return
+  console.log('[DB] migrating: adding sources.epg_url')
+  db.exec(`ALTER TABLE sources ADD COLUMN epg_url TEXT`)
 }
 
 /** One-shot: wipe all enrichment rows so v2 algo starts from scratch. Runs once per key. */

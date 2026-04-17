@@ -25,6 +25,7 @@ interface Props {
   candidates: EnrichmentCandidate[]
   onPicked: () => void
   onDisabled: () => void
+  onRerun: () => void
   onClose: () => void
 }
 
@@ -47,7 +48,7 @@ function parseCandidate(row: EnrichmentCandidate): ParsedCandidate {
   }
 }
 
-export function EnrichmentPicker({ contentId, contentType, candidates, onPicked, onDisabled, onClose }: Props) {
+export function EnrichmentPicker({ contentId, contentType, candidates, onPicked, onDisabled, onRerun, onClose }: Props) {
   const backdropRef = useRef<HTMLDivElement>(null)
   const parsed = candidates
     .filter((c) => c.confidence > 0 && c.raw_json !== '{}')
@@ -190,7 +191,23 @@ export function EnrichmentPicker({ contentId, contentType, candidates, onPicked,
         <div style={{
           padding: '10px 16px',
           borderTop: '1px solid var(--border-subtle)',
+          display: 'flex', flexDirection: 'column', gap: 6,
         }}>
+          <button
+            onClick={() => { onClose(); onRerun() }}
+            style={{
+              width: '100%', padding: '8px', borderRadius: 6,
+              background: 'transparent',
+              border: '1px solid var(--border-default)',
+              color: 'var(--text-1)', fontSize: 12,
+              cursor: 'pointer', fontFamily: 'var(--font-ui)',
+              transition: 'background 0.1s, color 0.1s',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-3)' }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+          >
+            Re-run lookup
+          </button>
           <button
             onClick={handleDisable}
             style={{

@@ -18,6 +18,7 @@ interface Props {
   onMinimize: () => void
   onExpand: () => void
   onSurfChannel?: (dir: 1 | -1) => ContentItem | null
+  onSurfEpisode?: (dir: 1 | -1) => ContentItem | null
   onChipClick?: (content: ContentItem) => void
 }
 
@@ -35,12 +36,14 @@ const MINI_STYLE: React.CSSProperties = {
   background: '#000',
 }
 
-export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, onSurfChannel, onChipClick }: Props) {
+export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, onSurfChannel, onSurfEpisode, onChipClick }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const artRef = useRef<Artplayer | null>(null)
   const qc = useQueryClient()
   const minWatchSeconds = useAppStore((s) => s.minWatchSeconds)
   const controlsMode = useAppStore((s) => s.controlsMode)
+  const episodeSurfList = useAppStore((s) => s.episodeSurfList)
+  const episodeSurfIndex = useAppStore((s) => s.episodeSurfIndex)
   const sources = useSourcesStore((s) => s.sources)
   const colorMap = useMemo(() => buildColorMapFromSources(sources), [sources])
 
@@ -187,6 +190,7 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
       }
 
       const url: string = result.url
+      const streamHeaders: Record<string, string> | undefined = result.headers
       setStreamUrl(url)
       if (content.type === 'live') liveStreamUrlRef.current = url
 
@@ -202,7 +206,7 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
       const pref = localStorage.getItem('fractals-player') as 'artplayer' | 'mpv' | 'vlc' | null
       if (pref === 'mpv' || pref === 'vlc') {
         const customPath = localStorage.getItem(`fractals-player-${pref}-path`) ?? undefined
-        api.player.openExternal({ player: pref, url, title: content.title, customPath }).then((res: any) => {
+        api.player.openExternal({ player: pref, url, title: content.title, customPath, headers: streamHeaders }).then((res: any) => {
           if (cancelled) return
           clearLoadingTimer()
           if (res?.success) { onClose() } else { setError(`Failed to launch ${pref.toUpperCase()}: ${res?.error ?? 'not found'}`); setPlayerState('error') }
@@ -260,7 +264,19 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
         ...(isHls && Hls.isSupported() && {
           customType: {
             m3u8: (video: HTMLVideoElement, src: string) => {
-              const hls = new Hls({ enableWorker: true, lowLatencyMode: isLive })
+              const hls = new Hls({
+                enableWorker: true,
+                lowLatencyMode: isLive,
+                // Referer works; User-Agent and Origin are forbidden header names
+              // in browsers — silently ignored here but work in mpv/VLC.
+              ...(streamHeaders && {
+                  xhrSetup: (xhr: XMLHttpRequest) => {
+                    for (const [k, v] of Object.entries(streamHeaders)) {
+                      try { xhr.setRequestHeader(k, v) } catch {}
+                    }
+                  },
+                }),
+              })
               ;(art as any).hls = hls
               hls.loadSource(src)
               hls.attachMedia(video)
@@ -648,6 +664,18 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
         }
       }
 
+      // ── Episode surf (series episodes only) ──
+      if (localContent?._parent && onSurfEpisode) {
+        const isMacUp = e.metaKey && e.key === 'ArrowUp'
+        const isMacDown = e.metaKey && e.key === 'ArrowDown'
+        const dir = (e.key === 'PageUp' || isMacUp) ? -1 : (e.key === 'PageDown' || isMacDown) ? 1 : null
+        if (dir !== null) {
+          e.preventDefault()
+          onSurfEpisode(dir)
+          return
+        }
+      }
+
       const art = artRef.current
       if (!art) return
 
@@ -711,7 +739,7 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
       setOsd(null)
       if (seekState.timer) clearTimeout(seekState.timer)
     }
-  }, [mode, isOsFullscreen, localContent?.type, isTimeshift, onClose, onMinimize, onSurfChannel, doChannelSwitch, showOsd])
+  }, [mode, isOsFullscreen, localContent?.type, localContent?._parent, isTimeshift, onClose, onMinimize, onSurfChannel, onSurfEpisode, doChannelSwitch, showOsd])
 
   // ── Render ────────────────────────────────────────────────────────────────
   const containerStyle: React.CSSProperties = mode === 'hidden'
@@ -757,7 +785,7 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
       {mode === 'mini' && localContent && (
         <div style={{
           position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10,
-          height: 28, background: 'rgba(0,0,0,0.85)',
+          height: 28, background: 'rgba(0,0,0,0.6)',
           display: 'flex', alignItems: 'center', gap: 6, padding: '0 8px',
           borderBottom: '1px solid rgba(255,255,255,0.08)',
         }}>
@@ -821,7 +849,7 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
           background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.12)',
           color: '#fff', cursor: 'pointer', backdropFilter: 'blur(8px)', transition: 'background 0.1s',
         }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.85)' }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.6)' }}
           onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.6)' }}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="m12 19-7-7 7-7" /><path d="M19 12H5" /></svg>
@@ -853,7 +881,7 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
       <AnimatePresence>
         {resumePrompt !== null && !isLoading && !isError && mode === 'fullscreen' && (
           <motion.div key="resume" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }} transition={{ duration: 0.25 }}
-            style={{ position: 'absolute', bottom: 80, left: '50%', transform: 'translateX(-50%)', zIndex: 96, display: 'flex', alignItems: 'center', gap: 12, background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(12px)', borderRadius: 12, padding: '12px 20px', border: '1px solid rgba(124,77,255,0.3)' }}>
+            style={{ position: 'absolute', bottom: 80, left: '50%', transform: 'translateX(-50%)', zIndex: 96, display: 'flex', alignItems: 'center', gap: 12, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(12px)', borderRadius: 12, padding: '12px 20px', border: '1px solid rgba(124,77,255,0.3)' }}>
             <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.8)' }}>Resume from {fmt(resumePrompt)}?</span>
             <button onClick={handleResume} style={{ padding: '6px 14px', borderRadius: 8, fontSize: 12, fontWeight: 600, background: 'var(--accent-interactive)', color: '#fff', border: 'none', cursor: 'pointer' }}>Resume</button>
             <button onClick={handleStartOver} style={{ padding: '6px 14px', borderRadius: 8, fontSize: 12, fontWeight: 500, background: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.7)', border: 'none', cursor: 'pointer' }}>Start Over</button>
@@ -942,6 +970,68 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
           currentProg={timeshiftProg}
         />
       )}
+
+      {/* ── Episode prev/next pills (fullscreen, episodes only) ── */}
+      {mode === 'fullscreen' && localContent?._parent && onSurfEpisode && (() => {
+        const canPrev = episodeSurfIndex > 0
+        const canNext = episodeSurfIndex < episodeSurfList.length - 1
+
+        const pillStyle: CSSProperties = {
+          display: 'flex', alignItems: 'center', gap: 5,
+          padding: '4px 10px', borderRadius: 12,
+          background: 'rgba(0,0,0,0.3)',
+          border: '1px solid rgba(255,255,255,0.18)',
+          color: 'rgba(255,255,255,0.9)', fontSize: 11, fontWeight: 500,
+          cursor: 'pointer', fontFamily: 'var(--font-ui)',
+          backdropFilter: 'blur(8px)',
+          transition: 'background 0.15s',
+        }
+        const disabledPillStyle: CSSProperties = {
+          ...pillStyle,
+          cursor: 'default',
+        }
+
+        return (
+          <>
+          <button
+            onClick={() => canPrev && onSurfEpisode(-1)}
+            style={{
+              ...(canPrev ? pillStyle : disabledPillStyle),
+              position: 'absolute', bottom: 70, left: 20, zIndex: 100,
+              opacity: showControls ? (canPrev ? 1 : 0.35) : 0,
+              pointerEvents: showControls && canPrev ? 'all' : 'none',
+              transition: 'opacity 0.2s, background 0.15s',
+            }}
+            onMouseEnter={(e) => { if (canPrev) e.currentTarget.style.background = 'rgba(0,0,0,0.6)' }}
+            onMouseLeave={(e) => { if (canPrev) e.currentTarget.style.background = 'rgba(0,0,0,0.65)' }}
+            title="Previous episode (PgUp / Cmd+↑)"
+          >
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="15 18 9 12 15 6"/>
+            </svg>
+            Prev
+          </button>
+          <button
+            onClick={() => canNext && onSurfEpisode(1)}
+            style={{
+              ...(canNext ? pillStyle : disabledPillStyle),
+              position: 'absolute', bottom: 70, right: 20, zIndex: 100,
+              opacity: showControls ? (canNext ? 1 : 0.35) : 0,
+              pointerEvents: showControls && canNext ? 'all' : 'none',
+              transition: 'opacity 0.2s, background 0.15s',
+            }}
+            onMouseEnter={(e) => { if (canNext) e.currentTarget.style.background = 'rgba(0,0,0,0.6)' }}
+            onMouseLeave={(e) => { if (canNext) e.currentTarget.style.background = 'rgba(0,0,0,0.65)' }}
+            title="Next episode (PgDn / Cmd+↓)"
+          >
+            Next
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="9 18 15 12 9 6"/>
+            </svg>
+          </button>
+          </>
+        )
+      })()}
 
       {/* ── Series-episode + category chips (fullscreen only).
            Episode playback gets two pills: left = series·S/E (opens series detail for episode picker),

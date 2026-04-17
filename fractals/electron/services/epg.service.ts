@@ -170,6 +170,61 @@ export async function syncEpg(
   return { inserted: programs.length }
 }
 
+/**
+ * Sync EPG from an arbitrary XMLTV URL (for M3U sources that provide url-tvg).
+ * Same logic as syncEpg but takes a direct URL instead of Xtream credentials.
+ */
+export async function syncEpgFromUrl(
+  sourceId: string,
+  epgUrl: string,
+  onProgress?: (msg: string) => void
+): Promise<{ inserted: number; error?: string }> {
+  const sqlite = getSqlite()
+
+  onProgress?.(`Fetching EPG…`)
+
+  let xml: string
+  try {
+    xml = await fetchUrl(epgUrl)
+  } catch (err) {
+    return { inserted: 0, error: `EPG fetch failed: ${String(err)}` }
+  }
+
+  if (!xml.includes('<programme') && !xml.includes('<channel')) {
+    return { inserted: 0, error: 'No EPG data returned' }
+  }
+
+  onProgress?.('Parsing EPG…')
+  const { programs } = parseXmltv(xml)
+
+  if (programs.length === 0) {
+    return { inserted: 0, error: 'EPG parsed but contained no programmes' }
+  }
+
+  onProgress?.(`Storing ${programs.length} EPG entries…`)
+
+  sqlite.prepare(`DELETE FROM epg WHERE source_id = ?`).run(sourceId)
+
+  const insert = sqlite.prepare(`
+    INSERT OR REPLACE INTO epg (id, channel_external_id, source_id, title, description, start_time, end_time, category)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `)
+
+  const batch = sqlite.transaction((items: ParsedProgram[]) => {
+    for (const p of items) {
+      const id = `${sourceId}:${p.channelId}:${p.start}`
+      insert.run(id, p.channelId, sourceId, p.title, p.description, p.start, p.end, p.category)
+    }
+  })
+
+  const BATCH = 1000
+  for (let i = 0; i < programs.length; i += BATCH) {
+    batch(programs.slice(i, i + BATCH))
+  }
+
+  return { inserted: programs.length }
+}
+
 // ── Query ─────────────────────────────────────────────────────────────────────
 
 export function getNowNext(contentId: string): NowNext {
