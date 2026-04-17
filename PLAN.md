@@ -100,7 +100,7 @@ Three-tier split (same React codebase, feature flags):
 
 ---
 
-## g2 — shipped so far (branch: g2, 2026-04-15)
+## g2 — shipped so far (branch: g2, 2026-04-17)
 
 - **iptv-org channel DB ingestion** — 39K channel snapshot, tvg-id matching, country/category/NSFW flags
 - **Unified detail panel spine** (`DetailShell`) — Channel/Movie/Series share chrome; breadcrumbs, type badge, source indicator
@@ -113,17 +113,24 @@ Three-tier split (same React codebase, feature flags):
 - **Adult content (NSFW) filtering** — `is_nsfw` on 3 category + 3 content tables; right-click category → mark/unmark; "Allow adult content" toggle in Settings; flag propagates to content rows on mark and post-sync
 - **VoD enrichment (movies + series)** — keyless (Wikipedia REST + Wikidata + IMDb suggest); algo v1 + v2; candidate rows in `movie_enrichment_g2` / `series_enrichment_g2`; `selected_enrichment_id` + `enrichment_disabled` on content rows; auto-enrich on first detail open; per-field fallback merge in MovieDetail/SeriesDetail; "Not this film?" picker (`EnrichmentPicker`); source-level enrich button
 - **Movie detail duration** — `md_runtime` column on movies, lazy-fetched via `get_vod_info` on first open, persisted, `staleTime: Infinity` for instant reloads; displayed in MetadataBlock strip
+- **Episode surf** — Prev/Next pills in fullscreen player for series episodes (bounded by season, no wrap). Keyboard: PgUp/PgDn + Cmd+↑/↓. `episodeSurfList`/`episodeSurfIndex` in app store, populated per-season in SeriesDetail.
+- **Episode click → embedded mode** — clicking episode row loads into embedded player zone in detail panel instead of fullscreen. Top play button tracks embedded episode label, click expands to fullscreen.
+- **Series resume fixes** — autoplay waits for continue-watching data before starting; season auto-select overrides cache when resume points to different season; `resume_episode_id` matching handles full content ID format; season/episode state resets on series switch.
+- **Populate metadata handler** — `content:populate-metadata` IPC handler wired to `parseTitle()` in `title-parser.ts`. Batched UPDATE (1000 rows/txn) for `md_prefix`, `md_language`, `md_year`, `md_quality`, `is_nsfw` across channels/movies/series. Progress broadcast via `metadata:progress`.
+- **ADV search (`@` prefix)** — tokenized query parser (`adv-query-parser.ts`). Auto-detects year (4-digit), language (English names + ISO codes), quality keywords, IPTV prefix codes. Each recognized token → `(md_* = value OR search_title LIKE '%token%')`. Unrecognized → title LIKE only. `field:value` syntax for power users (no OR fallback). All tokens AND together. ~90-entry hardcoded lookup table. Plain search (no `@`) unchanged.
+- **Bug fixes** — SeriesPosterCard double-wrapped `resume_episode_id`, LibraryView unsafe `clearId` fallback, SeriesDetail dead code in resume match, MovieDetail resume label on play button.
 
-## Snapshot (2026-04-16)
+## Snapshot (2026-04-17)
 
 - Phase state: **g2 in progress** (g1c shipped, g2 builds on top)
 - Active branch: `g2`
 - DB: 15 tables + enrichment tables (`movie_enrichment_g2`, `series_enrichment_g2`). Per-type split for content/categories/user-data, no canonical, no FTS.
-- Search: LIKE on `search_title` (populated inline at sync via any-ascii + lowercase). No ranking, no FTS. ADV search (`@` prefix) strips to plain LIKE (stopgap — parser not built).
-- Pipeline: Test → Sync. Ingest states `added → tested → synced → epg_fetched`. EPG auto-chains for Xtream sources.
+- Search: LIKE on `search_title` (no `@`). ADV search (`@` prefix): tokenized parser with auto-detected `md_*` filters + title LIKE fallback. No FTS.
+- Pipeline: Test → Sync → Populate Metadata (manual). Ingest states `added → tested → synced → epg_fetched`. EPG auto-chains for Xtream sources.
 - Security: Electron sandbox enabled, contextIsolation on, nodeIntegration off. NSFW default-off (opt-in).
+- Player: episode surf (PgUp/PgDn + Cmd+↑/↓, Prev/Next pills), episode click→embedded in detail panels, resume-aware autoplay.
 
 ## g2 — queued
 
-- **ADV search + `md_*` column population** — (1) audit sync gaps in `md_*` columns; (2) fill from Xtream API response; (3) ADV parser (`field:value` → WHERE on `md_*`). Frontend `@` chip + `isAdvanced` IPC flag already wired.
 - **M3U source parity review** — audit feature gaps vs. Xtream (sync, `md_*`, EPG, VoD enrichment applicability), then targeted fixes.
+- **Sync workers for manual steps** — automate populate-metadata (title parsing) and other manual data collection into sync pipeline.

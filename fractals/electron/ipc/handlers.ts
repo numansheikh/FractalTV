@@ -10,6 +10,8 @@ import { xtreamService } from '../services/xtream.service'
 import { m3uService } from '../services/m3u.service'
 import { syncEpg, getNowNext } from '../services/epg.service'
 import { normalizeForSearch } from '../lib/normalize'
+import { parseTitle } from '../lib/title-parser'
+import { parseAdvQuery, buildAdvWhere } from '../lib/adv-query-parser'
 import { pullAll as iptvOrgPullAll, getStatus as iptvOrgGetStatus, matchChannelsForSource as iptvOrgMatchSource } from '../services/iptv-org'
 import {
   enrichForSource as vodEnrichForSource,
@@ -159,7 +161,12 @@ const MOVIE_SELECT = `
   NULL                       AS tmdb_id,
   0                          AS enriched,
   NULL                       AS enriched_at,
-  0                          AS has_epg_data
+  0                          AS has_epg_data,
+  m.search_title             AS search_title,
+  m.md_prefix                AS md_prefix,
+  m.md_language              AS md_language,
+  m.md_quality               AS md_quality,
+  m.is_nsfw                  AS is_nsfw
 `
 
 const SERIES_SELECT = `
@@ -192,7 +199,12 @@ const SERIES_SELECT = `
   NULL                       AS tmdb_id,
   0                          AS enriched,
   NULL                       AS enriched_at,
-  0                          AS has_epg_data
+  0                          AS has_epg_data,
+  sr.search_title            AS search_title,
+  sr.md_prefix               AS md_prefix,
+  sr.md_language             AS md_language,
+  sr.md_quality              AS md_quality,
+  sr.is_nsfw                 AS is_nsfw
 `
 
 // ─── Handler registration ─────────────────────────────────────────────────
@@ -816,12 +828,26 @@ export function registerHandlers() {
       return runBrowseSearch(effectiveType, categoryName, filterIds, limit, offset)
     }
 
-    // TODO: when isAdvanced is true, route to a parsed-query search path
-    // instead of plain LIKE. For now, strip the @ and do plain search.
+    // Advanced search: parse tokens into md_* WHERE clauses + title LIKE fallback
+    if (isAdvanced) {
+      const advQuery = parseAdvQuery(searchQuery)
+      const doAdv = (type: 'live' | 'movie' | 'series', lim: number, off: number, sc: boolean) =>
+        g1cAdvSearch(advQuery, type, categoryName, filterIds, lim, off, sc)
 
-    // Typed search: single table — one COUNT + one SELECT LIMIT/OFFSET.
-    // skipCount short-circuits the COUNT for callers that only need items
-    // (e.g. Home, which displays a fixed cap and never shows a total).
+      if (effectiveType) return doAdv(effectiveType, limit, offset, skipCount)
+
+      const cap = limit + offset
+      const live   = doAdv('live',   cap, 0, skipCount)
+      const movies = doAdv('movie',  cap, 0, skipCount)
+      const series = doAdv('series', cap, 0, skipCount)
+      const merged = [...live.items, ...movies.items, ...series.items]
+      return {
+        items: merged.slice(offset, offset + limit),
+        total: live.total + movies.total + series.total,
+      }
+    }
+
+    // Plain search: single LIKE on search_title
     if (effectiveType === 'movie') {
       return g1cSearchMovies(searchQuery, categoryName, filterIds, limit, offset, skipCount)
     }
@@ -832,9 +858,6 @@ export function registerHandlers() {
       return g1cSearchSeries(searchQuery, categoryName, filterIds, limit, offset, skipCount)
     }
 
-    // All-types fan-out: concatenate live+movie+series, paginate across
-    // the merged sequence. We over-fetch (limit+offset) per type so we can
-    // pick a consistent slice; each type's total is summed for the grand total.
     const cap = limit + offset
     const live   = g1cSearchChannels(searchQuery, categoryName, filterIds, cap, 0, skipCount)
     const movies = g1cSearchMovies  (searchQuery, categoryName, filterIds, cap, 0, skipCount)
@@ -1431,6 +1454,76 @@ export function registerHandlers() {
     try { vodResetEnrichment(contentId); return { ok: true } } catch (e) { return { ok: false, error: String(e) } }
   })
 
+  // ── Metadata population (g2 — deterministic title parsing) ──────────────
+
+  // Tracks which sources are currently having metadata populated — prevents concurrent runs per source
+  const metadataPopulatingJobs = new Set<string>()
+
+  ipcMain.handle('content:populate-metadata', (_event, sourceId: string) => {
+    if (metadataPopulatingJobs.has(sourceId)) {
+      return { ok: false, alreadyRunning: true }
+    }
+    metadataPopulatingJobs.add(sourceId)
+
+    const broadcast = (p: object) =>
+      BrowserWindow.getAllWindows()[0]?.webContents.send('metadata:progress', { sourceId, ...p })
+
+    // Fire and forget — returns immediately
+    ;(async () => {
+      const sqlite = getSqlite()
+      const BATCH = 1000
+
+      for (const [table, label] of [
+        ['movies', 'movies'],
+        ['series', 'series'],
+        ['channels', 'channels'],
+      ] as [string, string][]) {
+        const total = (sqlite.prepare(`SELECT COUNT(*) as n FROM ${table} WHERE source_id = ?`).get(sourceId) as { n: number }).n
+        let processed = 0
+
+        const updateStmt = sqlite.prepare(
+          `UPDATE ${table} SET
+            md_prefix   = ?,
+            md_language = ?,
+            md_year     = ?,
+            md_quality  = ?,
+            is_nsfw     = ?
+          WHERE id = ?`
+        )
+
+        while (processed < total) {
+          const rows = sqlite.prepare(
+            `SELECT id, title FROM ${table} WHERE source_id = ? LIMIT ? OFFSET ?`
+          ).all(sourceId, BATCH, processed) as { id: string; title: string }[]
+
+          if (!rows.length) break
+
+          const run = sqlite.transaction(() => {
+            for (const row of rows) {
+              const p = parseTitle(row.title)
+              updateStmt.run(p.mdPrefix, p.mdLanguage, p.mdYear, p.mdQuality, p.isNsfw, row.id)
+            }
+          })
+          run()
+
+          processed += rows.length
+          broadcast({ phase: 'progress', label, current: processed, total })
+        }
+      }
+
+      broadcast({ phase: 'done', current: 0, total: 0 })
+    })()
+      .catch((e) => {
+        const message = e instanceof Error ? e.message : String(e)
+        broadcast({ phase: 'error', current: 0, total: 0, error: message })
+      })
+      .finally(() => {
+        metadataPopulatingJobs.delete(sourceId)
+      })
+
+    return { ok: true, started: true }
+  })
+
   // ── Enrichment — deprecated stubs (no canonical layer in g1c) ─────────
   const deprecatedEnrichment = (opName: string) => () => ({
     success: false,
@@ -1582,6 +1675,61 @@ function applyNsfwFlags(sqlite: ReturnType<typeof getSqlite>) {
 }
 
 // ─── Search helpers ──────────────────────────────────────────────────────
+// ─── Advanced search (@ prefix) ──────────────────────────────────────────────
+// Tokenized query with auto-detected md_* filters + title LIKE fallback.
+
+const ADV_TABLE_CONFIG: Record<string, { select: string; table: string; alias: string; catTable: string; catFk: string }> = {
+  live:   { select: 'CHANNEL_SELECT', table: 'channels',  alias: 'c',  catTable: 'channel_categories', catFk: 'c.category_id' },
+  movie:  { select: 'MOVIE_SELECT',   table: 'movies',    alias: 'm',  catTable: 'movie_categories',   catFk: 'm.category_id' },
+  series: { select: 'SERIES_SELECT',  table: 'series',    alias: 'sr', catTable: 'series_categories',  catFk: 'sr.category_id' },
+}
+
+function g1cAdvSearch(
+  advQuery: ReturnType<typeof parseAdvQuery>,
+  type: 'live' | 'movie' | 'series',
+  categoryName: string | undefined,
+  filterIds: string[],
+  limit: number, offset: number, skipCount = false,
+): { items: unknown[]; total: number } {
+  const sqlite = getSqlite()
+  const cfg = ADV_TABLE_CONFIG[type]
+  const a = cfg.alias
+  const selectCols = type === 'live' ? CHANNEL_SELECT : type === 'movie' ? MOVIE_SELECT : SERIES_SELECT
+
+  const sourceList = filterIds.map(() => '?').join(',')
+  const catJoin = categoryName
+    ? `JOIN ${cfg.catTable} cat ON cat.id = ${cfg.catFk} AND cat.name = ?`
+    : ''
+  const catParams: unknown[] = categoryName ? [categoryName] : []
+  const nsfwWhere = getSetting('allow_adult') === '1' ? '' : `AND ${a}.is_nsfw = 0`
+
+  const adv = buildAdvWhere(advQuery, a)
+  if (!adv) return { items: [], total: 0 }
+
+  const where = `${adv.where} AND ${a}.source_id IN (${sourceList}) ${nsfwWhere}`
+  const allParams = [...catParams, ...adv.params, ...filterIds]
+
+  const items = sqlite.prepare(`
+    SELECT ${selectCols}
+    FROM ${cfg.table} ${a}
+    ${catJoin}
+    WHERE ${where}
+    LIMIT ? OFFSET ?
+  `).all(...allParams, limit, offset) as unknown[]
+
+  if (skipCount) return { items, total: items.length }
+  if (items.length === 0) return { items, total: 0 }
+
+  const total = (sqlite.prepare(`
+    SELECT COUNT(*) AS cnt
+    FROM ${cfg.table} ${a}
+    ${catJoin}
+    WHERE ${where}
+  `).get(...allParams) as { cnt: number }).cnt
+  return { items, total }
+}
+
+// ─── Plain LIKE search ───────────────────────────────────────────────────────
 // LIKE `%query%` on `search_title`. Sync workers populate `search_title`
 // inline via `normalizeForSearch` (any-ascii + lowercase) so ligatures /
 // diacritics fold bidirectionally ("ae" ↔ "æ", "e" ↔ "é"). No FTS.

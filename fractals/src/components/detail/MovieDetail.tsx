@@ -4,6 +4,7 @@ import { ContentItem, BreadcrumbNav } from '@/lib/types'
 import { api } from '@/lib/api'
 import { useSourcesStore } from '@/stores/sources.store'
 import { useAppStore } from '@/stores/app.store'
+import { useUserStore } from '@/stores/user.store'
 import { buildColorMapFromSources } from '@/lib/sourceColors'
 import { SlidePanel } from '@/components/layout/SlidePanel'
 import { MetadataBlock } from './MetadataBlock'
@@ -141,6 +142,12 @@ export function MovieDetail({ item, onPlay, onClose, onNavigate, isPlaying }: Pr
   const categoryName = (c as any).categoryName ?? (c as any).category_name
   const hasCandidates = (enrichmentData?.candidates ?? []).some((r: any) => r.confidence > 0 && r.raw_json !== '{}')
 
+  const userData = useUserStore((s) => s.data[item.id])
+  const lastPosition = userData?.last_position ?? 0
+  const watchLabel = lastPosition > 0
+    ? `▶ Resume from ${(() => { const h = Math.floor(lastPosition / 3600); const m = Math.floor((lastPosition % 3600) / 60); const s = Math.floor(lastPosition % 60); return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}` : `${m}:${String(s).padStart(2, '0')}` })()}`
+    : '▶ Watch'
+
   const breadcrumbs: BreadcrumbItem[] = [
     ...(primarySource && sourceColor ? [{
       label: primarySource.name,
@@ -165,7 +172,6 @@ export function MovieDetail({ item, onPlay, onClose, onNavigate, isPlaying }: Pr
 
   const footer = (
     <>
-      <ActionButtons item={c} onPlay={onPlay} hidePrimary />
       <button
         onClick={() => onPlay(displayItem)}
         style={{
@@ -179,7 +185,7 @@ export function MovieDetail({ item, onPlay, onClose, onNavigate, isPlaying }: Pr
         onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.88' }}
         onMouseLeave={(e) => { e.currentTarget.style.opacity = '1' }}
       >
-        <span>▶ Watch</span>
+        <span>{watchLabel}</span>
         {expandIcon}
       </button>
       {/* Embedded player placeholder — PlayerOverlay overlays this div in 'embedded' mode */}
@@ -239,6 +245,7 @@ export function MovieDetail({ item, onPlay, onClose, onNavigate, isPlaying }: Pr
       <DetailShell
         typeBadge={{ label: 'FILM', accent: 'var(--accent-film)' }}
         breadcrumbs={breadcrumbs}
+        actionsRow={<ActionButtons item={c} onPlay={onPlay} hidePrimary />}
         primarySource={primarySource}
         primarySourceColor={sourceColor}
         allSourceIds={allSourceIds}
@@ -256,6 +263,14 @@ export function MovieDetail({ item, onPlay, onClose, onNavigate, isPlaying }: Pr
           candidates={enrichmentData?.candidates ?? []}
           onPicked={() => { setShowPicker(false); queryClient.invalidateQueries({ queryKey: ['vodEnrich', c.id] }) }}
           onDisabled={() => { setShowPicker(false); queryClient.invalidateQueries({ queryKey: ['vodEnrich', c.id] }) }}
+          onRerun={() => {
+            enrichTriggered.current = false
+            setEnrichingSingle(true)
+            api.vodEnrich.enrichSingle(c.id, true).finally(() => {
+              setEnrichingSingle(false)
+              refetchEnrichment()
+            })
+          }}
           onClose={() => setShowPicker(false)}
         />
       )}

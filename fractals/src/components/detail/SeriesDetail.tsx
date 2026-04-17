@@ -37,6 +37,9 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
   const colorMap = buildColorMapFromSources(sources)
   const userStore = useUserStore()
   const queryClient = useQueryClient()
+  const playingContent = useAppStore((s) => s.playingContent)
+  const playerMode = useAppStore((s) => s.playerMode)
+  const setPlayerMode = useAppStore((s) => s.setPlayerMode)
 
   const { data: enrichedItem } = useQuery({
     queryKey: ['content', item.id],
@@ -49,6 +52,14 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
 
   // Reset enrichTriggered when the item changes so a new item can auto-enrich.
   useEffect(() => { enrichTriggered.current = false }, [item.id])
+
+  // Reset season selection when series changes (component is reused, state doesn't reinitialize)
+  useEffect(() => {
+    _setActiveSeason(activeSeasonCache.get(item.id) ?? null)
+    setHasAutoSelectedSeason(false)
+    firstEpIdRef.current = undefined
+    useAppStore.getState().setEpisodeSurfContext([], -1)
+  }, [item.id])
 
   const { data: enrichmentData, refetch: refetchEnrichment } = useQuery({
     queryKey: ['vodEnrich', item.id],
@@ -76,7 +87,7 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
     staleTime: 5 * 60_000,
   })
 
-  const { data: continueData = [] } = useQuery<ContentItem[]>({
+  const { data: continueData = [], isFetched: continueFetched } = useQuery<ContentItem[]>({
     queryKey: ['series-continue', item.id],
     queryFn: async () => {
       const all = await api.user.continueWatching({ type: 'series' }) as ContentItem[]
@@ -156,11 +167,33 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
   const username: string = (seriesInfo as any)?.username ?? ''
   const password: string = (seriesInfo as any)?.password ?? ''
 
+  useEffect(() => {
+    if (!episodes.length || !primarySourceId || !serverUrl || currentSeason === null) return
+    const epItems: ContentItem[] = episodes.map((ep) => ({
+      ...item,
+      id: `${primarySourceId}:episode:${ep.id}`,
+      title: `S${String(currentSeason).padStart(2,'0')}E${String(ep.episode_num).padStart(2,'0')} · ${ep.title ?? ''}`,
+      _streamId: String(ep.id),
+      _serverUrl: serverUrl,
+      _username: username,
+      _password: password,
+      _extension: ep.container_extension,
+      _parent: { id: item.id, title: item.title, type: 'series' },
+    } as ContentItem))
+    const playingId = useAppStore.getState().playingContent?.id
+    const idx = playingId ? epItems.findIndex((e) => e.id === playingId) : -1
+    useAppStore.getState().setEpisodeSurfContext(epItems, idx >= 0 ? idx : 0)
+  }, [episodes, primarySourceId, currentSeason, serverUrl, username, password, item])
+
   const categoryName = (c as any).categoryName ?? (c as any).category_name
 
   const firstEpisode = episodes[0] ?? null
   const resumeEpisodeInList = resumeEntry?.resume_episode_id
-    ? episodes.find((ep) => String(ep.id) === resumeEntry.resume_episode_id)
+    ? episodes.find((ep) => {
+        const rawId = String(ep.id)
+        // resume_episode_id is full content ID ({sourceId}:episode:{streamId}), ep.id is raw stream ID
+        return `${primarySourceId}:episode:${rawId}` === resumeEntry.resume_episode_id
+      })
     : null
   const resumeSeason = resumeEntry?.resume_season_number != null
     ? String(resumeEntry.resume_season_number)
@@ -168,10 +201,11 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
 
   const [hasAutoSelectedSeason, setHasAutoSelectedSeason] = useState(false)
   useEffect(() => {
-    if (!hasAutoSelectedSeason && resumeSeason && seasonKeys.includes(resumeSeason) && activeSeason === null) {
-      setHasAutoSelectedSeason(true)
-      setActiveSeason(resumeSeason)
-    }
+    if (hasAutoSelectedSeason) return
+    if (!resumeSeason || !seasonKeys.includes(resumeSeason)) return
+    if (resumeSeason === activeSeason) return
+    setHasAutoSelectedSeason(true)
+    setActiveSeason(resumeSeason)
   }, [hasAutoSelectedSeason, resumeSeason, seasonKeys, activeSeason])
 
   const episodeForPlay = resumeEpisodeInList ?? firstEpisode
@@ -189,10 +223,11 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
       }
     : undefined
 
-  // Start embedded playback once the first episode item is ready (or player already running)
+  // Start embedded playback once resume data is settled and the episode item is ready
   const firstEpIdRef = useRef<string | undefined>(undefined)
   useEffect(() => {
     if (!firstEpItem) return
+    if (!continueFetched) return
     if (firstEpIdRef.current === firstEpItem.id) return
     firstEpIdRef.current = firstEpItem.id
     const s = useAppStore.getState()
@@ -208,11 +243,16 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
       }, 2000)
       return () => clearTimeout(timer)
     }
-  }, [firstEpItem?.id])
+  }, [firstEpItem?.id, continueFetched])
 
   const playButtonLabel = resumeEntry && resumeEntry.resume_season_number != null && resumeEntry.resume_episode_number != null
     ? `▶ Resume S${resumeEntry.resume_season_number}·E${resumeEntry.resume_episode_number}`
     : firstEpisode ? '▶ Play from S1·E1' : '▶ Play'
+
+  const embeddedEpLabel = playerMode === 'embedded' && playingContent?._parent?.id === item.id
+    ? playingContent!.title.split(' · ')[0]
+    : null
+  const topButtonLabel = embeddedEpLabel ? `▶ ${embeddedEpLabel}` : playButtonLabel
 
   const breadcrumbs: BreadcrumbItem[] = [
     ...(primarySource && sourceColor ? [{
@@ -368,6 +408,13 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
                     }
                     onPlay(epItem)
                   }}
+                  isPlaying={(() => {
+                    const epId = `${primarySourceId}:episode:${ep.id}`
+                    const activeId = playingContent?._parent?.id === item.id
+                      ? playingContent!.id
+                      : firstEpItem?.id
+                    return epId === activeId
+                  })()}
                   isCompleted={isCompleted}
                   progress={progress}
                 />
@@ -381,6 +428,7 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
           <DetailShell
             typeBadge={{ label: 'SERIES', accent: 'var(--accent-series)' }}
             breadcrumbs={breadcrumbs}
+            actionsRow={<ActionButtons item={c} onPlay={onPlay} episodeToPlay={firstEpItem} hidePrimary />}
             primarySource={primarySource}
             primarySourceColor={sourceColor}
             allSourceIds={allSourceIds}
@@ -388,14 +436,8 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
             onClose={onClose}
             footer={
               <>
-                <ActionButtons
-                  item={c}
-                  onPlay={onPlay}
-                  episodeToPlay={firstEpItem}
-                  hidePrimary
-                />
                 <button
-                  onClick={() => onPlay(firstEpItem ?? c)}
+                  onClick={() => embeddedEpLabel ? setPlayerMode('fullscreen') : onPlay(firstEpItem ?? c)}
                   style={{
                     width: '100%', height: 36, borderRadius: 6,
                     background: 'var(--accent-series)', color: '#fff',
@@ -407,7 +449,7 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
                   onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.88' }}
                   onMouseLeave={(e) => { e.currentTarget.style.opacity = '1' }}
                 >
-                  <span>{playButtonLabel}</span>
+                  <span>{topButtonLabel}</span>
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
                     <polyline points="15 3 21 3 21 9" /><polyline points="9 21 3 21 3 15" />
                     <line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" />
@@ -477,6 +519,14 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
           candidates={enrichmentData?.candidates ?? []}
           onPicked={() => { setShowPicker(false); queryClient.invalidateQueries({ queryKey: ['vodEnrich', c.id] }) }}
           onDisabled={() => { setShowPicker(false); queryClient.invalidateQueries({ queryKey: ['vodEnrich', c.id] }) }}
+          onRerun={() => {
+            enrichTriggered.current = false
+            setEnrichingSingle(true)
+            api.vodEnrich.enrichSingle(c.id, true).finally(() => {
+              setEnrichingSingle(false)
+              refetchEnrichment()
+            })
+          }}
           onClose={() => setShowPicker(false)}
         />
       )}

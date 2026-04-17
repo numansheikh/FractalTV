@@ -69,9 +69,7 @@ function HeroSearch({ query, setQuery, inputRef }: {
   // by tinting the input border (which would compete with the chip color).
   const borderColor = focused ? 'var(--accent-interactive)' : 'var(--border-strong)'
 
-  // Amber palette for the ADV chip — distinct from accent-interactive (purple)
-  // so the chip and the focused input border don't blend into one color.
-  const ADV_AMBER = '#f59e0b'
+  const ADV_ACCENT = '#7733ff'
 
   return (
     <div style={{ flex: 1, position: 'relative', height: 40, minWidth: 0 }}>
@@ -99,18 +97,18 @@ function HeroSearch({ query, setQuery, inputRef }: {
           height: 24, padding: '0 9px',
           display: 'flex', alignItems: 'center', gap: 5,
           borderRadius: 5,
-          border: `1px solid ${isAdvanced ? ADV_AMBER : 'var(--border-strong)'}`,
-          background: isAdvanced ? ADV_AMBER : 'var(--bg-2)',
-          color: isAdvanced ? '#1a1305' : 'var(--text-2)',
+          border: `1px solid ${isAdvanced ? ADV_ACCENT : 'var(--border-strong)'}`,
+          background: isAdvanced ? `${ADV_ACCENT}78` : 'var(--bg-2)',
+          color: isAdvanced ? '#fff' : 'var(--text-2)',
           fontSize: 10, fontWeight: 800, fontFamily: 'var(--font-mono)',
           letterSpacing: '0.08em', cursor: 'pointer', userSelect: 'none',
-          boxShadow: isAdvanced ? `0 0 0 2px color-mix(in srgb, ${ADV_AMBER} 22%, transparent)` : 'none',
+          boxShadow: isAdvanced ? `0 0 0 2px color-mix(in srgb, ${ADV_ACCENT} 22%, transparent)` : 'none',
           transition: 'color 0.12s, border-color 0.12s, background 0.12s, box-shadow 0.12s',
         }}
         onMouseEnter={(e) => {
           if (!isAdvanced) {
-            e.currentTarget.style.color = ADV_AMBER
-            e.currentTarget.style.borderColor = ADV_AMBER
+            e.currentTarget.style.color = ADV_ACCENT
+            e.currentTarget.style.borderColor = ADV_ACCENT
           }
         }}
         onMouseLeave={(e) => {
@@ -173,6 +171,18 @@ function HeroSearch({ query, setQuery, inputRef }: {
           /
         </span>
       </div>
+
+      {/* ADV legend — shown below the search bar when @ mode is active */}
+      {isAdvanced && (
+        <div style={{
+          position: 'absolute', left: 0, top: '100%', marginTop: 4,
+          fontSize: 10, color: 'var(--text-3)', fontFamily: 'var(--font-mono)',
+          pointerEvents: 'none', whiteSpace: 'nowrap',
+          paddingLeft: CHIP_PAD,
+        }}>
+          year:2024 &nbsp; lang:en &nbsp; quality:4K &nbsp; prefix:GR &nbsp; country:US
+        </div>
+      )}
     </div>
   )
 }

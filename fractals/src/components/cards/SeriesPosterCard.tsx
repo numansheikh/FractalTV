@@ -47,11 +47,15 @@ export function SeriesPosterCard({ item, onClick }: Props) {
     const sn = String(item.resume_season_number).padStart(2, '0')
     const en = String(item.resume_episode_number).padStart(2, '0')
     const epTitle = item.resume_episode_title ? ` · ${item.resume_episode_title}` : ''
+    const resumeId = String(item.resume_episode_id)
+    // resume_episode_id is already a full content ID ({sourceId}:episode:{streamId})
+    const epId = resumeId.includes(':episode:') ? resumeId : `${primarySourceId}:episode:${resumeId}`
+    const streamId = resumeId.includes(':episode:') ? resumeId.split(':episode:')[1] : resumeId
     setPlayingContent({
       ...item,
-      id: `${primarySourceId}:episode:${item.resume_episode_id}`,
+      id: epId,
       title: `S${sn}E${en}${epTitle}`,
-      _streamId: String(item.resume_episode_id),
+      _streamId: streamId,
       _serverUrl: source.serverUrl,
       _username: source.username,
       _password: source.password,
@@ -125,19 +129,35 @@ export function SeriesPosterCard({ item, onClick }: Props) {
             <PosterPlaceholder id={item.id} title={item.title} style={{ position: 'absolute', inset: 0 }} />
           )}
 
-          {/* Top-left: type pill (S) */}
+          {/* Top-left: type pill + NSFW badge stack */}
           <div style={{
             position: 'absolute', top: 3, left: 3,
-            minWidth: 16, height: 16, padding: '0 4px',
-            borderRadius: 4,
-            background: 'var(--accent-series)',
-            color: '#fff',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 10, fontWeight: 700, letterSpacing: '0.02em',
-            fontFamily: 'var(--font-ui)',
-            zIndex: 1,
+            display: 'flex', flexDirection: 'column', gap: 3, zIndex: 1,
           }}>
-            S
+            <div style={{
+              minWidth: 16, height: 16, padding: '0 4px',
+              borderRadius: 4,
+              background: 'var(--accent-series)',
+              color: '#fff',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 10, fontWeight: 700, letterSpacing: '0.02em',
+              fontFamily: 'var(--font-ui)',
+            }}>
+              S
+            </div>
+            {(item as any).is_nsfw === 1 && (
+              <div style={{
+                padding: '1px 4px', borderRadius: 4,
+                background: 'rgba(180,0,0,0.85)',
+                color: '#fff',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 9, fontWeight: 700, letterSpacing: '0.04em',
+                fontFamily: 'var(--font-ui)',
+                border: '1px solid rgba(255,80,80,0.35)',
+              }}>
+                18+
+              </div>
+            )}
           </div>
 
           {/* Top-right cluster: completed checkmark + favorite heart (when not hovered) */}

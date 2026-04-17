@@ -4,7 +4,7 @@ import { useSourcesStore } from '@/stores/sources.store'
 import { useSearchStore } from '@/stores/search.store'
 import { buildColorMapFromSources } from '@/lib/sourceColors'
 
-const ADV_AMBER = '#f59e0b'
+const ADV_ACCENT = '#7733ff'
 
 function CmdSearchInput({ query, setQuery, inputRef }: {
   query: string
@@ -65,18 +65,18 @@ function CmdSearchInput({ query, setQuery, inputRef }: {
           height: 20, padding: '0 7px',
           display: 'flex', alignItems: 'center', gap: 4,
           borderRadius: 4,
-          border: `1px solid ${isAdvanced ? ADV_AMBER : 'var(--border-strong)'}`,
-          background: isAdvanced ? ADV_AMBER : 'transparent',
-          color: isAdvanced ? '#1a1305' : 'var(--text-3)',
+          border: `1px solid ${isAdvanced ? ADV_ACCENT : 'var(--border-strong)'}`,
+          background: isAdvanced ? `${ADV_ACCENT}78` : 'transparent',
+          color: isAdvanced ? '#fff' : 'var(--text-3)',
           fontSize: 9, fontWeight: 800, fontFamily: 'var(--font-mono)',
           letterSpacing: '0.06em', cursor: 'pointer', userSelect: 'none',
-          boxShadow: isAdvanced ? `0 0 0 2px color-mix(in srgb, ${ADV_AMBER} 20%, transparent)` : 'none',
+          boxShadow: isAdvanced ? `0 0 0 2px color-mix(in srgb, ${ADV_ACCENT} 20%, transparent)` : 'none',
           transition: 'color 0.12s, border-color 0.12s, background 0.12s, box-shadow 0.12s',
         }}
         onMouseEnter={(e) => {
           if (!isAdvanced) {
-            e.currentTarget.style.color = ADV_AMBER
-            e.currentTarget.style.borderColor = ADV_AMBER
+            e.currentTarget.style.color = ADV_ACCENT
+            e.currentTarget.style.borderColor = ADV_ACCENT
           }
         }}
         onMouseLeave={(e) => {
@@ -154,6 +154,18 @@ function CmdSearchInput({ query, setQuery, inputRef }: {
             <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
           </svg>
         </button>
+      )}
+
+      {/* ADV legend — shown below the search bar when @ mode is active */}
+      {isAdvanced && (
+        <div style={{
+          position: 'absolute', left: 0, top: '100%', marginTop: 4,
+          fontSize: 10, color: 'var(--text-3)', fontFamily: 'var(--font-mono)',
+          pointerEvents: 'none', whiteSpace: 'nowrap',
+          paddingLeft: LEFT_PAD,
+        }}>
+          year:2024 &nbsp; lang:en &nbsp; quality:4K &nbsp; prefix:GR &nbsp; country:US
+        </div>
       )}
     </div>
   )
