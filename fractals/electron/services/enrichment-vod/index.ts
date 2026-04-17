@@ -119,17 +119,25 @@ export async function enrichForSource(
     ...seriesItems.map((s) => ({ ...s, kind: 'series' as const })),
   ]
 
-  // Skip already-enriched unless force
-  const toEnrich = force
-    ? allItems
-    : allItems.filter((item) => {
-        const table = item.kind === 'movie' ? 'movie_enrichment_g2' : 'series_enrichment_g2'
-        const col = item.kind === 'movie' ? 'movie_id' : 'series_id'
-        const row = db.prepare(`SELECT 1 FROM ${table} WHERE ${col} = ? AND algo_version = ? LIMIT 1`).get(item.id, ALGO_VERSION)
-        return !row
-      })
+  // Split: items needing full enrichment vs. series already enriched but missing TVmaze
+  const toEnrich: typeof allItems = []
+  const toAugment: typeof allItems = []
+  if (!force) {
+    for (const item of allItems) {
+      const table = item.kind === 'movie' ? 'movie_enrichment_g2' : 'series_enrichment_g2'
+      const col = item.kind === 'movie' ? 'movie_id' : 'series_id'
+      const row = db.prepare(`SELECT tvmaze_id FROM ${table} WHERE ${col} = ? AND algo_version = ? LIMIT 1`).get(item.id, ALGO_VERSION) as { tvmaze_id: string | null } | undefined
+      if (!row) {
+        toEnrich.push(item)
+      } else if (item.kind === 'series' && !row.tvmaze_id) {
+        toAugment.push(item)
+      }
+    }
+  } else {
+    toEnrich.push(...allItems)
+  }
 
-  const total = toEnrich.length
+  const total = toEnrich.length + toAugment.length
   onProgress({ phase: 'starting', current: 0, total, message: `${total} titles to enrich` })
 
   let doneMovies = 0
@@ -209,6 +217,14 @@ export async function enrichForSource(
 
     // Rate limiting — be courteous to Wikipedia + Wikidata
     if (current < total) await delay(REQUEST_DELAY_MS)
+  }
+
+  // Augment already-enriched series missing TVmaze data
+  for (const item of toAugment) {
+    current++
+    onProgress({ phase: 'enriching', current, total, message: `TVmaze: ${item.title}` })
+    await augmentSeriesWithTvmaze(item.id, db)
+    if (current < total) await delay(300)  // TVmaze-only calls are cheaper; shorter delay
   }
 
   onProgress({ phase: 'done', current: total, total, message: `Enriched ${doneMovies + doneSeries} titles` })

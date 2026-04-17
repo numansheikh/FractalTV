@@ -51,13 +51,6 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
       setMiniPos(saved)
     }
   }, [])
-  // Reset to bottom-right when mini player first appears
-  useEffect(() => {
-    if (mode === 'mini' && !miniPos) {
-      setMiniPos({ top: window.innerHeight - 225 - 20, right: 20 })
-    }
-  }, [mode, miniPos])
-
   const handleDragStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
     const pos = miniPos ?? { top: window.innerHeight - 225 - 20, right: 20 }
