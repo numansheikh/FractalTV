@@ -29,26 +29,28 @@ export function parseCast(raw: string | undefined): string[] {
 export function CastPanel({ cast }: { cast: string[] }) {
   if (!cast.length) return null
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       <span style={{
         fontSize: 10, fontWeight: 600,
         textTransform: 'uppercase', letterSpacing: '0.06em',
         color: 'var(--text-3)', fontFamily: 'var(--font-ui)',
-        marginBottom: 4,
       }}>
         Cast
       </span>
-      {cast.map((name) => (
-        <span key={name} style={{
-          fontSize: 12, color: 'var(--text-1)',
-          fontFamily: 'var(--font-ui)',
-          padding: '3px 0',
-          borderBottom: '1px solid var(--border-subtle)',
-          lineHeight: 1.4,
-        }}>
-          {name}
-        </span>
-      ))}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+        {cast.map((name) => (
+          <span key={name} style={{
+            padding: '4px 10px', borderRadius: 20,
+            background: 'var(--bg-3)',
+            border: '1px solid var(--border-subtle)',
+            color: 'var(--text-1)',
+            fontSize: 11, whiteSpace: 'nowrap',
+            fontFamily: 'var(--font-ui)',
+          }}>
+            {name}
+          </span>
+        ))}
+      </div>
     </div>
   )
 }
