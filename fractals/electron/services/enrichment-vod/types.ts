@@ -38,13 +38,21 @@ export interface VodEnrichmentCandidate {
   awards: string[]
 
   // Images
-  poster_url: string | null  // best available (wikipedia thumbnail or wikidata P18 or imdb)
+  poster_url: string | null    // best available (wikipedia thumbnail or wikidata P18 or imdb)
+  backdrop_url: string | null  // widescreen backdrop — TMDB only
 
   // Series-specific (from TVmaze)
   status: string | null       // "Running" | "Ended" | "To Be Determined" | null
   network: string | null      // "AMC" | "Netflix" | null
   rating: number | null       // 0.0..10.0 (TVmaze rating.average)
   tvmaze_id: string | null
+
+  // TMDB-specific (optional key)
+  tmdb_vote_average: number | null  // 0.0..10.0 (TMDB community rating)
+  tmdb_vote_count: number | null
+  creator: string | null            // series — first created_by name
+  season_count: number | null       // series only
+  episode_count: number | null      // series only
 
   // Links
   wikipedia_url: string | null

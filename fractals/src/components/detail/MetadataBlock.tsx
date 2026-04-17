@@ -75,9 +75,10 @@ export function MetadataBlock({ item, isSeries, hideHero }: Props) {
   const rawHero = backdrop || poster
   const heroSrc = rawHero && !heroError ? rawHero : null
   const heroIsPosterFallback = !backdrop && !!poster
-  const rating = (item as any).tvmazeRating ?? item.ratingTmdb ?? item.rating_tmdb ?? item.ratingImdb ?? item.rating_imdb
+  const rating = item.tmdbRating ?? (item as any).tvmazeRating ?? item.ratingTmdb ?? item.rating_tmdb ?? item.ratingImdb ?? item.rating_imdb
   const tvmazeNetwork = (item as any).tvmazeNetwork ?? null
   const tvmazeStatus = (item as any).tvmazeStatus ?? null
+  const creator = item.tmdbCreator ?? null
   const genres = parseGenres(item.genres)
   const typeAccent = isSeries ? 'var(--accent-series)' : 'var(--accent-film)'
 
@@ -89,14 +90,19 @@ export function MetadataBlock({ item, isSeries, hideHero }: Props) {
   // Show raw subtitle when a prefix was stripped or the title contains non-ASCII (transliterated)
   const showRawSubtitle = !!mdPrefix || /[^\x00-\x7F]/.test(item.title)
 
-  // Content facts: year, runtime, rating, network, status, director
+  // Content facts: year, runtime, rating, network, status, director/creator
   const contentMeta: string[] = []
   if (item.year) contentMeta.push(String(item.year))
   if (item.runtime) contentMeta.push(formatRuntime(item.runtime))
   if (rating) contentMeta.push(`★ ${Number(rating).toFixed(1)}`)
+  if (isSeries && item.seasonCount) {
+    const ep = item.episodeCount ? ` · ${item.episodeCount} ep` : ''
+    contentMeta.push(`${item.seasonCount} season${item.seasonCount !== 1 ? 's' : ''}${ep}`)
+  }
   if (tvmazeNetwork) contentMeta.push(tvmazeNetwork)
-  if (tvmazeStatus && tvmazeStatus !== 'Running') contentMeta.push(tvmazeStatus)
-  if (item.director) contentMeta.push(item.director)
+  if (tvmazeStatus && tvmazeStatus !== 'Running' && tvmazeStatus !== 'Returning Series') contentMeta.push(tvmazeStatus)
+  const credit = isSeries ? (creator ?? item.director) : item.director
+  if (credit) contentMeta.push(credit)
 
   // Source tags: IPTV prefix + language, deduped (e.g. "DE" not "DE · DE")
   const sourceTags: string[] = []

@@ -8,9 +8,10 @@
  * Rate-limited to be neighbor-friendly with Wikipedia + Wikidata.
  */
 
-import { getSqlite } from '../../database/connection'
+import { getSqlite, getSetting } from '../../database/connection'
 import { enrichTitle, normalizeTitle, ALGO_VERSION } from './algo-v3'
 import { fetchTvmaze } from './sources/tvmaze'
+import { fetchTmdb } from './sources/tmdb'
 import type { EnrichProgress, VodEnrichmentCandidate, VodEnrichmentForContent, VodEnrichmentRow } from './types'
 
 // Minimum ms between title enrichment calls (Wikipedia/Wikidata rate-limit courtesy)
@@ -27,6 +28,71 @@ function mergeTvmaze(c: VodEnrichmentCandidate, tvmaze: NonNullable<Awaited<Retu
     cast: tvmaze.cast.length > 0 ? tvmaze.cast : c.cast,
     genres: tvmaze.genres.length > 0 ? tvmaze.genres : c.genres,
     sources_used: [...(c.sources_used ?? []), 'tvmaze'],
+  }
+}
+
+/** Read TMDB API key from settings. Returns null if disabled or key not set. */
+function getTmdbApiKey(): string | null {
+  const enabled = getSetting('tmdb_enabled')
+  if (enabled !== '1') return null
+  return getSetting('tmdb_api_key') || null
+}
+
+/** Merge TMDB data into a candidate. TMDB wins for backdrop, poster, vote average, cast, genres, overview. */
+function mergeTmdb(c: VodEnrichmentCandidate, tmdb: NonNullable<Awaited<ReturnType<typeof fetchTmdb>>>): VodEnrichmentCandidate {
+  return {
+    ...c,
+    tmdb_id: tmdb.tmdb_id,
+    backdrop_url: tmdb.backdrop_url,
+    poster_url: tmdb.poster_url ?? c.poster_url,
+    tmdb_vote_average: tmdb.vote_average,
+    tmdb_vote_count: tmdb.vote_count,
+    cast: tmdb.cast.length > 0 ? tmdb.cast : c.cast,
+    directors: tmdb.director ? [tmdb.director] : c.directors,
+    genres: tmdb.genres.length > 0 ? tmdb.genres : c.genres,
+    overview: tmdb.overview ?? c.overview,
+    runtime_min: tmdb.runtime_min ?? c.runtime_min,
+    // Series-specific
+    status: tmdb.status ?? c.status,
+    network: tmdb.network ?? c.network,
+    creator: tmdb.creator,
+    season_count: tmdb.season_count,
+    episode_count: tmdb.episode_count,
+    sources_used: [...(c.sources_used ?? []), 'tmdb'],
+  }
+}
+
+/**
+ * Augment already-enriched rows with TMDB data if not yet fetched.
+ * Non-destructive — updates raw_json in-place, doesn't re-run v3.
+ */
+async function augmentWithTmdb(contentId: string, db: ReturnType<typeof getSqlite>, apiKey: string) {
+  const isMovie = contentId.includes(':movie:')
+  const table = isMovie ? 'movie_enrichment_g2' : 'series_enrichment_g2'
+  const col = isMovie ? 'movie_id' : 'series_id'
+
+  const existing = db.prepare(
+    `SELECT id, imdb_id, tmdb_id, raw_json FROM ${table} WHERE ${col} = ? AND confidence > 0`
+  ).all(contentId) as Array<{ id: number; imdb_id: string | null; tmdb_id: string | null; raw_json: string }>
+
+  if (!existing.length) return
+  // Already has TMDB data
+  const firstRaw = (() => { try { return JSON.parse(existing[0].raw_json) } catch { return {} } })()
+  if (existing[0].tmdb_id && firstRaw.backdrop_url) return
+
+  const imdbId = existing[0].imdb_id
+  const tmdb = await fetchTmdb(imdbId, isMovie ? 'movie' : 'series', apiKey)
+  if (!tmdb) return
+
+  const update = db.prepare(`UPDATE ${table} SET tmdb_id = ?, raw_json = ? WHERE id = ?`)
+  for (const row of existing) {
+    try {
+      const candidate = JSON.parse(row.raw_json) as VodEnrichmentCandidate
+      const merged = mergeTmdb(candidate, tmdb)
+      update.run(tmdb.tmdb_id, JSON.stringify(merged), row.id)
+    } catch {
+      // Malformed raw_json — skip
+    }
   }
 }
 
@@ -168,6 +234,8 @@ export async function enrichForSource(
       message: item.title,
     })
 
+    const tmdbKey = getTmdbApiKey()
+
     const candidates = await enrichTitle({
       title: item.title,
       year: effectiveYear,
@@ -177,8 +245,12 @@ export async function enrichForSource(
       md_year: item.md_year ?? null,
       md_language: item.md_language ?? null,
     })
+    const resolvedImdbId = candidates[0]?.imdb_id ?? imdb_id ?? null
     const tvmaze = item.kind === 'series' && candidates.length > 0
-      ? await fetchTvmaze(candidates[0].imdb_id ?? imdb_id ?? null, item.title, effectiveYear)
+      ? await fetchTvmaze(resolvedImdbId, item.title, effectiveYear)
+      : null
+    const tmdb = candidates.length > 0 && tmdbKey
+      ? await fetchTmdb(resolvedImdbId, item.kind, tmdbKey)
       : null
 
     if (candidates.length === 0) {
@@ -196,7 +268,8 @@ export async function enrichForSource(
       db.prepare(`DELETE FROM ${table} WHERE ${col} = ?`).run(item.id)
 
       for (const c of candidates) {
-        const merged = tvmaze ? mergeTvmaze(c, tvmaze) : c
+        let merged = tvmaze ? mergeTvmaze(c, tvmaze) : c
+        if (tmdb) merged = mergeTmdb(merged, tmdb)
         if (item.kind === 'series') {
           insertSeries.run(
             item.id, ALGO_VERSION, merged.imdb_id ?? null, merged.tmdb_id ?? null,
@@ -222,6 +295,8 @@ export async function enrichForSource(
     current++
     onProgress({ phase: 'enriching', current, total, message: `TVmaze: ${item.title}` })
     await augmentSeriesWithTvmaze(item.id, db)
+    const tmdbKey = getTmdbApiKey()
+    if (tmdbKey) await augmentWithTmdb(item.id, db, tmdbKey)
     if (current < total) await delay(300)  // TVmaze-only calls are cheaper; shorter delay
   }
 
@@ -246,10 +321,10 @@ export async function enrichSingle(contentId: string, force = false): Promise<Vo
     // Already enriched with current algo version
     const existing = db.prepare(`SELECT 1 FROM ${table} WHERE ${col} = ? AND algo_version = ? AND confidence > 0 LIMIT 1`).get(contentId, ALGO_VERSION)
     if (existing) {
-      // For series: augment with TVmaze if not yet fetched
-      if (!isMovie) {
-        await augmentSeriesWithTvmaze(contentId, db)
-      }
+      // Augment with TVmaze / TMDB if not yet fetched
+      if (!isMovie) await augmentSeriesWithTvmaze(contentId, db)
+      const tmdbKey = getTmdbApiKey()
+      if (tmdbKey) await augmentWithTmdb(contentId, db, tmdbKey)
       return getForContent(contentId)
     }
   }
@@ -261,6 +336,8 @@ export async function enrichSingle(contentId: string, force = false): Promise<Vo
   const { year } = normalizeTitle(row.title)
   const effectiveYear = row.md_year ?? year
 
+  const tmdbKey = getTmdbApiKey()
+
   const candidates = await enrichTitle({
     title: row.title,
     year: effectiveYear,
@@ -270,8 +347,12 @@ export async function enrichSingle(contentId: string, force = false): Promise<Vo
     md_year: row.md_year ?? null,
     md_language: row.md_language ?? null,
   })
+  const resolvedImdbId = candidates[0]?.imdb_id ?? imdb_id ?? null
   const tvmaze = !isMovie && candidates.length > 0
-    ? await fetchTvmaze(candidates[0].imdb_id ?? imdb_id ?? null, row.title, effectiveYear)
+    ? await fetchTvmaze(resolvedImdbId, row.title, effectiveYear)
+    : null
+  const tmdb = candidates.length > 0 && tmdbKey
+    ? await fetchTmdb(resolvedImdbId, isMovie ? 'movie' : 'series', tmdbKey)
     : null
 
   if (candidates.length === 0) {
@@ -285,7 +366,8 @@ export async function enrichSingle(contentId: string, force = false): Promise<Vo
   } else {
     db.prepare(`DELETE FROM ${table} WHERE ${col} = ?`).run(contentId)
     for (const c of candidates) {
-      const merged = tvmaze ? mergeTvmaze(c, tvmaze) : c
+      let merged = tvmaze ? mergeTvmaze(c, tvmaze) : c
+      if (tmdb) merged = mergeTmdb(merged, tmdb)
       if (isMovie) {
         db.prepare(`INSERT OR REPLACE INTO ${table} (${col}, algo_version, imdb_id, tmdb_id, wikidata_qid, confidence, fetched_at, raw_json) VALUES (?, ?, ?, ?, ?, ?, unixepoch(), ?)`)
           .run(contentId, ALGO_VERSION, merged.imdb_id ?? null, merged.tmdb_id ?? null, merged.wikidata_qid ?? null, merged.confidence, JSON.stringify(merged))

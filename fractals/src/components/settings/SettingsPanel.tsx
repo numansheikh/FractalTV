@@ -584,6 +584,105 @@ function PlayerNote({ title, color, children }: { title: string; color: string; 
   )
 }
 
+/* ── Enrichment section (inside Data tab) ─────────────────────── */
+function EnrichmentSection() {
+  const [enabled, setEnabled] = useState(false)
+  const [apiKey, setApiKey] = useState('')
+  const [showKey, setShowKey] = useState(false)
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    api.settings.get('tmdb_enabled').then((v) => setEnabled(v === '1'))
+    api.settings.get('tmdb_api_key').then((v) => setApiKey(v ?? ''))
+  }, [])
+
+  const save = async (nextEnabled: boolean, nextKey: string) => {
+    await api.settings.set('tmdb_enabled', nextEnabled ? '1' : '0')
+    await api.settings.set('tmdb_api_key', nextKey)
+    setSaved(true)
+    setTimeout(() => setSaved(false), 2000)
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{
+        padding: '12px 14px', borderRadius: 8,
+        background: 'var(--bg-2)', border: '1px solid var(--border-subtle)',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-0)', marginBottom: 3 }}>TMDB</div>
+            <div style={{ fontSize: 11, color: 'var(--text-1)', lineHeight: 1.45 }}>
+              Adds backdrops, ratings, and cast from The Movie Database. Free API key required.
+            </div>
+          </div>
+          <button
+            onClick={() => { const next = !enabled; setEnabled(next); save(next, apiKey) }}
+            style={{
+              width: 36, height: 20, borderRadius: 10, border: 'none', cursor: 'pointer',
+              background: enabled ? 'var(--accent-interactive)' : 'var(--bg-3)',
+              position: 'relative', transition: 'background 0.15s', flexShrink: 0,
+            }}
+          >
+            <div style={{
+              width: 16, height: 16, borderRadius: 8, background: '#fff',
+              position: 'absolute', top: 2,
+              left: enabled ? 18 : 2,
+              transition: 'left 0.15s',
+            }} />
+          </button>
+        </div>
+
+        {enabled && (
+          <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <label style={{
+              fontSize: 10, color: 'var(--text-2)', fontWeight: 600,
+              letterSpacing: '0.04em', textTransform: 'uppercase',
+            }}>
+              API Key
+            </label>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <div style={{ position: 'relative', flex: 1 }}>
+                <input
+                  type={showKey ? 'text' : 'password'}
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  onBlur={() => save(enabled, apiKey)}
+                  placeholder="Paste your TMDB API key here"
+                  style={{
+                    width: '100%', boxSizing: 'border-box',
+                    background: 'var(--bg-1)', border: '1px solid var(--border-default)',
+                    borderRadius: 7, padding: '7px 32px 7px 10px',
+                    fontSize: 11, fontFamily: 'var(--font-mono)',
+                    color: 'var(--text-0)', outline: 'none',
+                  }}
+                  onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--accent-interactive)' }}
+                />
+                <button
+                  onClick={() => setShowKey((s) => !s)}
+                  style={{
+                    position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+                    background: 'none', border: 'none', cursor: 'pointer',
+                    color: 'var(--text-3)', padding: 2,
+                  }}
+                >
+                  {showKey
+                    ? <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                    : <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                  }
+                </button>
+              </div>
+            </div>
+            {saved && (
+              <span style={{ fontSize: 10, color: 'var(--accent-success)' }}>Saved</span>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 /* ── Data tab ──────────────────────────────────────────────────── */
 function DataTab() {
   const qc = useQueryClient()
@@ -704,7 +803,11 @@ function DataTab() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
-      {/* ── Enrichment — hidden until TMDB integration (g2+) ── */}
+      {/* ── Enrichment ── */}
+      <section>
+        <SectionLabel>Enrichment</SectionLabel>
+        <EnrichmentSection />
+      </section>
 
       {/* ── iptv-org reference database ── */}
       <IptvOrgRow />

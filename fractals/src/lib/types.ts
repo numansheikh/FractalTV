@@ -72,6 +72,13 @@ export interface ContentItem {
   tvmazeNetwork?: string | null
   tvmazeRating?: number | null
 
+  // TMDB enrichment fields
+  tmdbRating?: number | null
+  tmdbVoteCount?: number | null
+  tmdbCreator?: string | null   // series — equivalent of director
+  seasonCount?: number | null
+  episodeCount?: number | null
+
   // Continue-watching fields — present when returned from user:continue-watching
   last_position?: number
   last_watched_at?: number

@@ -80,11 +80,12 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
       })
       return
     }
-    // Already enriched — fire enrichSingle (no-op except TVmaze augmentation for missing tvmaze_id)
+    // Already enriched — fire enrichSingle if TVmaze or TMDB augment not yet done
     const best = enrichmentData.candidates[0]
     if (best && best.raw_json !== '{}') {
       try {
-        if (!JSON.parse(best.raw_json).tvmaze_id) {
+        const parsed = JSON.parse(best.raw_json)
+        if (!parsed.tvmaze_id || !parsed.tmdb_id) {
           enrichTriggered.current = true
           api.vodEnrich.enrichSingle(item.id).finally(refetchEnrichment)
         }
@@ -132,10 +133,17 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
     director: activeEnrichment?.directors?.join(', ') ?? c.director,
     genres: activeEnrichment?.genres?.join(', ') ?? c.genres,
     posterUrl: activeEnrichment?.poster_url ?? c.posterUrl ?? c.poster_url,
+    backdropUrl: activeEnrichment?.backdrop_url ?? c.backdropUrl ?? c.backdrop_url,
     // TVmaze fields
     tvmazeStatus: activeEnrichment?.status ?? null,
     tvmazeNetwork: activeEnrichment?.network ?? null,
     tvmazeRating: activeEnrichment?.rating ?? null,
+    // TMDB fields
+    tmdbRating: activeEnrichment?.tmdb_vote_average ?? null,
+    tmdbVoteCount: activeEnrichment?.tmdb_vote_count ?? null,
+    tmdbCreator: activeEnrichment?.creator ?? null,
+    seasonCount: activeEnrichment?.season_count ?? null,
+    episodeCount: activeEnrichment?.episode_count ?? null,
   }
 
   const hasCandidates = (enrichmentData?.candidates ?? []).some((r: any) => r.confidence > 0 && r.raw_json !== '{}')

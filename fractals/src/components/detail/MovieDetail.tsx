@@ -51,18 +51,31 @@ export function MovieDetail({ item, onPlay, onClose, onNavigate, isPlaying }: Pr
     staleTime: 60_000,
   })
 
-  // Auto-enrich on first open if no data exists
+  // Auto-enrich on first open; augment with TMDB if already enriched but missing tmdb_id
   useEffect(() => {
     if (enrichTriggered.current) return
     if (!enrichmentData) return
     if (enrichmentData.disabled) return
-    if (enrichmentData.candidates.some((c: any) => c.confidence > 0)) return
-    enrichTriggered.current = true
-    setEnrichingSingle(true)
-    api.vodEnrich.enrichSingle(item.id).finally(() => {
-      setEnrichingSingle(false)
-      refetchEnrichment()
-    })
+    const hasCandidates = enrichmentData.candidates.some((c: any) => c.confidence > 0)
+    if (!hasCandidates) {
+      enrichTriggered.current = true
+      setEnrichingSingle(true)
+      api.vodEnrich.enrichSingle(item.id).finally(() => {
+        setEnrichingSingle(false)
+        refetchEnrichment()
+      })
+      return
+    }
+    // Already enriched — augment with TMDB if tmdb_id missing
+    const best = enrichmentData.candidates[0]
+    if (best && best.raw_json !== '{}') {
+      try {
+        if (!JSON.parse(best.raw_json).tmdb_id) {
+          enrichTriggered.current = true
+          api.vodEnrich.enrichSingle(item.id).finally(refetchEnrichment)
+        }
+      } catch {}
+    }
   }, [enrichmentData, item.id, refetchEnrichment])
 
   const c = (enrichedItem as ContentItem | null) ?? item
@@ -91,7 +104,10 @@ export function MovieDetail({ item, onPlay, onClose, onNavigate, isPlaying }: Pr
     director: activeEnrichment?.directors?.join(', ') ?? c.director,
     genres: activeEnrichment?.genres?.join(', ') ?? c.genres,
     posterUrl: activeEnrichment?.poster_url ?? c.posterUrl ?? c.poster_url,
-    runtime: (c as any).runtime ?? (c as any).md_runtime ?? vodInfo?.runtime ?? undefined,
+    backdropUrl: activeEnrichment?.backdrop_url ?? c.backdropUrl ?? c.backdrop_url,
+    tmdbRating: activeEnrichment?.tmdb_vote_average ?? null,
+    tmdbVoteCount: activeEnrichment?.tmdb_vote_count ?? null,
+    runtime: (c as any).runtime ?? (c as any).md_runtime ?? activeEnrichment?.runtime_min ?? vodInfo?.runtime ?? undefined,
   }
   const primarySourceId = c.primarySourceId ?? c.primary_source_id ?? item.primarySourceId ?? item.primary_source_id ?? (item as any).source_ids ?? item.id?.split(':')[0]
   const sourceColor = primarySourceId ? colorMap[primarySourceId] : undefined
