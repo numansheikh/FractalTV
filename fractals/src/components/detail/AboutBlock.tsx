@@ -1,5 +1,4 @@
 import { ContentItem } from '@/lib/types'
-import { useSearchStore } from '@/stores/search.store'
 
 interface Props {
   item: ContentItem
@@ -11,9 +10,7 @@ function parseCast(raw: string | undefined): string[] {
   try { const p = JSON.parse(raw); return Array.isArray(p) ? p : [String(p)] } catch { return [raw] }
 }
 
-export function AboutBlock({ item, onClose }: Props) {
-  const setQuery = useSearchStore((s) => s.setQuery)
-
+export function AboutBlock({ item, onClose: _onClose }: Props) {
   const plot = item.plot ?? ''
   const cast = parseCast(item.cast)
 
@@ -33,29 +30,19 @@ export function AboutBlock({ item, onClose }: Props) {
           </span>
           <div style={{ display: 'flex', gap: 5, overflowX: 'auto', paddingBottom: 2 }}>
             {cast.slice(0, 12).map((name) => (
-              <button
+              <span
                 key={name}
-                onClick={() => { setQuery(name); onClose() }}
                 style={{
                   padding: '4px 10px', borderRadius: 20,
                   background: 'var(--bg-3)',
                   border: '1px solid var(--border-subtle)',
                   color: 'var(--text-1)',
-                  fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap',
+                  fontSize: 11, whiteSpace: 'nowrap',
                   fontFamily: 'var(--font-ui)', flexShrink: 0,
-                  transition: 'background 0.1s, color 0.1s',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = 'var(--bg-4)'
-                  e.currentTarget.style.color = 'var(--text-0)'
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'var(--bg-3)'
-                  e.currentTarget.style.color = 'var(--text-1)'
                 }}
               >
                 {name}
-              </button>
+              </span>
             ))}
           </div>
         </div>

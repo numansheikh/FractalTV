@@ -65,18 +65,31 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
     staleTime: 60_000,
   })
 
-  // Auto-enrich on first open if no data exists
+  // Auto-enrich on first open; for already-enriched series also trigger TVmaze augmentation.
   useEffect(() => {
     if (enrichTriggered.current) return
     if (!enrichmentData) return
     if (enrichmentData.disabled) return
-    if (enrichmentData.candidates.some((c: any) => c.confidence > 0)) return
-    enrichTriggered.current = true
-    setEnrichingSingle(true)
-    api.vodEnrich.enrichSingle(item.id).finally(() => {
-      setEnrichingSingle(false)
-      refetchEnrichment()
-    })
+    const hasCandidates = enrichmentData.candidates.some((c: any) => c.confidence > 0)
+    if (!hasCandidates) {
+      enrichTriggered.current = true
+      setEnrichingSingle(true)
+      api.vodEnrich.enrichSingle(item.id).finally(() => {
+        setEnrichingSingle(false)
+        refetchEnrichment()
+      })
+      return
+    }
+    // Already enriched — fire enrichSingle (no-op except TVmaze augmentation for missing tvmaze_id)
+    const best = enrichmentData.candidates[0]
+    if (best && best.raw_json !== '{}') {
+      try {
+        if (!JSON.parse(best.raw_json).tvmaze_id) {
+          enrichTriggered.current = true
+          api.vodEnrich.enrichSingle(item.id).finally(refetchEnrichment)
+        }
+      } catch {}
+    }
   }, [enrichmentData, item.id, refetchEnrichment])
 
   const { data: seriesInfo, isFetching: seriesFetching } = useQuery({
