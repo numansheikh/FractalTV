@@ -31,10 +31,14 @@ function mergeTvmaze(c: VodEnrichmentCandidate, tvmaze: NonNullable<Awaited<Retu
   }
 }
 
-/** Read TMDB API key from settings. Returns null if disabled or key not set. */
+/** Current enrichment level: 0=off, 1=keyless (v3+TVmaze), 2=TMDB */
+function getEnrichmentLevel(): '0' | '1' | '2' {
+  return ((getSetting('enrichment_level') as string) || '1') as '0' | '1' | '2'
+}
+
+/** Read TMDB API key from settings. Returns null if level !== 2 or key not set. */
 function getTmdbApiKey(): string | null {
-  const enabled = getSetting('tmdb_enabled')
-  if (enabled !== '1') return null
+  if (getEnrichmentLevel() !== '2') return null
   return getSetting('tmdb_api_key') || null
 }
 
@@ -167,6 +171,8 @@ export async function enrichForSource(
   onProgress: (p: EnrichProgress) => void,
   force = false,
 ): Promise<{ movies: number; series: number }> {
+  if (getEnrichmentLevel() === '0') return { movies: 0, series: 0 }
+
   const db = getSqlite()
 
   // Load all movies + series for source (include provider_metadata for imdb_id hints)
@@ -188,7 +194,8 @@ export async function enrichForSource(
   // Split: items needing full enrichment vs. already enriched but missing TVmaze/TMDB
   const toEnrich: typeof allItems = []
   const toAugment: typeof allItems = []
-  const tmdbKeyForSplit = getTmdbApiKey()
+  const enrichLevel = getEnrichmentLevel()
+  const tmdbKey = getTmdbApiKey()
   if (!force) {
     for (const item of allItems) {
       const table = item.kind === 'movie' ? 'movie_enrichment_g2' : 'series_enrichment_g2'
@@ -198,8 +205,8 @@ export async function enrichForSource(
       if (!row) {
         toEnrich.push(item)
       } else {
-        const needsTvmaze = item.kind === 'series' && !row.tvmaze_id
-        const needsTmdb = tmdbKeyForSplit && !row.tmdb_id
+        const needsTvmaze = enrichLevel === '1' && item.kind === 'series' && !row.tvmaze_id
+        const needsTmdb = enrichLevel === '2' && !!tmdbKey && !row.tmdb_id
         if (needsTvmaze || needsTmdb) toAugment.push(item)
       }
     }
@@ -238,8 +245,6 @@ export async function enrichForSource(
       message: item.title,
     })
 
-    const tmdbKey = getTmdbApiKey()
-
     const candidates = await enrichTitle({
       title: item.title,
       year: effectiveYear,
@@ -250,10 +255,10 @@ export async function enrichForSource(
       md_language: item.md_language ?? null,
     })
     const resolvedImdbId = candidates[0]?.imdb_id ?? imdb_id ?? null
-    const tvmaze = item.kind === 'series' && candidates.length > 0
+    const tvmaze = enrichLevel === '1' && item.kind === 'series' && candidates.length > 0
       ? await fetchTvmaze(resolvedImdbId, item.title, effectiveYear)
       : null
-    const tmdb = candidates.length > 0 && tmdbKey
+    const tmdb = enrichLevel === '2' && candidates.length > 0 && tmdbKey
       ? await fetchTmdb(resolvedImdbId, tmdbKey)
       : null
 
@@ -294,14 +299,13 @@ export async function enrichForSource(
     if (current < total) await delay(REQUEST_DELAY_MS)
   }
 
-  // Augment already-enriched series missing TVmaze data
+  // Augment already-enriched items missing TVmaze (level 1) or TMDB (level 2)
   for (const item of toAugment) {
     current++
-    onProgress({ phase: 'enriching', current, total, message: `TVmaze: ${item.title}` })
-    await augmentSeriesWithTvmaze(item.id, db)
-    const tmdbKey = getTmdbApiKey()
-    if (tmdbKey) await augmentWithTmdb(item.id, db, tmdbKey)
-    if (current < total) await delay(300)  // TVmaze-only calls are cheaper; shorter delay
+    onProgress({ phase: 'enriching', current, total, message: `Augmenting: ${item.title}` })
+    if (enrichLevel === '1' && item.kind === 'series') await augmentSeriesWithTvmaze(item.id, db)
+    if (enrichLevel === '2' && tmdbKey) await augmentWithTmdb(item.id, db, tmdbKey)
+    if (current < total) await delay(300)
   }
 
   onProgress({ phase: 'done', current: total, total, message: `Enriched ${doneMovies + doneSeries} titles` })
@@ -313,6 +317,8 @@ export async function enrichForSource(
  * Skips if rows already exist. Returns candidates after persisting.
  */
 export async function enrichSingle(contentId: string, force = false): Promise<VodEnrichmentForContent> {
+  if (getEnrichmentLevel() === '0') return getForContent(contentId)
+
   const db = getSqlite()
   const isMovie = contentId.includes(':movie:')
   const table = isMovie ? 'movie_enrichment_g2' : 'series_enrichment_g2'
@@ -325,10 +331,13 @@ export async function enrichSingle(contentId: string, force = false): Promise<Vo
     // Already enriched with current algo version
     const existing = db.prepare(`SELECT 1 FROM ${table} WHERE ${col} = ? AND algo_version = ? AND confidence > 0 LIMIT 1`).get(contentId, ALGO_VERSION)
     if (existing) {
-      // Augment with TVmaze / TMDB if not yet fetched
-      if (!isMovie) await augmentSeriesWithTvmaze(contentId, db)
-      const tmdbKey = getTmdbApiKey()
-      if (tmdbKey) await augmentWithTmdb(contentId, db, tmdbKey)
+      const level = getEnrichmentLevel()
+      // Augment with TVmaze (level 1 series only) or TMDB (level 2)
+      if (level === '1' && !isMovie) await augmentSeriesWithTvmaze(contentId, db)
+      if (level === '2') {
+        const tmdbKey = getTmdbApiKey()
+        if (tmdbKey) await augmentWithTmdb(contentId, db, tmdbKey)
+      }
       return getForContent(contentId)
     }
   }
@@ -340,6 +349,7 @@ export async function enrichSingle(contentId: string, force = false): Promise<Vo
   const { year } = normalizeTitle(row.title)
   const effectiveYear = row.md_year ?? year
 
+  const level = getEnrichmentLevel()
   const tmdbKey = getTmdbApiKey()
 
   const candidates = await enrichTitle({
@@ -352,10 +362,10 @@ export async function enrichSingle(contentId: string, force = false): Promise<Vo
     md_language: row.md_language ?? null,
   })
   const resolvedImdbId = candidates[0]?.imdb_id ?? imdb_id ?? null
-  const tvmaze = !isMovie && candidates.length > 0
+  const tvmaze = level === '1' && !isMovie && candidates.length > 0
     ? await fetchTvmaze(resolvedImdbId, row.title, effectiveYear)
     : null
-  const tmdb = candidates.length > 0 && tmdbKey
+  const tmdb = level === '2' && candidates.length > 0 && tmdbKey
     ? await fetchTmdb(resolvedImdbId, tmdbKey)
     : null
 

@@ -187,8 +187,15 @@ Plain `LIKE '%query%'` on a persisted `search_title` column (any-ascii + lowerca
 ### Multi-source deduplication (not planned in g1c)
 Same movie from two sources appears as two items. This is a permanent g1c tradeoff — canonical identity is not on the roadmap (it was the biggest complexity source in the discarded g2-flat branch).
 
-### VoD Enrichment (g2)
-Keyless pipeline: Wikipedia REST + Wikidata + IMDb suggest. Auto-enriches on first detail panel open. Per-field fallback merge (enrichment → stream data). "Not this film?" picker for manual candidate selection. `enrichment_disabled` flag per content row. Source-level bulk enrich button. No TMDB/OMDb API keys required.
+### VoD Enrichment (g3)
+3-level user-selectable pipeline (Settings → Data → Enrichment):
+- **Level 0** — off, stream data only
+- **Level 1** — keyless default: v3 (FM-DB + Wikidata/Wikipedia) + TVmaze for series
+- **Level 2** — TMDB (free API key required): replaces v3.2 + TVmaze, best quality
+
+Setting stored as `enrichment_level` (`"0"` | `"1"` | `"2"`) in SQLite settings table. `tmdb_api_key` stored alongside. Auto-enriches on first detail panel open. Per-field fallback merge (enrichment → stream data). "Not this film?" picker for manual candidate selection. `enrichment_disabled` flag per content row. Source-level bulk enrich button.
+
+`md_*` columns (prefix, language, year, quality) are populated by local title parsing — always available regardless of enrichment level.
 
 ### Catchup / Timeshift
 For live TV channels with catchup support:
@@ -364,7 +371,7 @@ Canonical identity / deduplication is not on the roadmap — it's a permanent g1
 **g1 — Complete (2026-04-12).** Pure provider-data app on 12 tables. LIKE search with debounce. User data survived resync.
 **g1c — Complete (2026-04-14).** Per-type 15-table split. LIKE on `search_title` (any-ascii + lowercase, inline at sync). Two-button pipeline (Test → Sync; EPG auto-chains inside Sync for Xtream). FTS5 tried and removed. Enrichment pipeline (iptv-org / Wikidata / IMDb-suggest / indexing worker) deleted.
 **g2 — Complete (branch: g2, 2026-04-17).** iptv-org ingestion, unified detail panels, mini player (draggable, always-floating for VoD), NSFW filtering, EPG sync button, VoD enrichment (keyless, TVmaze sequential after v3), movie duration, episode surf (Prev/Next pills + PgUp/PgDn), M3U parity, ADV search. See PLAN.md for full shipped list.
-**g3 — In progress (branch: g3).** TMDB enrichment, design overhaul, daisy-chain sync, code sweep.
+**g3 — In progress (branch: g3).** Shipped: TMDB enrichment (key-gated level 2), 3-level enrichment picker, genre pills + cast panel in detail views, post-sync auto-chain (iptv-org match → populate metadata). Remaining: design overhaul, code sweep.
 **Phase 3 — Not started.** Capacitor for Android/iOS/TV, Tizen.
 
 ### g1c features (current state)

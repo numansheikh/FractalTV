@@ -78,6 +78,72 @@ function dbPath(): string {
 // `activeSyncWorkers` allows cancel mid-flight.
 const activeSyncWorkers = new Map<string, Worker>()
 
+// Tracks running post-sync chains (iptv-org match + populate metadata).
+// Deleting a sourceId from this set signals cancellation to the running chain.
+const activePostSyncChains = new Set<string>()
+
+/** Extract populate metadata logic so it can be called from the post-sync chain. */
+async function runPopulateMetadata(
+  sourceId: string,
+  sqlite: ReturnType<typeof getSqlite>,
+  onProgress?: (msg: string) => void,
+): Promise<void> {
+  const BATCH = 1000
+  for (const [table, label] of [
+    ['movies', 'movies'],
+    ['series', 'series'],
+    ['channels', 'channels'],
+  ] as [string, string][]) {
+    const total = (sqlite.prepare(`SELECT COUNT(*) as n FROM ${table} WHERE source_id = ?`).get(sourceId) as { n: number }).n
+    let processed = 0
+    const updateStmt = sqlite.prepare(
+      `UPDATE ${table} SET md_prefix = ?, md_language = ?, md_year = ?, md_quality = ?, is_nsfw = ? WHERE id = ?`
+    )
+    while (processed < total) {
+      const rows = sqlite.prepare(
+        `SELECT id, title FROM ${table} WHERE source_id = ? LIMIT ? OFFSET ?`
+      ).all(sourceId, BATCH, processed) as { id: string; title: string }[]
+      if (!rows.length) break
+      sqlite.transaction(() => {
+        for (const row of rows) {
+          const p = parseTitle(row.title)
+          updateStmt.run(p.mdPrefix, p.mdLanguage, p.mdYear, p.mdQuality, p.isNsfw, row.id)
+        }
+      })()
+      processed += rows.length
+      onProgress?.(`Populating metadata… ${label} ${processed}/${total}`)
+    }
+  }
+}
+
+/** Run iptv-org match → populate metadata sequentially after sync+EPG complete. */
+async function runPostSyncChain(
+  sourceId: string,
+  win: BrowserWindow | null,
+  sqlite: ReturnType<typeof getSqlite>,
+): Promise<void> {
+  activePostSyncChains.add(sourceId)
+  const send = (message: string) =>
+    win?.webContents.send('sync:progress', { sourceId, phase: 'post-sync', current: 0, total: 0, message })
+  const cancelled = () => !activePostSyncChains.has(sourceId)
+
+  try {
+    if (cancelled()) return
+    send('Matching channels…')
+    iptvOrgMatchSource(sourceId)
+    applyNsfwFlags(sqlite)
+
+    if (cancelled()) return
+    await runPopulateMetadata(sourceId, sqlite, send)
+
+    if (!cancelled()) {
+      win?.webContents.send('sync:progress', { sourceId, phase: 'done', current: 0, total: 0, message: 'Ready' })
+    }
+  } finally {
+    activePostSyncChains.delete(sourceId)
+  }
+}
+
 // ─── Content type detection ───────────────────────────────────────────────
 // Content IDs follow the format `{sourceId}:{kind}:{external_id}` where kind
 // is one of 'live' | 'movie' | 'series' | 'episode'.
@@ -568,6 +634,9 @@ export function registerHandlers() {
 
     const SYNC_TIMEOUT_MS = 15 * 60 * 1000 // 15 minutes
 
+    // Cancel any running post-sync chain for this source before starting fresh
+    activePostSyncChains.delete(sourceId)
+
     return new Promise((resolve) => {
       const worker = new Worker(workerPath, { workerData: wData })
       activeSyncWorkers.set(sourceId, worker)
@@ -615,16 +684,17 @@ export function registerHandlers() {
           }
 
           runEpgChain().then((epgResult) => {
-            applyNsfwFlags(sqlite)
             const syncMsg = `Synced ${msg.catCount} categories, ${msg.totalItems.toLocaleString()} items`
-            const doneMsg = epgResult
-              ? (epgResult.error ? `${syncMsg} · EPG failed: ${epgResult.error}` : `${syncMsg} · EPG ${Number(epgResult.inserted ?? 0).toLocaleString()} entries`)
-              : syncMsg
+            const epgSuffix = epgResult
+              ? (epgResult.error ? ` · EPG failed: ${epgResult.error}` : ` · EPG ${Number(epgResult.inserted ?? 0).toLocaleString()} entries`)
+              : ''
             win?.webContents.send('sync:progress', {
-              sourceId, phase: 'done', current: msg.totalItems, total: msg.totalItems,
-              message: doneMsg,
+              sourceId, phase: 'post-sync', current: msg.totalItems, total: msg.totalItems,
+              message: syncMsg + epgSuffix,
             })
             resolve({ success: true })
+            // Chain: iptv-org match → populate metadata (fire and forget)
+            runPostSyncChain(sourceId, win, sqlite).catch(() => {})
           })
         } else if (msg.type === 'warning') {
           win?.webContents.send('sync:progress', {
@@ -1514,50 +1584,8 @@ export function registerHandlers() {
       BrowserWindow.getAllWindows()[0]?.webContents.send('metadata:progress', { sourceId, ...p })
 
     // Fire and forget — returns immediately
-    ;(async () => {
-      const sqlite = getSqlite()
-      const BATCH = 1000
-
-      for (const [table, label] of [
-        ['movies', 'movies'],
-        ['series', 'series'],
-        ['channels', 'channels'],
-      ] as [string, string][]) {
-        const total = (sqlite.prepare(`SELECT COUNT(*) as n FROM ${table} WHERE source_id = ?`).get(sourceId) as { n: number }).n
-        let processed = 0
-
-        const updateStmt = sqlite.prepare(
-          `UPDATE ${table} SET
-            md_prefix   = ?,
-            md_language = ?,
-            md_year     = ?,
-            md_quality  = ?,
-            is_nsfw     = ?
-          WHERE id = ?`
-        )
-
-        while (processed < total) {
-          const rows = sqlite.prepare(
-            `SELECT id, title FROM ${table} WHERE source_id = ? LIMIT ? OFFSET ?`
-          ).all(sourceId, BATCH, processed) as { id: string; title: string }[]
-
-          if (!rows.length) break
-
-          const run = sqlite.transaction(() => {
-            for (const row of rows) {
-              const p = parseTitle(row.title)
-              updateStmt.run(p.mdPrefix, p.mdLanguage, p.mdYear, p.mdQuality, p.isNsfw, row.id)
-            }
-          })
-          run()
-
-          processed += rows.length
-          broadcast({ phase: 'progress', label, current: processed, total })
-        }
-      }
-
-      broadcast({ phase: 'done', current: 0, total: 0 })
-    })()
+    runPopulateMetadata(sourceId, getSqlite(), (msg) => broadcast({ phase: 'progress', message: msg }))
+      .then(() => broadcast({ phase: 'done', current: 0, total: 0 }))
       .catch((e) => {
         const message = e instanceof Error ? e.message : String(e)
         broadcast({ phase: 'error', current: 0, total: 0, error: message })
