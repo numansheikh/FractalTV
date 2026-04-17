@@ -73,13 +73,12 @@ FTS5 is **not** on this list — tried twice, rejected both times at this catalo
 
 ## Generation roadmap
 
-### g3 — Product polish & enrichment
+### g3 — Enrichment, polish & cleanup
 
 - TMDB/OMDb enrichment — optional API key in Settings, supplements keyless pipeline
-- Design system overhaul — borders + lavender, token refresh, contrast
-- Settings live-apply — no page refresh required
-- Mark all episodes watched — batch episode_user_data
-- Content type correction — flag non-film in movies table (~7.3%)
+- Visual design revamp
+- Daisy-chain sync worker — auto-run Populate Metadata after sync (like EPG auto-chains)
+- Full code sweep — ~143 `as any` casts, dead code, stale comments, accumulated debt
 
 ### g4 — Multi-platform & product tiers
 
@@ -138,5 +137,4 @@ FTS5 is **not** on this list — tried twice, rejected both times at this catalo
 
 ## g2 — queued
 
-- **Full code sweep** — ~143 `as any` casts, dead code, stale comments, accumulated g2 debt.
-- **Daisy-chain sync worker** — auto-run Populate Metadata after sync (like EPG auto-chains).
+None. Remaining work moved to g3.

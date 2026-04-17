@@ -1,17 +1,11 @@
 # Fractals — TODO
 
-## Remaining g2
-
-- [ ] **Full code sweep** — TypeScript `any` elimination (~143 casts, worst in `lib/api.ts` / `PlayerOverlay` / `ipc/handlers.ts`), dead code, logic issues, stale comments, accumulated g2 debt.
-- [ ] **Daisy-chain sync worker** — auto-run Populate Metadata after sync completes (like EPG auto-chains). Pipeline becomes: Test → Sync → (auto: Populate Metadata + EPG).
-
 ## g3
 
 - [ ] TMDB/OMDb enrichment (optional API key, supplements keyless pipeline)
-- [ ] Design system overhaul (borders + lavender)
-- [ ] Settings live-apply (no page refresh)
-- [ ] Mark all episodes watched
-- [ ] Content type correction (7.3% non-film in movies table)
+- [ ] Visual design revamp
+- [ ] Daisy-chain sync worker — auto-run Populate Metadata after sync (like EPG auto-chains)
+- [ ] Full code sweep — ~143 `as any` casts, dead code, stale comments, accumulated debt
 
 ## g4
 
