@@ -168,20 +168,18 @@ export async function enrichForSource(
       message: item.title,
     })
 
-    const [candidates, tvmaze] = await Promise.all([
-      enrichTitle({
-        title: item.title,
-        year: effectiveYear,
-        imdb_id: imdb_id ?? null,
-        tmdb_id: tmdb_id ?? null,
-        search_title: item.search_title ?? null,
-        md_year: item.md_year ?? null,
-        md_language: item.md_language ?? null,
-      }),
-      item.kind === 'series'
-        ? fetchTvmaze(imdb_id ?? null, item.title, effectiveYear)
-        : Promise.resolve(null),
-    ])
+    const candidates = await enrichTitle({
+      title: item.title,
+      year: effectiveYear,
+      imdb_id: imdb_id ?? null,
+      tmdb_id: tmdb_id ?? null,
+      search_title: item.search_title ?? null,
+      md_year: item.md_year ?? null,
+      md_language: item.md_language ?? null,
+    })
+    const tvmaze = item.kind === 'series' && candidates.length > 0
+      ? await fetchTvmaze(candidates[0].imdb_id ?? imdb_id ?? null, item.title, effectiveYear)
+      : null
 
     if (candidates.length === 0) {
       // Sentinel row — prevents re-hitting on every detail open
@@ -263,20 +261,18 @@ export async function enrichSingle(contentId: string, force = false): Promise<Vo
   const { year } = normalizeTitle(row.title)
   const effectiveYear = row.md_year ?? year
 
-  const [candidates, tvmaze] = await Promise.all([
-    enrichTitle({
-      title: row.title,
-      year: effectiveYear,
-      imdb_id: imdb_id ?? null,
-      tmdb_id: tmdb_id ?? null,
-      search_title: row.search_title ?? null,
-      md_year: row.md_year ?? null,
-      md_language: row.md_language ?? null,
-    }),
-    !isMovie
-      ? fetchTvmaze(imdb_id ?? null, row.title, effectiveYear)
-      : Promise.resolve(null),
-  ])
+  const candidates = await enrichTitle({
+    title: row.title,
+    year: effectiveYear,
+    imdb_id: imdb_id ?? null,
+    tmdb_id: tmdb_id ?? null,
+    search_title: row.search_title ?? null,
+    md_year: row.md_year ?? null,
+    md_language: row.md_language ?? null,
+  })
+  const tvmaze = !isMovie && candidates.length > 0
+    ? await fetchTvmaze(candidates[0].imdb_id ?? imdb_id ?? null, row.title, effectiveYear)
+    : null
 
   if (candidates.length === 0) {
     if (isMovie) {
