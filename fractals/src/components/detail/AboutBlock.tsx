@@ -32,7 +32,7 @@ export function CastPanel({ cast }: { cast: string[] }) {
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
         {cast.map((name) => (
           <span key={name} style={{
-            padding: '4px 10px', borderRadius: 20,
+            padding: '2px 7px', borderRadius: 20,
             background: 'var(--bg-2)',
             border: '1px solid var(--border-default)',
             color: 'var(--text-1)',
