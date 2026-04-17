@@ -16,7 +16,7 @@ Architecture, tech stack, schema, conventions, design language: see `fractals/CL
 | 2.5 | Complete | V3 data model + search (canonical split, association layer, MetadataProvider, advanced search, two-phase sync) |
 | g1 | Complete | Strip to pure provider-data app. 12 tables. LIKE search + debounce. |
 | g1c | **Complete** | 15-table per-type split. LIKE on `search_title` (inline at sync). Test → Sync pipeline (EPG auto-chains). VoD card redesign, vocabulary sweep, Channel Detail panel (logo/title/actions + Schedule section + EPG identity) + card Details buttons. Continue-watching invalidation bug fixed (2026-04-15). Tech cleanup: `tsconfig.node.json` fixed, Electron sandbox enabled. |
-| g2 | **In progress** | iptv-org ingestion, detail panels, mini player, NSFW filtering, EPG sync, M3U parity, ADV search |
+| g2 | **Complete** | iptv-org ingestion, detail panels, mini player, NSFW filtering, EPG sync, M3U parity, ADV search, TVmaze enrichment |
 | g3 | Not started | TMDB enrichment, design overhaul, settings live-apply |
 | g4 | Not started | Capacitor (Android/iOS/TV), Tizen, three-tier product split |
 
@@ -123,17 +123,23 @@ FTS5 is **not** on this list — tried twice, rejected both times at this catalo
 - **Bug fixes** — SeriesPosterCard double-wrapped `resume_episode_id`, LibraryView unsafe `clearId` fallback, SeriesDetail dead code in resume match, MovieDetail resume label on play button.
 - **M3U source parity** — two-pass series detection in sync worker (`parseSeriesTitle` + URL `/series/` classification); `series:get-info` M3U early return (DB query, no Xtream API); `content:get-stream-url` returns headers for M3U; SeriesDetail conditional Xtream vs M3U; guessType priority fix (URL path over duration); M3U EPG support (`epg_url` from `url-tvg`/`x-tvg-url`); `#EXTVLCOPT` parsing (User-Agent, Referer, Origin → `provider_metadata`); HTTP headers to HLS.js + mpv + VLC; parser consolidated to `electron/lib/m3u-parser.ts`.
 - **Source toggle refresh** — individual + bulk enable/disable → `queryClient.invalidateQueries()` refreshes all views.
+- **TVmaze enrichment** — free API (no key), series-only. Phase A: `tvmaze.ts` source (IMDb-first lookup, title fallback, year ±2 guard). Phase B: `mergeTvmaze()` fills status/network/rating/cast/genres/tvmaze_id; `augmentSeriesWithTvmaze()` backfills already-enriched series missing `tvmaze_id`. Displayed in MetadataBlock (rating star, network, status). `tvmaze_id` column migrated into `series_enrichment_g2` via `addTvmazeIdColumn()`.
+- **Phase C — mini player overhaul** — embedded player zones removed from MovieDetail and SeriesDetail. VoD now always starts in floating mini player. Mini player is draggable (top-bar drag handle, position persisted to localStorage). Live channels keep their ChannelDetail embedded player (separate architecture).
+- **Sequential TVmaze calls** — v3 enrichment runs first; TVmaze called only if v3 found a match (uses v3-resolved IMDb ID). `Promise.all` → sequential in both `enrichSingle` and `enrichForSource`. Safer for rate limits; TVmaze gets the better IMDb ID from v3.
+- **Plot always full** — removed show more/show less clamp; panel scrolls.
+- **Cast pills non-interactive** — pills are plain labels (no search link, not buttons).
 
 ## Snapshot (2026-04-17)
 
-- Phase state: **g2 in progress** (g1c shipped, g2 builds on top)
-- Active branch: `g2`
-- DB: 15 tables + enrichment tables (`movie_enrichment_g2`, `series_enrichment_g2`). Per-type split for content/categories/user-data, no canonical, no FTS.
+- Phase state: **g2 complete** → g3 active
+- Active branch: `g3`
+- DB: 15 tables + enrichment tables (`movie_enrichment_g2`, `series_enrichment_g2` with `tvmaze_id`). Per-type split for content/categories/user-data, no canonical, no FTS.
 - Search: LIKE on `search_title` (plain). ADV search (`@` prefix): tokenized parser with auto-detected `md_*` filters + title LIKE fallback. No FTS.
 - Pipeline: Test → Sync → Populate Metadata (manual). Ingest states `added → tested → synced → epg_fetched`. EPG auto-chains for Xtream sources.
 - Security: Electron sandbox enabled, contextIsolation on, nodeIntegration off. NSFW default-off (opt-in).
-- Player: episode surf (PgUp/PgDn + Cmd+↑/↓, Prev/Next pills), episode click→embedded in detail panels, resume-aware autoplay.
+- Player: episode surf (PgUp/PgDn + Cmd+↑/↓, Prev/Next pills), VoD always starts in draggable floating mini player, resume-aware autoplay.
 - M3U sources: full parity with Xtream (channels, movies, series+episodes, EPG, HTTP headers).
+- Enrichment: keyless pipeline (Wikipedia REST + Wikidata + IMDb suggest + TVmaze). Auto-enrich on first detail open. TVmaze sequential after v3.
 
 ## g2 — queued
 

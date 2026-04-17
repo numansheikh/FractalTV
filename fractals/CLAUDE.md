@@ -363,7 +363,8 @@ Canonical identity / deduplication is not on the roadmap — it's a permanent g1
 **Phase 0–2.5 — Complete.** Core through V3 data model.
 **g1 — Complete (2026-04-12).** Pure provider-data app on 12 tables. LIKE search with debounce. User data survived resync.
 **g1c — Complete (2026-04-14).** Per-type 15-table split. LIKE on `search_title` (any-ascii + lowercase, inline at sync). Two-button pipeline (Test → Sync; EPG auto-chains inside Sync for Xtream). FTS5 tried and removed. Enrichment pipeline (iptv-org / Wikidata / IMDb-suggest / indexing worker) deleted.
-**g2 — In progress (branch: g2).** iptv-org ingestion, unified detail panels, mini player, NSFW filtering, EPG sync button, VoD enrichment (keyless), movie duration, episode surf (Prev/Next pills + PgUp/PgDn), episode click→embedded mode, series resume fixes. See PLAN.md for full shipped list.
+**g2 — Complete (branch: g2, 2026-04-17).** iptv-org ingestion, unified detail panels, mini player (draggable, always-floating for VoD), NSFW filtering, EPG sync button, VoD enrichment (keyless, TVmaze sequential after v3), movie duration, episode surf (Prev/Next pills + PgUp/PgDn), M3U parity, ADV search. See PLAN.md for full shipped list.
+**g3 — In progress (branch: g3).** TMDB enrichment, design overhaul, daisy-chain sync, code sweep.
 **Phase 3 — Not started.** Capacitor for Android/iOS/TV, Tizen.
 
 ### g1c features (current state)
@@ -417,12 +418,13 @@ Canonical identity / deduplication is not on the roadmap — it's a permanent g1
 - Embedded overlay z-index 30 (above ArtPlayer `.art-mask` at 20)
 - Reconnect overlay: 5-attempt exponential backoff with spinner + attempt counter
 - Episode surf: Prev/Next pills in fullscreen player for series episodes (bounded by season, no wrap). Keyboard: PgUp/PgDn + Cmd+↑/↓. `episodeSurfList`/`episodeSurfIndex` in app store.
+- VoD (movie/series) always starts in floating mini player — no embedded zone in detail panels. Mini player is draggable via top-bar drag handle; position persisted to `localStorage` key `fractals:mini-player-pos`.
 
 **Detail panels**
 - Unified spine via `DetailShell` (close + type badge + source indicator + breadcrumbs + scrollable body). All three types share the same chrome.
 - Channel: 380px, logo + title + EPG schedule + tvg-id block
-- Movie: 380px, hero strip + metadata + actions + plot/cast; VoD enrichment (auto-enrich on open, "Not this film?" picker); duration from `md_runtime`
-- Series: 700px (380 right + 320 left), left column season coins + episode list, right column shares the movie spine; `activeSeason` persisted across reopens; episode click → embedded player (not fullscreen); resume-aware autoplay gated on continue-watching data
+- Movie: 380px, hero strip + metadata + actions + plot/cast; VoD enrichment (auto-enrich on open, "Not this film?" picker); duration from `md_runtime`. Play always opens floating mini player.
+- Series: 700px (380 right + 320 left), left column season coins + episode list, right column shares the movie spine; `activeSeason` persisted across reopens; play/episode click → floating mini player; resume-aware autoplay gated on continue-watching data
 - Hero strip: backdrop when present, else blurred poster scaled to fit, else a type-accent gradient with title initials. Broken image URLs fall back to the gradient.
 - Action buttons per-type: live = play + favorite; movie = full set (play/resume, favorite, watchlist, rating, clear history); series = play + favorite + watchlist + rating
 - 2s autoplay embedded mini player in all three panel types
