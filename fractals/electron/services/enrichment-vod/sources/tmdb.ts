@@ -134,10 +134,10 @@ async function fetchSeriesDetails(tmdbId: string, apiKey: string): Promise<TmdbD
 /**
  * Fetch TMDB data for a content item using its IMDb ID.
  * Returns null if key is missing, IMDb ID is unavailable, or any request fails.
+ * Kind is determined by TMDB's /find result, not the caller — TMDB is authoritative.
  */
 export async function fetchTmdb(
   imdbId: string | null,
-  kind: 'movie' | 'series',
   apiKey: string,
 ): Promise<TmdbData | null> {
   if (!imdbId || !apiKey) return null

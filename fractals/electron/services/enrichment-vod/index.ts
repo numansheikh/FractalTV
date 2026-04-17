@@ -40,6 +40,7 @@ function getTmdbApiKey(): string | null {
 
 /** Merge TMDB data into a candidate. TMDB wins for backdrop, poster, vote average, cast, genres, overview. */
 function mergeTmdb(c: VodEnrichmentCandidate, tmdb: NonNullable<Awaited<ReturnType<typeof fetchTmdb>>>): VodEnrichmentCandidate {
+  const isSeries = tmdb.season_count !== null || tmdb.episode_count !== null
   return {
     ...c,
     tmdb_id: tmdb.tmdb_id,
@@ -52,9 +53,9 @@ function mergeTmdb(c: VodEnrichmentCandidate, tmdb: NonNullable<Awaited<ReturnTy
     genres: tmdb.genres.length > 0 ? tmdb.genres : c.genres,
     overview: tmdb.overview ?? c.overview,
     runtime_min: tmdb.runtime_min ?? c.runtime_min,
-    // Series-specific
-    status: tmdb.status ?? c.status,
-    network: tmdb.network ?? c.network,
+    // Series-specific — don't overwrite with TMDB's movie status ("Released")
+    status: isSeries ? (tmdb.status ?? c.status) : c.status,
+    network: isSeries ? (tmdb.network ?? c.network) : c.network,
     creator: tmdb.creator,
     season_count: tmdb.season_count,
     episode_count: tmdb.episode_count,
@@ -76,12 +77,11 @@ async function augmentWithTmdb(contentId: string, db: ReturnType<typeof getSqlit
   ).all(contentId) as Array<{ id: number; imdb_id: string | null; tmdb_id: string | null; raw_json: string }>
 
   if (!existing.length) return
-  // Already has TMDB data
-  const firstRaw = (() => { try { return JSON.parse(existing[0].raw_json) } catch { return {} } })()
-  if (existing[0].tmdb_id && firstRaw.backdrop_url) return
+  // Already has TMDB data — tmdb_id column is the canonical flag
+  if (existing[0].tmdb_id) return
 
   const imdbId = existing[0].imdb_id
-  const tmdb = await fetchTmdb(imdbId, isMovie ? 'movie' : 'series', apiKey)
+  const tmdb = await fetchTmdb(imdbId, apiKey)
   if (!tmdb) return
 
   const update = db.prepare(`UPDATE ${table} SET tmdb_id = ?, raw_json = ? WHERE id = ?`)
@@ -185,18 +185,22 @@ export async function enrichForSource(
     ...seriesItems.map((s) => ({ ...s, kind: 'series' as const })),
   ]
 
-  // Split: items needing full enrichment vs. series already enriched but missing TVmaze
+  // Split: items needing full enrichment vs. already enriched but missing TVmaze/TMDB
   const toEnrich: typeof allItems = []
   const toAugment: typeof allItems = []
+  const tmdbKeyForSplit = getTmdbApiKey()
   if (!force) {
     for (const item of allItems) {
       const table = item.kind === 'movie' ? 'movie_enrichment_g2' : 'series_enrichment_g2'
       const col = item.kind === 'movie' ? 'movie_id' : 'series_id'
-      const row = db.prepare(`SELECT tvmaze_id FROM ${table} WHERE ${col} = ? AND algo_version = ? LIMIT 1`).get(item.id, ALGO_VERSION) as { tvmaze_id: string | null } | undefined
+      const selectCols = item.kind === 'series' ? 'tvmaze_id, tmdb_id' : 'tmdb_id'
+      const row = db.prepare(`SELECT ${selectCols} FROM ${table} WHERE ${col} = ? AND algo_version = ? LIMIT 1`).get(item.id, ALGO_VERSION) as { tvmaze_id?: string | null; tmdb_id: string | null } | undefined
       if (!row) {
         toEnrich.push(item)
-      } else if (item.kind === 'series' && !row.tvmaze_id) {
-        toAugment.push(item)
+      } else {
+        const needsTvmaze = item.kind === 'series' && !row.tvmaze_id
+        const needsTmdb = tmdbKeyForSplit && !row.tmdb_id
+        if (needsTvmaze || needsTmdb) toAugment.push(item)
       }
     }
   } else {
@@ -250,7 +254,7 @@ export async function enrichForSource(
       ? await fetchTvmaze(resolvedImdbId, item.title, effectiveYear)
       : null
     const tmdb = candidates.length > 0 && tmdbKey
-      ? await fetchTmdb(resolvedImdbId, item.kind, tmdbKey)
+      ? await fetchTmdb(resolvedImdbId, tmdbKey)
       : null
 
     if (candidates.length === 0) {
@@ -352,7 +356,7 @@ export async function enrichSingle(contentId: string, force = false): Promise<Vo
     ? await fetchTvmaze(resolvedImdbId, row.title, effectiveYear)
     : null
   const tmdb = candidates.length > 0 && tmdbKey
-    ? await fetchTmdb(resolvedImdbId, isMovie ? 'movie' : 'series', tmdbKey)
+    ? await fetchTmdb(resolvedImdbId, tmdbKey)
     : null
 
   if (candidates.length === 0) {
