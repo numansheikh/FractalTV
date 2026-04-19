@@ -101,13 +101,20 @@ Full shipped list in git history (branch `g2`). Headlines:
 
 ## g4 — future
 
-Detailed strategy: [`docs/reference/multi-platform-strategy.md`](docs/reference/multi-platform-strategy.md). Summary:
+Detailed strategy: [`docs/reference/multi-platform-strategy.md`](docs/reference/multi-platform-strategy.md).
 
-- Capacitor: Android phone → Android TV → iOS → Tizen → PWA
-- `DataService` interface swap (Electron IPC → direct HTTP + `@capacitor-community/sqlite`)
-- `PlayerAdapter` abstraction (ArtPlayer / ExoPlayer / AVPlayer / AVPlay)
-- Spatial navigation (d-pad) + TV 1.5x spacing
-- Three-tier product split (feature flags, same codebase):
+**Architecture decision (2026-04-19):** One React codebase across all platforms. The UI (cards, panels, search, navigation) is written once and shared everywhere. Platform differences are isolated entirely to the `PlayerAdapter` layer.
+
+TV platforms (Tizen/Vega/webOS) run the same React web app packaged as a native TV app (.wgt/.ipk), calling their proprietary native player APIs (AVPlay/OIPF/Luna) instead of `<video>` — this gives near-universal codec support without a separate native codebase. iOS/Apple TV accept AVPlayer's codec ceiling (MP4/HLS only).
+
+**Execution order:**
+1. libmpv for Electron — fixes AVI/MKV on desktop, defines PlayerAdapter interface shape
+2. Capacitor scaffold — Android phone/tablet → iOS → Android TV → Apple TV
+3. DataService swap — Electron IPC → direct HTTP + `@capacitor-community/sqlite`
+4. PlayerAdapter per platform — ExoPlayer (Android), AVPlayer (iOS), AVPlay/OIPF/Luna (TV web apps)
+5. TV web app shells — Tizen (.wgt), Vega, webOS (.ipk), same React build
+6. Spatial navigation — d-pad/remote input, foundational for all TV targets
+7. Three-tier product split (feature flags, single codebase):
   - **M3U Player** — free, all platforms, channel organizer
   - **Xtream Lite** — free, Android only, single source, TMDB
   - **Fractals Pro** — paid, all platforms, multi-source, full features

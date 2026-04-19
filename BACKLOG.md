@@ -16,15 +16,17 @@ Reference docs (API formats, strategy, competitors): [`docs/reference/`](docs/re
 
 **Legend:** `P0` breaks a feature · `P1` severe UX/integrity friction · `P2` quality/debt · `P3` nice-to-have.
 
-**Top of next discussion batch (g4 opening moves):**
-- §3 libmpv embedded player — last UI/UX blocker for VoD audio-track switching on desktop
-- §5.5 — Triage 42 `react-hooks/exhaustive-deps` warnings (classify real bugs vs intentional mount-only)
-- §6 — remaining test coverage: enrichment-vod algo dispatch, store key transitions, Playwright e2e smoke
+**Priority order for g4 opening:**
+1. P1 correctness first: React Query invalidation audit, enrichment-vod tests, fixture files
+2. P2 quality: exhaustive-deps triage, store tests, Playwright e2e, design token pass
+3. libmpv: unlocks AVI/MKV/audio-track switching on desktop; defines PlayerAdapter interface shape for all g4 platform work
+4. Capacitor scaffold: Android/iOS first platform after Electron
+5. PlayerAdapter + TV web apps: ExoPlayer (Android), AVPlayer (iOS), AVPlay/Luna/OIPF (Tizen/Vega/webOS)
 
-**Next actionable** (unblocked, leaf items — discuss before starting):
-- §3 libmpv (P2): route direct-file streams to libmpv, HLS stays on ArtPlayer
-- §5.5 (P2): triage 42 exhaustive-deps warnings — real bugs get fixed, intentional get `// Intentional:` comment
-- §6 enrichment tests (P1): algo-v1/v2/v3 dispatch + confidence scoring
+**Next actionable** (discuss before starting):
+- §6 React Query invalidation audit (P1) — correctness bug, should go first
+- §6 enrichment-vod tests (P1) — algo dispatch + confidence scoring
+- §3 libmpv (P2) — first g4 foundation piece
 
 ---
 
@@ -108,7 +110,7 @@ _No open items in this bucket. Remaining perf work (runtime instrumentation for 
   - [x] Source added, sync failed → error card. Already in place: `SourceCard.tsx:432-442` renders a red banner on `status='error' + lastError`; step-2 Sync button doubles as retry (same pipeline button, user clicks it again).
   - [x] Offline detection → NavRail indicator. Added `navigator.onLine` + `online`/`offline` listeners in `NavRail.tsx`; shows a red slashed-wifi icon above the theme toggle while offline.
   - [x] Network error during detail load → retry button. `SeriesDetail.tsx` episode fetch (`api.series.getInfo`) now exposes `isError` + `refetch`; renders an error line with a Retry button in the episodes column instead of perpetual spinner + "No episodes found" fallback. MovieDetail / ChannelDetail don't block on network (enrichment is silent-fallback, channel schedule is pre-synced) — no change needed.
-- [ ] **libmpv embedded player for Electron** (P2). VOD on this provider is 100% direct files (272k MKV, 133k MP4, 1.5k TS — zero HLS). Chromium cannot switch audio tracks on direct files. libmpv embedded via native Node addon renders into the player container, replacing ArtPlayer for direct-file streams. HLS streams stay on ArtPlayer + HLS.js. On Android/Fire TV ExoPlayer handles this natively (g4). On Tizen no solution exists. Shape: detect stream type on load → route to libmpv (direct files) or ArtPlayer (HLS). React overlay (controls, OSD, chips, badges) stays on top unchanged. Audio/subtitle track badges then work for MKV/MP4 VOD on desktop.
+- [ ] **libmpv embedded player for Electron** (P2). VOD on this provider is 100% direct files (272k MKV, 133k MP4, 1.5k TS — zero HLS). Chromium cannot switch audio tracks on direct files, and cannot play AVI at all. libmpv embedded via native Node addon renders into the player container, replacing ArtPlayer for direct-file streams. HLS streams stay on ArtPlayer + HLS.js. Shape: detect stream type on load → route to libmpv (direct files) or ArtPlayer (HLS). React overlay (controls, OSD, chips, badges) stays on top unchanged. Audio/subtitle track badges then work for MKV/MP4/AVI VOD on desktop. On Android/Fire TV: ExoPlayer handles this (g4). On Tizen/Vega/webOS: AVPlay/OIPF/Luna native player APIs handle it from within the web app (g4 TV layer).
 - [ ] **"Open in MPV/VLC" in right-click context menu on cards** (P3). Pre-play escape hatch — right-click a VOD card → "Open in MPV" / "Open in VLC" without launching the in-app player. Bundled with §3 right-click UX pass.
 - [ ] **Right-click context menus** (P3, _deferred — needs UX thought_). Category NSFW toggle exists; extending to source dots / content cards ("Hide source", "Rename", "Copy URL", etc.) needs a proper menu-shape pass before wiring.
 - [x] **Copy / vocabulary audit** (P3, 2026-04-18). 8 decisions locked via interactive Q&A. Executed: "account"→"source" in 5 empty-state strings (BrowseView, ContentArea, SourcesPanel, HomeView, Sidebar delete-confirm); "account" kept only in Add Source dialog caption (Xtream onboarding warmth); M3U "playlist" kept in sync-phase labels and tech copy; `'cancelled'`→`'canceled'` (handlers.ts phase emit, App.tsx comparison, store comment, algo comment); "grey"→"gray" (globals.css comment). Repo-wide sweep found no other UK spellings. Gold standard: `docs/reference/vocabulary.md`.
@@ -197,10 +199,30 @@ Borders + washed-out lavender feel off, but not blocking. Pick up after function
 
 Detailed strategy in [`docs/reference/multi-platform-strategy.md`](docs/reference/multi-platform-strategy.md).
 
-- [ ] **Capacitor: Android phone → Android TV → iOS → Tizen → PWA**
+**Decided architecture (2026-04-19):** One React codebase across all platforms. Platform differences isolated entirely to the PlayerAdapter layer — the UI (cards, panels, search, navigation) is written once and shared everywhere.
+
+**Platform → player adapter map:**
+
+| Platform | Adapter | Container ceiling |
+|---|---|---|
+| Electron (desktop) | libmpv | Universal |
+| Android phone/tablet/TV | ExoPlayer + FFmpeg ext | Universal |
+| iOS / iPadOS / Apple TV | AVPlayer | MP4/HLS only |
+| Tizen (Samsung TV) | AVPlay API (from web app) | Near-universal |
+| Vega OS (Philips TV) | OIPF player API (from web app) | Near-universal |
+| LG webOS | Luna player API (from web app) | Near-universal |
+| PWA / browser | ArtPlayer + HLS.js | MP4/HLS only |
+
+TV platforms (Tizen/Vega/webOS) run the same React web app but call their proprietary native player APIs instead of `<video>` — bypassing Chromium's codec ceiling entirely. No separate native TV app needed.
+
+iOS/Apple TV accept the codec ceiling — AVPlayer only. AVI/MKV without H.264 will not work; document clearly.
+
+- [ ] **libmpv for Electron** — defines PlayerAdapter interface, fixes AVI/MKV on desktop now.
+- [ ] **Capacitor scaffold** — Android phone → tablet → Android TV → iOS → iPadOS → Apple TV.
 - [ ] **DataService interface swap** — Electron IPC → direct HTTP + `@capacitor-community/sqlite`.
-- [ ] **PlayerAdapter abstraction** — ArtPlayer (Electron) / ExoPlayer (Android) / AVPlayer (iOS) / AVPlay (Tizen).
-- [ ] **Spatial navigation for TV** — `@noriginmedia/norigin-spatial-navigation` or custom grid navigator.
+- [ ] **PlayerAdapter abstraction** — implement per-platform, swap at runtime.
+- [ ] **TV web app shells** — Tizen (.wgt), Vega, webOS (.ipk) — same React build, AVPlay/OIPF/Luna adapter injected.
+- [ ] **Spatial navigation** — `@noriginmedia/norigin-spatial-navigation` or custom; foundational for all TV + Apple TV targets.
 - [ ] **Three-tier product split** (feature flags, single codebase):
   - **M3U Player** — free, all platforms, channel organizer.
   - **Xtream Lite** — free Android, single source, TMDB enrichment.
