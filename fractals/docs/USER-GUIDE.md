@@ -20,7 +20,15 @@ Add as many Xtream accounts as you want. Content from all sources appears in one
 
 ### Metadata / Enrichment
 
-g1c ships without TMDB / enrichment. Posters, plots, cast, and ratings come from whatever the provider gives you. Canonical-identity and enrichment layers are on the g2+ roadmap.
+Fractals enriches VoD (movies + series) from free sources by default — no API key required. Open Settings → Data → Enrichment to choose a level:
+
+- **Level 0** — Off. Stream data only.
+- **Level 1** — Keyless (default). FM-DB + Wikidata/Wikipedia + TVmaze for series.
+- **Level 2** — TMDB (free API key in Settings). Replaces Level 1 for titles TMDB covers; best quality.
+
+Enrichment runs automatically on first detail-panel open. If the auto-match is wrong, use the "Not this film?" picker to choose a different candidate.
+
+Canonical-identity (deduplication across sources) is a permanent tradeoff — same title from two sources shows as two items.
 
 ---
 
@@ -63,17 +71,24 @@ When browsing without a category filter, you'll see rows at the top:
 
 ### Basic Search
 
-Click the search bar or press `/` or `Cmd+K` to focus it. Start typing to search across all content — titles, plots, cast, directors, and genres.
-
-Results are grouped by type (Live / Movies / Series) with "Load More" buttons for each section.
+Click the search bar or press `/` or `Cmd+K` to focus it. Start typing — results stream in across Live / Movies / Series with "Load More" per section. Search matches titles only.
 
 ### Search Tips
 
-- **Prefix matching** — typing "dark" finds "The Dark Knight", "Darkest Hour", etc.
-- **Substring matching** — partial words work too ("dar" finds "undark")
-- **Special characters** — brackets `[]`, parentheses `()`, dashes `-`, underscores `_` are supported as search characters
-- **Diacritics** — accented characters are transliterated (searching "Borgen" finds "Borgen")
-- **Trailing space** — adding a space after a word forces an exact word match
+- **Substring matching** — partial words work ("dar" finds "Dark Knight", "Undark").
+- **Diacritics** — accented characters auto-normalize both directions (searching "amelie" finds "Amélie"; searching "Amélie" finds "amelie").
+- **Ligatures** — ae↔æ, oe↔œ, ss↔ß match either direction.
+- **2-character minimum** — single-char searches don't query the DB.
+
+### Advanced search (`@` prefix)
+
+Prefix your query with `@` to activate the tokenized parser:
+
+- **Auto-detected tokens** — 4-digit year, language (English name or ISO code), quality keywords (4K, 1080p, HD, BluRay), IPTV prefix codes (EN, FR, NF, etc.). Each recognized token filters by the matching `md_*` column OR falls back to a title substring.
+- **Power syntax** — `field:value` (e.g. `@ year:2020 language:french`) skips the substring fallback.
+- **All tokens AND together.** Unrecognized tokens become plain title substrings.
+
+Examples: `@ 2020` · `@ hindi 4k` · `@ netflix action` · `@ year:1999 quality:1080p`.
 
 ### Clearing Search
 

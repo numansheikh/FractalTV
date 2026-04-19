@@ -1,90 +1,23 @@
 import { getSqlite } from '../database/connection'
 import { randomUUID } from 'crypto'
 import { readFileSync } from 'fs'
+import { parseM3u } from '../lib/m3u-parser'
 
-// ─── M3U Parser Types ─────────────────────────────────────────────────────────
-
-export interface M3uEntry {
-  title: string
-  groupTitle: string   // category name
-  tvgId?: string       // EPG channel ID
-  tvgName?: string
-  tvgLogo?: string
-  duration: number
-  url: string
-  type: 'live' | 'movie' | 'series'
-}
+// Re-export parser types and functions for consumers that import from this file
+export { parseM3u, guessType, extractContainerExt } from '../lib/m3u-parser'
+export type { M3uEntry, M3uParseResult } from '../lib/m3u-parser'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /** Read M3U content from a URL or local file path */
-async function readM3uContent(m3uUrl: string): Promise<string> {
+export async function readM3uContent(m3uUrl: string): Promise<string> {
   if (m3uUrl.startsWith('file://') || (!m3uUrl.startsWith('http://') && !m3uUrl.startsWith('https://'))) {
-    // Local file — strip file:// prefix if present
     const filePath = m3uUrl.startsWith('file://') ? m3uUrl.slice(7) : m3uUrl
     return readFileSync(filePath, 'utf-8')
   }
   const res = await fetch(m3uUrl, { signal: AbortSignal.timeout(15_000) })
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`)
   return res.text()
-}
-
-// ─── Parser ───────────────────────────────────────────────────────────────────
-
-function guessType(url: string): 'live' | 'movie' | 'series' {
-  if (url.match(/\/series\//i)) return 'series'
-  if (url.match(/\/movie\//i) || url.match(/\.(mp4|mkv|avi|mov)(\?|$)/i)) return 'movie'
-  return 'live'
-}
-
-export function parseM3u(text: string): M3uEntry[] {
-  const lines = text.split(/\r?\n/)
-  const entries: M3uEntry[] = []
-  let current: Partial<M3uEntry> | null = null
-
-  for (const line of lines) {
-    const trimmed = line.trim()
-    if (!trimmed || trimmed === '#EXTM3U') continue
-
-    if (trimmed.startsWith('#EXTINF:')) {
-      // Parse: #EXTINF:duration key="value" ...,Title
-      const commaIdx = trimmed.indexOf(',')
-      const title = commaIdx >= 0 ? trimmed.slice(commaIdx + 1).trim() : 'Unknown'
-      const meta = commaIdx >= 0 ? trimmed.slice(8, commaIdx) : trimmed.slice(8)
-
-      // Extract duration (first token before space)
-      const durMatch = meta.match(/^(-?\d+)/)
-      const duration = durMatch ? parseInt(durMatch[1], 10) : -1
-
-      // Extract attributes
-      const attrs: Record<string, string> = {}
-      const attrRegex = /([\w-]+)="([^"]*)"/g
-      let m: RegExpExecArray | null
-      while ((m = attrRegex.exec(meta)) !== null) {
-        attrs[m[1].toLowerCase()] = m[2]
-      }
-
-      current = {
-        title,
-        groupTitle: attrs['group-title'] || 'Uncategorized',
-        tvgId: attrs['tvg-id'] || undefined,
-        tvgName: attrs['tvg-name'] || undefined,
-        tvgLogo: attrs['tvg-logo'] || undefined,
-        duration,
-      }
-    } else if (trimmed.startsWith('#')) {
-      // Skip other directives
-      continue
-    } else if (current) {
-      // This is the URL line
-      current.url = trimmed
-      current.type = guessType(trimmed)
-      entries.push(current as M3uEntry)
-      current = null
-    }
-  }
-
-  return entries
 }
 
 // ─── Service ──────────────────────────────────────────────────────────────────
@@ -94,7 +27,7 @@ export const m3uService = {
     try {
       const text = await readM3uContent(m3uUrl)
       if (!text.includes('#EXTINF')) return { count: 0, error: 'Not a valid M3U playlist (no #EXTINF entries)' }
-      const entries = parseM3u(text)
+      const { entries } = parseM3u(text)
       return { count: entries.length }
     } catch (err: any) {
       return { count: 0, error: err.message ?? 'Connection failed' }

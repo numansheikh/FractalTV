@@ -66,7 +66,8 @@ export const G1C_SCHEMA_SQL = `
     source_id   TEXT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
     external_id TEXT NOT NULL,
     name        TEXT NOT NULL,
-    position    INTEGER NOT NULL DEFAULT 0
+    position    INTEGER NOT NULL DEFAULT 0,
+    is_nsfw     INTEGER NOT NULL DEFAULT 0
   );
 
   CREATE TABLE IF NOT EXISTS channels (
@@ -82,14 +83,16 @@ export const G1C_SCHEMA_SQL = `
     stream_url          TEXT,
     tvg_id              TEXT,
     epg_channel_id      TEXT,
+    iptv_org_id         TEXT REFERENCES iptv_channels(id) ON DELETE SET NULL,
     catchup_supported   INTEGER NOT NULL DEFAULT 0,
     catchup_days        INTEGER NOT NULL DEFAULT 0,
+    is_nsfw             INTEGER NOT NULL DEFAULT 0,
     provider_metadata   TEXT,               -- JSON bag
 
     md_country          TEXT,
     md_language         TEXT,
     md_year             INTEGER,
-    md_origin           TEXT,
+    md_prefix           TEXT,
     md_quality          TEXT,
 
     added_at            INTEGER NOT NULL DEFAULT (unixepoch())
@@ -113,7 +116,8 @@ export const G1C_SCHEMA_SQL = `
     source_id   TEXT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
     external_id TEXT NOT NULL,
     name        TEXT NOT NULL,
-    position    INTEGER NOT NULL DEFAULT 0
+    position    INTEGER NOT NULL DEFAULT 0,
+    is_nsfw     INTEGER NOT NULL DEFAULT 0
   );
 
   CREATE TABLE IF NOT EXISTS movies (
@@ -128,13 +132,15 @@ export const G1C_SCHEMA_SQL = `
     thumbnail_url       TEXT,
     stream_url          TEXT,
     container_extension TEXT,
+    is_nsfw             INTEGER NOT NULL DEFAULT 0,
     provider_metadata   TEXT,               -- JSON bag
 
     md_country          TEXT,
     md_language         TEXT,
     md_year             INTEGER,
-    md_origin           TEXT,
+    md_prefix           TEXT,
     md_quality          TEXT,
+    md_runtime          INTEGER,            -- minutes, populated on first detail open
 
     added_at            INTEGER NOT NULL DEFAULT (unixepoch())
   );
@@ -146,7 +152,8 @@ export const G1C_SCHEMA_SQL = `
     source_id   TEXT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
     external_id TEXT NOT NULL,
     name        TEXT NOT NULL,
-    position    INTEGER NOT NULL DEFAULT 0
+    position    INTEGER NOT NULL DEFAULT 0,
+    is_nsfw     INTEGER NOT NULL DEFAULT 0
   );
 
   CREATE TABLE IF NOT EXISTS series (
@@ -159,12 +166,13 @@ export const G1C_SCHEMA_SQL = `
     search_title        TEXT,              -- populated by Index button
 
     thumbnail_url       TEXT,
+    is_nsfw             INTEGER NOT NULL DEFAULT 0,
     provider_metadata   TEXT,               -- JSON bag
 
     md_country          TEXT,
     md_language         TEXT,
     md_year             INTEGER,
-    md_origin           TEXT,
+    md_prefix           TEXT,
     md_quality          TEXT,
 
     added_at            INTEGER NOT NULL DEFAULT (unixepoch())
@@ -245,13 +253,17 @@ export const G1C_SCHEMA_SQL = `
   -- ─── Indexes ──────────────────────────────────────────────────────
 
   CREATE INDEX IF NOT EXISTS idx_channels_source           ON channels(source_id);
+  CREATE INDEX IF NOT EXISTS idx_channels_source_added     ON channels(source_id, added_at DESC);
   CREATE INDEX IF NOT EXISTS idx_channels_category         ON channels(category_id, source_id);
   CREATE INDEX IF NOT EXISTS idx_channels_epg              ON channels(epg_channel_id);
+  CREATE INDEX IF NOT EXISTS idx_channels_iptv_org_id      ON channels(iptv_org_id);
 
   CREATE INDEX IF NOT EXISTS idx_movies_source             ON movies(source_id);
+  CREATE INDEX IF NOT EXISTS idx_movies_source_added       ON movies(source_id, added_at DESC);
   CREATE INDEX IF NOT EXISTS idx_movies_category           ON movies(category_id, source_id);
 
   CREATE INDEX IF NOT EXISTS idx_series_source             ON series(source_id);
+  CREATE INDEX IF NOT EXISTS idx_series_source_added       ON series(source_id, added_at DESC);
   CREATE INDEX IF NOT EXISTS idx_series_category           ON series(category_id, source_id);
 
   CREATE INDEX IF NOT EXISTS idx_episodes_series           ON episodes(series_id);
@@ -263,6 +275,81 @@ export const G1C_SCHEMA_SQL = `
 
   CREATE INDEX IF NOT EXISTS idx_epg_channel               ON epg(channel_external_id);
   CREATE INDEX IF NOT EXISTS idx_epg_time                  ON epg(start_time, end_time);
+
+  -- ─── iptv-org reference data (g2) ─────────────────────────────────
+  -- Flat, denormalized snapshot of multiple iptv-org endpoints merged
+  -- into one table at ingest time. Replaced atomically on pull; never
+  -- joined at read time. Independent of the channels table — bridge to
+  -- tvg_id is deferred to a later mini-phase.
+
+  CREATE TABLE IF NOT EXISTS iptv_channels (
+    id                TEXT PRIMARY KEY,
+    name              TEXT NOT NULL,
+    alt_names         TEXT,
+    network           TEXT,
+    owners            TEXT,
+    country           TEXT,
+    category_ids      TEXT,
+    is_nsfw           INTEGER NOT NULL DEFAULT 0,
+    launched          TEXT,
+    closed            TEXT,
+    replaced_by       TEXT,
+    website           TEXT,
+    country_name      TEXT,
+    country_flag      TEXT,
+    category_labels   TEXT,
+    logo_url          TEXT,
+    guide_urls        TEXT,
+    stream_urls       TEXT,
+    is_blocked        INTEGER NOT NULL DEFAULT 0
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_iptv_channels_country ON iptv_channels(country);
+
+  -- ─── Category overrides ──────────────────────────────────────────
+  -- Persists user-toggled is_nsfw decisions per (source, content_type,
+  -- category_external_id). Category rows are wiped on resync via CASCADE,
+  -- so their is_nsfw flag is rebuilt from iptv-org rules each time; these
+  -- overrides are reapplied last so a manual toggle isn't clobbered.
+  CREATE TABLE IF NOT EXISTS category_overrides (
+    source_id            TEXT    NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+    content_type         TEXT    NOT NULL CHECK (content_type IN ('live','movie','series')),
+    category_external_id TEXT    NOT NULL,
+    is_nsfw              INTEGER NOT NULL DEFAULT 0,
+    updated_at           INTEGER NOT NULL DEFAULT (unixepoch()),
+    PRIMARY KEY (source_id, content_type, category_external_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_category_overrides_source ON category_overrides(source_id);
+
+  -- ─── VoD enrichment (g2 — keyless, Wikipedia + Wikidata + IMDb suggest) ──
+
+  CREATE TABLE IF NOT EXISTS movie_enrichment_g2 (
+    id            INTEGER PRIMARY KEY,
+    movie_id      TEXT    NOT NULL REFERENCES movies(id) ON DELETE CASCADE,
+    algo_version  TEXT    NOT NULL,           -- 'v1'
+    imdb_id       TEXT,
+    tmdb_id       TEXT,
+    wikidata_qid  TEXT,
+    confidence    REAL    NOT NULL DEFAULT 0, -- 0.0..1.0
+    fetched_at    INTEGER NOT NULL DEFAULT (unixepoch()),
+    raw_json      TEXT    NOT NULL DEFAULT '{}' -- VodEnrichmentCandidate JSON
+  );
+  CREATE INDEX IF NOT EXISTS idx_movie_enrich_movie ON movie_enrichment_g2(movie_id);
+  CREATE INDEX IF NOT EXISTS idx_movie_enrich_imdb  ON movie_enrichment_g2(imdb_id);
+
+  CREATE TABLE IF NOT EXISTS series_enrichment_g2 (
+    id            INTEGER PRIMARY KEY,
+    series_id     TEXT    NOT NULL REFERENCES series(id) ON DELETE CASCADE,
+    algo_version  TEXT    NOT NULL,
+    imdb_id       TEXT,
+    tmdb_id       TEXT,
+    wikidata_qid  TEXT,
+    confidence    REAL    NOT NULL DEFAULT 0,
+    fetched_at    INTEGER NOT NULL DEFAULT (unixepoch()),
+    raw_json      TEXT    NOT NULL DEFAULT '{}'
+  );
+  CREATE INDEX IF NOT EXISTS idx_series_enrich_series ON series_enrichment_g2(series_id);
+  CREATE INDEX IF NOT EXISTS idx_series_enrich_imdb   ON series_enrichment_g2(imdb_id);
 
   CREATE INDEX IF NOT EXISTS idx_channel_ud_favorites      ON channel_user_data(profile_id, is_favorite);
   CREATE INDEX IF NOT EXISTS idx_movie_ud_favorites        ON movie_user_data(profile_id, is_favorite);

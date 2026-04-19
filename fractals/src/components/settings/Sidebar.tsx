@@ -125,7 +125,7 @@ function SourceRow({
       <div className="rounded-xl p-3" style={{ background: 'rgba(224,108,117,0.08)', border: '1px solid rgba(224,108,117,0.2)' }}>
         <p className="mb-1 text-xs font-semibold" style={{ color: 'var(--color-error)' }}>Remove "{source.name}"?</p>
         <p className="mb-3 text-[10px]" style={{ color: 'var(--color-text-muted)', lineHeight: '1.6' }}>
-          Permanently deletes all synced content from this account.
+          Permanently deletes all synced content from this source.
         </p>
         <div className="flex gap-1.5">
           <button onClick={() => setConfirmDelete(false)}

@@ -17,16 +17,11 @@ For everything below — architecture, running locally, keyboard shortcuts, conv
 
 ## Current state
 
-Active branch: **`g1c`** (shipped; being promoted to `master`). 15-table per-type schema (channels / movies / series / episodes + per-type categories + per-type user_data + sources / profiles / settings + epg). Search is plain LIKE on a persisted `search_title` column (any-ascii + lowercase), populated inline at sync. No canonical identity layer, no FTS, no TMDB enrichment. Pipeline: Test → Sync (EPG auto-chains for Xtream sources). Full phase map + future buckets in [`PLAN.md`](PLAN.md).
+Active branch: **`g3`**. g0–g2 shipped (15-table per-type schema, LIKE search on `search_title`, unified detail panels, mini player, M3U parity, VoD enrichment, ADV search). g3 in progress (TMDB enrichment shipped; design revamp + code sweep remaining). Multi-platform (Capacitor/Tizen) is g4.
 
-## Roadmap
-
-Tracked in **[`PLAN.md`](PLAN.md)**:
-
-1. **g2 — Search improvements** (future, no commitments) — denormalized corpus, trigram on CJK / Arabic, ranking signals, embeddings
-2. **Multi-platform reach** (Phase 3) — Android, iOS, Android TV, Samsung Tizen via Capacitor
-3. **Tech health** — remaining `as any` cast triage
-4. **Product shape** (discussion only) — three-tier split (M3U Player / Xtream Lite / Fractals Pro)
+- **Strategy + shipped history:** [`PLAN.md`](PLAN.md)
+- **Actionable work (bugs, gaps, debt):** [`BACKLOG.md`](BACKLOG.md)
+- **Reference (API / format docs, strategy papers):** [`docs/reference/`](docs/reference/)
 
 ## Disclaimer
 

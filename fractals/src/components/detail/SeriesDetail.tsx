@@ -1,16 +1,18 @@
-import { useState, useEffect } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useState, useEffect, useRef } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ContentItem, BreadcrumbNav } from '@/lib/types'
 import { api } from '@/lib/api'
 import { useSourcesStore } from '@/stores/sources.store'
 import { useUserStore } from '@/stores/user.store'
+import { useAppStore } from '@/stores/app.store'
 import { buildColorMapFromSources } from '@/lib/sourceColors'
 import { SlidePanel } from '@/components/layout/SlidePanel'
 import { EpisodeRow } from '@/components/cards/EpisodeRow'
 import { MetadataBlock } from './MetadataBlock'
 import { ActionButtons } from './ActionButtons'
-import { AboutBlock } from './AboutBlock'
+import { AboutBlock, parseCast, CastPanel } from './AboutBlock'
 import { DetailShell, BreadcrumbItem } from './DetailShell'
+import { EnrichmentPicker } from './EnrichmentPicker'
 
 interface Props {
   item: ContentItem
@@ -20,12 +22,23 @@ interface Props {
   isPlaying?: boolean
 }
 
+// Session-level cache so activeSeason survives panel close/reopen within the same session.
+const activeSeasonCache = new Map<string, string>()
+
 export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: Props) {
-  const [activeSeason, setActiveSeason] = useState<string | null>(null)
+  const [activeSeason, _setActiveSeason] = useState<string | null>(() => activeSeasonCache.get(item.id) ?? null)
+  const setActiveSeason = (s: string | null) => {
+    if (s) activeSeasonCache.set(item.id, s)
+    _setActiveSeason(s)
+  }
+  const [showPicker, setShowPicker] = useState(false)
 
   const { sources } = useSourcesStore()
   const colorMap = buildColorMapFromSources(sources)
   const userStore = useUserStore()
+  const queryClient = useQueryClient()
+  const playingContent = useAppStore((s) => s.playingContent)
+  const playerMode = useAppStore((s) => s.playerMode)
 
   const { data: enrichedItem } = useQuery({
     queryKey: ['content', item.id],
@@ -33,7 +46,54 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
     staleTime: 5 * 60_000,
   })
 
-  const { data: seriesInfo, isFetching: seriesFetching } = useQuery({
+  const [enrichingSingle, setEnrichingSingle] = useState(false)
+  const enrichTriggered = useRef(false)
+
+  // Reset enrichTriggered when the item changes so a new item can auto-enrich.
+  useEffect(() => { enrichTriggered.current = false }, [item.id])
+
+  // Reset season selection when series changes (component is reused, state doesn't reinitialize)
+  useEffect(() => {
+    _setActiveSeason(activeSeasonCache.get(item.id) ?? null)
+    setHasAutoSelectedSeason(false)
+    useAppStore.getState().setEpisodeSurfContext([], -1)
+  }, [item.id])
+
+  const { data: enrichmentData, refetch: refetchEnrichment } = useQuery({
+    queryKey: ['vodEnrich', item.id],
+    queryFn: () => api.vodEnrich.getForContent(item.id),
+    staleTime: 60_000,
+  })
+
+  // Auto-enrich on first open; for already-enriched series also trigger TVmaze augmentation.
+  useEffect(() => {
+    if (enrichTriggered.current) return
+    if (!enrichmentData) return
+    if (enrichmentData.disabled) return
+    const hasCandidates = enrichmentData.candidates.some((c: any) => c.confidence > 0)
+    if (!hasCandidates) {
+      enrichTriggered.current = true
+      setEnrichingSingle(true)
+      api.vodEnrich.enrichSingle(item.id).finally(() => {
+        setEnrichingSingle(false)
+        refetchEnrichment()
+      })
+      return
+    }
+    // Already enriched — fire enrichSingle if TVmaze or TMDB augment not yet done
+    const best = enrichmentData.candidates[0]
+    if (best && best.raw_json !== '{}') {
+      try {
+        const parsed = JSON.parse(best.raw_json)
+        if (!parsed.tvmaze_id || !parsed.tmdb_id) {
+          enrichTriggered.current = true
+          api.vodEnrich.enrichSingle(item.id).finally(refetchEnrichment)
+        }
+      } catch {}
+    }
+  }, [enrichmentData, item.id, refetchEnrichment])
+
+  const { data: seriesInfo, isFetching: seriesFetching, isError: seriesError, refetch: refetchSeries } = useQuery({
     queryKey: ['series-info', item.id],
     queryFn: () => api.series.getInfo(item.id),
     staleTime: 5 * 60_000,
@@ -50,6 +110,44 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
   const resumeEntry = continueData[0] ?? null
 
   const c = (enrichedItem as ContentItem | null) ?? item
+
+  // Derive active enrichment candidate
+  const activeEnrichment = (() => {
+    if (!enrichmentData || enrichmentData.disabled) return null
+    const candidates = enrichmentData.candidates ?? []
+    if (!candidates.length) return null
+    if (enrichmentData.selected_id != null) {
+      const pinned = candidates.find((r: any) => r.id === enrichmentData.selected_id)
+      if (pinned && pinned.confidence > 0) return JSON.parse(pinned.raw_json)
+    }
+    const best = candidates[0]
+    if (best && best.confidence > 0 && best.raw_json !== '{}') return JSON.parse(best.raw_json)
+    return null
+  })()
+
+  // Merge enrichment over stream data per-field
+  const displayItem: ContentItem = {
+    ...c,
+    plot: activeEnrichment?.overview ?? c.plot,
+    cast: activeEnrichment?.cast?.length ? JSON.stringify(activeEnrichment.cast) : c.cast,
+    director: activeEnrichment?.directors?.join(', ') ?? c.director,
+    genres: activeEnrichment?.genres?.join(', ') ?? c.genres,
+    posterUrl: activeEnrichment?.poster_url ?? c.posterUrl ?? c.poster_url,
+    backdropUrl: activeEnrichment?.backdrop_url ?? c.backdropUrl ?? c.backdrop_url,
+    // TVmaze fields
+    tvmazeStatus: activeEnrichment?.status ?? null,
+    tvmazeNetwork: activeEnrichment?.network ?? null,
+    tvmazeRating: activeEnrichment?.rating ?? null,
+    // TMDB fields
+    tmdbRating: activeEnrichment?.tmdb_vote_average ?? null,
+    tmdbVoteCount: activeEnrichment?.tmdb_vote_count ?? null,
+    tmdbCreator: activeEnrichment?.creator ?? null,
+    seasonCount: activeEnrichment?.season_count ?? null,
+    episodeCount: activeEnrichment?.episode_count ?? null,
+  }
+
+  const hasCandidates = (enrichmentData?.candidates ?? []).some((r: any) => r.confidence > 0 && r.raw_json !== '{}')
+
   const primarySourceId = c.primarySourceId ?? c.primary_source_id ?? item.primarySourceId ?? item.primary_source_id ?? (item as any).source_ids ?? item.id?.split(':')[0]
   const sourceColor = primarySourceId ? colorMap[primarySourceId] : undefined
   const primarySource = primarySourceId ? sources.find((s) => s.id === primarySourceId) : undefined
@@ -77,11 +175,46 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
   const username: string = (seriesInfo as any)?.username ?? ''
   const password: string = (seriesInfo as any)?.password ?? ''
 
+  // Xtream episodes use _streamId to build URL client-side; M3U episodes
+  // have stream_url in DB and resolve via content:get-stream-url instead.
+  const isXtream = !!serverUrl
+
+  useEffect(() => {
+    if (!primarySourceId || seasonKeys.length === 0) return
+    const epItems: ContentItem[] = []
+    for (const sk of seasonKeys) {
+      const seasonEps: any[] = seasons[sk] ?? []
+      for (const ep of seasonEps) {
+        epItems.push({
+          ...item,
+          id: `${primarySourceId}:episode:${ep.id}`,
+          title: `S${String(sk).padStart(2,'0')}E${String(ep.episode_num).padStart(2,'0')} · ${ep.title ?? ''}`,
+          ...(isXtream ? {
+            _streamId: String(ep.id),
+            _serverUrl: serverUrl,
+            _username: username,
+            _password: password,
+            _extension: ep.container_extension,
+          } : {}),
+          _parent: { id: item.id, title: item.title, type: 'series' },
+        } as ContentItem)
+      }
+    }
+    if (epItems.length === 0) return
+    const playingId = useAppStore.getState().playingContent?.id
+    const idx = playingId ? epItems.findIndex((e) => e.id === playingId) : -1
+    useAppStore.getState().setEpisodeSurfContext(epItems, idx >= 0 ? idx : 0)
+  }, [seriesInfo, primarySourceId, serverUrl, username, password, item])
+
   const categoryName = (c as any).categoryName ?? (c as any).category_name
 
   const firstEpisode = episodes[0] ?? null
   const resumeEpisodeInList = resumeEntry?.resume_episode_id
-    ? episodes.find((ep) => String(ep.id) === resumeEntry.resume_episode_id)
+    ? episodes.find((ep) => {
+        const rawId = String(ep.id)
+        // resume_episode_id is full content ID ({sourceId}:episode:{streamId}), ep.id is raw stream ID
+        return `${primarySourceId}:episode:${rawId}` === resumeEntry.resume_episode_id
+      })
     : null
   const resumeSeason = resumeEntry?.resume_season_number != null
     ? String(resumeEntry.resume_season_number)
@@ -89,10 +222,11 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
 
   const [hasAutoSelectedSeason, setHasAutoSelectedSeason] = useState(false)
   useEffect(() => {
-    if (!hasAutoSelectedSeason && resumeSeason && seasonKeys.includes(resumeSeason) && activeSeason === null) {
-      setHasAutoSelectedSeason(true)
-      setActiveSeason(resumeSeason)
-    }
+    if (hasAutoSelectedSeason) return
+    if (!resumeSeason || !seasonKeys.includes(resumeSeason)) return
+    if (resumeSeason === activeSeason) return
+    setHasAutoSelectedSeason(true)
+    setActiveSeason(resumeSeason)
   }, [hasAutoSelectedSeason, resumeSeason, seasonKeys, activeSeason])
 
   const episodeForPlay = resumeEpisodeInList ?? firstEpisode
@@ -101,11 +235,13 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
         ...item,
         id: `${primarySourceId}:episode:${episodeForPlay.id}`,
         title: `S${String(currentSeason ?? 1).padStart(2,'0')}E${String(episodeForPlay.episode_num).padStart(2,'0')} · ${episodeForPlay.title ?? ''}`,
-        _streamId: String(episodeForPlay.id),
-        _serverUrl: serverUrl,
-        _username: username,
-        _password: password,
-        _extension: episodeForPlay.container_extension,
+        ...(isXtream ? {
+          _streamId: String(episodeForPlay.id),
+          _serverUrl: serverUrl,
+          _username: username,
+          _password: password,
+          _extension: episodeForPlay.container_extension,
+        } : {}),
         _parent: { id: item.id, title: item.title, type: 'series' },
       }
     : undefined
@@ -113,6 +249,11 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
   const playButtonLabel = resumeEntry && resumeEntry.resume_season_number != null && resumeEntry.resume_episode_number != null
     ? `▶ Resume S${resumeEntry.resume_season_number}·E${resumeEntry.resume_episode_number}`
     : firstEpisode ? '▶ Play from S1·E1' : '▶ Play'
+
+  const playingEpLabel = playerMode !== 'hidden' && playingContent?._parent?.id === item.id
+    ? playingContent!.title.split(' · ')[0]
+    : null
+  const topButtonLabel = playingEpLabel ? `▶ ${playingEpLabel}` : playButtonLabel
 
   const breadcrumbs: BreadcrumbItem[] = [
     ...(primarySource && sourceColor ? [{
@@ -133,7 +274,7 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
 
   return (
     <SlidePanel open={true} onClose={onClose} width={panelWidth} suppressClose={isPlaying}>
-      <div style={{ display: 'flex', flexDirection: 'row', height: '100%', background: 'var(--bg-1)' }}>
+      <div style={{ display: 'flex', flexDirection: 'row', height: '100%', background: 'var(--bg-2)' }}>
 
         {/* ── Left column: Season selector + episode list ── */}
         <div style={{
@@ -143,6 +284,7 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
           flexDirection: 'column',
           borderRight: '1px solid var(--border-subtle)',
           overflow: 'hidden',
+          background: 'var(--bg-1)',
         }}>
           <div style={{
             height: 48,
@@ -211,7 +353,30 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
               </div>
             )}
 
-            {!seriesFetching && seasonKeys.length === 0 && (
+            {!seriesFetching && seriesError && (
+              <div style={{
+                padding: '16px 12px',
+                display: 'flex', flexDirection: 'column', gap: 8,
+                color: 'var(--accent-danger)', fontSize: 12, fontFamily: 'var(--font-ui)',
+              }}>
+                <span>Couldn't load episodes — network error.</span>
+                <button
+                  onClick={() => refetchSeries()}
+                  style={{
+                    alignSelf: 'flex-start',
+                    padding: '4px 10px', borderRadius: 5,
+                    background: 'color-mix(in srgb, var(--accent-interactive) 16%, transparent)',
+                    border: '1px solid color-mix(in srgb, var(--accent-interactive) 36%, transparent)',
+                    color: 'var(--accent-interactive)',
+                    fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                  }}
+                >
+                  Retry
+                </button>
+              </div>
+            )}
+
+            {!seriesFetching && !seriesError && seasonKeys.length === 0 && (
               <p style={{ padding: '20px 12px', fontSize: 12, color: 'var(--text-3)', fontFamily: 'var(--font-ui)', margin: 0 }}>
                 No episodes found.
               </p>
@@ -248,25 +413,45 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
                 poster: ep.poster,
               }
 
+              const epCopyItem = {
+                id: `${primarySourceId}:episode:${ep.id}`,
+                ...(isXtream ? {
+                  _streamId: String(ep.id),
+                  _serverUrl: serverUrl,
+                  _username: username,
+                  _password: password,
+                  _extension: ep.container_extension,
+                } : {}),
+              }
               return (
                 <EpisodeRow
                   key={ep.id}
                   episode={epAsEpisodeRowFmt}
                   seriesId={item.id}
+                  copyItem={epCopyItem}
                   onPlay={() => {
                     const epItem: ContentItem = {
                       ...item,
                       id: `${primarySourceId}:episode:${ep.id}`,
                       title: `S${String(currentSeason).padStart(2,'0')}E${String(ep.episode_num).padStart(2,'0')} · ${ep.title ?? ''}`,
-                      _streamId: String(ep.id),
-                      _serverUrl: serverUrl,
-                      _username: username,
-                      _password: password,
-                      _extension: ep.container_extension,
+                      ...(isXtream ? {
+                        _streamId: String(ep.id),
+                        _serverUrl: serverUrl,
+                        _username: username,
+                        _password: password,
+                        _extension: ep.container_extension,
+                      } : {}),
                       _parent: { id: item.id, title: item.title, type: 'series' },
                     }
                     onPlay(epItem)
                   }}
+                  isPlaying={(() => {
+                    const epId = `${primarySourceId}:episode:${ep.id}`
+                    const activeId = playingContent?._parent?.id === item.id
+                      ? playingContent!.id
+                      : firstEpItem?.id
+                    return epId === activeId
+                  })()}
                   isCompleted={isCompleted}
                   progress={progress}
                 />
@@ -280,23 +465,123 @@ export function SeriesDetail({ item, onPlay, onClose, onNavigate, isPlaying }: P
           <DetailShell
             typeBadge={{ label: 'SERIES', accent: 'var(--accent-series)' }}
             breadcrumbs={breadcrumbs}
+            actionsRow={<ActionButtons item={c} onPlay={onPlay} episodeToPlay={firstEpItem} hidePrimary />}
             primarySource={primarySource}
             primarySourceColor={sourceColor}
             allSourceIds={allSourceIds}
             sourceColorMap={colorMap}
             onClose={onClose}
+            castPanel={<CastPanel cast={parseCast(displayItem.cast)} loading={enrichingSingle} />}
+            footer={
+              <>
+                <button
+                  onClick={() => onPlay(firstEpItem ?? c)}
+                  style={{
+                    width: '100%', height: 36, borderRadius: 6,
+                    background: 'var(--accent-series)', color: '#fff',
+                    border: 'none', fontSize: 13, fontWeight: 600,
+                    cursor: 'pointer', fontFamily: 'var(--font-ui)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                    transition: 'opacity 0.12s',
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.88' }}
+                  onMouseLeave={(e) => { e.currentTarget.style.opacity = '1' }}
+                >
+                  <span>{topButtonLabel}</span>
+                </button>
+                {enrichingSingle && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'center', padding: '2px 0' }}>
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ animation: 'spin 1s linear infinite', flexShrink: 0 }}><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
+                    <span style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--font-ui)' }}>Looking up series data…</span>
+                  </div>
+                )}
+                {!enrichingSingle && !hasCandidates && (
+                  <button
+                    onClick={() => {
+                      enrichTriggered.current = false
+                      setEnrichingSingle(true)
+                      api.vodEnrich.enrichSingle(item.id, true).finally(() => {
+                        setEnrichingSingle(false)
+                        refetchEnrichment()
+                      })
+                    }}
+                    style={{
+                      alignSelf: 'center',
+                      background: 'none', border: 'none', cursor: 'pointer',
+                      fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--font-ui)',
+                      padding: '2px 0', transition: 'color 0.12s',
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-1)' }}
+                    onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-3)' }}
+                  >
+                    Retry lookup
+                  </button>
+                )}
+                {hasCandidates && (
+                  <div style={{ display: 'flex', gap: 10, alignSelf: 'center' }}>
+                    <button
+                      onClick={() => setShowPicker(true)}
+                      style={{
+                        background: 'none', border: 'none', cursor: 'pointer',
+                        fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--font-ui)',
+                        padding: '2px 0',
+                        transition: 'color 0.12s',
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-1)' }}
+                      onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-3)' }}
+                    >
+                      {enrichmentData?.disabled ? 'Re-enable enrichment' : 'Not this series?'}
+                    </button>
+                    <span style={{ color: 'var(--text-3)', fontSize: 11 }}>·</span>
+                    <button
+                      onClick={() => {
+                        enrichTriggered.current = false
+                        setEnrichingSingle(true)
+                        api.vodEnrich.enrichSingle(item.id, true).finally(() => {
+                          setEnrichingSingle(false)
+                          refetchEnrichment()
+                        })
+                      }}
+                      style={{
+                        background: 'none', border: 'none', cursor: 'pointer',
+                        fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--font-ui)',
+                        padding: '2px 0', transition: 'color 0.12s',
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-1)' }}
+                      onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-3)' }}
+                    >
+                      Re-enrich
+                    </button>
+                  </div>
+                )}
+              </>
+            }
           >
-            <MetadataBlock item={c} isSeries />
-            <ActionButtons
-              item={c}
-              onPlay={onPlay}
-              episodeToPlay={firstEpItem}
-              overridePlayLabel={playButtonLabel}
-            />
-            <AboutBlock item={c} onClose={onClose} />
+            <MetadataBlock item={displayItem} isSeries />
+            <AboutBlock item={displayItem} />
           </DetailShell>
         </div>
       </div>
+      {showPicker && (
+        <EnrichmentPicker
+          contentId={c.id}
+          contentType="series"
+          candidates={enrichmentData?.candidates ?? []}
+          selectedId={enrichmentData?.selected_id ?? null}
+          onPicked={() => { setShowPicker(false); queryClient.invalidateQueries({ queryKey: ['vodEnrich', c.id] }) }}
+          onDisabled={() => { setShowPicker(false); queryClient.invalidateQueries({ queryKey: ['vodEnrich', c.id] }) }}
+          onReset={() => { setShowPicker(false); queryClient.invalidateQueries({ queryKey: ['vodEnrich', c.id] }) }}
+          onRerun={() => {
+            enrichTriggered.current = false
+            setEnrichingSingle(true)
+            api.vodEnrich.enrichSingle(c.id, true).finally(() => {
+              setEnrichingSingle(false)
+              refetchEnrichment()
+            })
+          }}
+          onClose={() => setShowPicker(false)}
+        />
+      )}
     </SlidePanel>
   )
 }

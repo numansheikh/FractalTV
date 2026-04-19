@@ -1,5 +1,4 @@
 // any-ascii is a dual ESM/CJS package — require() returns { default: fn }
-// eslint-disable-next-line @typescript-eslint/no-require-imports
 const anyAscii: (s: string) => string = require('any-ascii').default ?? require('any-ascii')
 
 /**

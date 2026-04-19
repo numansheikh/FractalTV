@@ -187,8 +187,15 @@ Plain `LIKE '%query%'` on a persisted `search_title` column (any-ascii + lowerca
 ### Multi-source deduplication (not planned in g1c)
 Same movie from two sources appears as two items. This is a permanent g1c tradeoff — canonical identity is not on the roadmap (it was the biggest complexity source in the discarded g2-flat branch).
 
-### Enrichment (not in g1c)
-Hidden in the UI. The enrichment IPC surface is stubbed (returns zeros) so renderer status pollers don't crash. TMDB / iptv-org / Wikidata / IMDb-suggest providers were deleted as part of the g1c simplification.
+### VoD Enrichment (g3)
+3-level user-selectable pipeline (Settings → Data → Enrichment):
+- **Level 0** — off, stream data only
+- **Level 1** — keyless default: v3 (FM-DB + Wikidata/Wikipedia) + TVmaze for series
+- **Level 2** — TMDB (free API key required): replaces v3.2 + TVmaze, best quality
+
+Setting stored as `enrichment_level` (`"0"` | `"1"` | `"2"`) in SQLite settings table. `tmdb_api_key` stored alongside. Auto-enriches on first detail panel open. Per-field fallback merge (enrichment → stream data). "Not this film?" picker for manual candidate selection. `enrichment_disabled` flag per content row. Source-level bulk enrich button.
+
+`md_*` columns (prefix, language, year, quality) are populated by local title parsing — always available regardless of enrichment level.
 
 ### Catchup / Timeshift
 For live TV channels with catchup support:
@@ -328,6 +335,8 @@ These are defined in `:root` as dark defaults, then **bridged** via `[data-theme
 | `Space` | Play/pause (in player) |
 | `←` `→` | Seek (in player) |
 | `↑` `↓` | Channel surf (live TV) / navigate list |
+| `PgUp` `PgDn` | Episode surf prev/next (series player) |
+| `Cmd+↑` `Cmd+↓` | Episode surf prev/next (macOS — series player) |
 | `F` | Toggle fullscreen |
 | `M` | Mute |
 | `Cmd+,` | Settings |
@@ -352,17 +361,18 @@ Single layer. What M3U/Xtream APIs return, stored directly into per-type tables:
 - **Tied to subscription** — content goes away when source is removed / expired. Resync wipes user_data via CASCADE (g1c hard cut).
 - **No deduplication** — same content from two sources = two items.
 - **Search target** is `search_title` (persisted normalized column), not `title`. Populated inline at sync INSERT.
-- **Metadata columns** use the `md_` prefix on each content table (`md_country`, `md_language`, `md_year`, `md_origin`, `md_quality`). Shape locked; enrichment population deferred.
+- **Metadata columns** use the `md_` prefix on each content table (`md_country`, `md_language`, `md_year`, `md_origin`, `md_quality`). `md_runtime` added to movies in g2 (lazy-fetched via `get_vod_info` on first detail open).
 
 Canonical identity / deduplication is not on the roadmap — it's a permanent g1c tradeoff.
 
-## Implementation status (as of 2026-04-15)
+## Implementation status (as of 2026-04-19)
 
 **Phase 0–2.5 — Complete.** Core through V3 data model.
-**g1 — Complete (2026-04-12).** Pure provider-data app on 12 tables. LIKE search with debounce. User data survived resync.
-**g1c — Complete (2026-04-14).** Per-type 15-table split. LIKE on `search_title` (any-ascii + lowercase, inline at sync). Two-button pipeline (Test → Sync; EPG auto-chains inside Sync for Xtream). FTS5 tried and removed. Enrichment pipeline (iptv-org / Wikidata / IMDb-suggest / indexing worker) deleted.
-**g2+ — Future.** Search improvements (see `PLAN.md`). No commitments.
-**Phase 3 — Not started.** Capacitor for Android/iOS/TV, Tizen.
+**g1 — Complete (2026-04-12).** Pure provider-data app on 12 tables. LIKE search with debounce.
+**g1c — Complete (2026-04-14).** Per-type 15-table split. LIKE on `search_title` inline at sync. Two-button pipeline. FTS5 tried and removed.
+**g2 — Complete (2026-04-17).** iptv-org ingestion, unified detail panels, draggable mini player, NSFW filtering, EPG sync button, VoD enrichment (keyless + TVmaze), episode surf, M3U parity, ADV search.
+**g3 — Complete (2026-04-19).** TMDB enrichment (key-gated level 2), 3-level enrichment picker, genre pills + cast panel, post-sync auto-chain (iptv-org → populate metadata), full code sweep (dead code removed, `handlers.ts` split to 8 domain files, IPC + player `as any` eliminated), unit test suite (125 tests). Tagged `g3`.
+**g4 — Not started.** Capacitor for Android/iOS/TV, Tizen, three-tier product split.
 
 ### g1c features (current state)
 
@@ -409,16 +419,22 @@ Canonical identity / deduplication is not on the roadmap — it's a permanent g1
 - Position saved on pause, 10s interval, and close
 - `minWatchSeconds` threshold (default 5s)
 - EPG now/next overlay on fullscreen live (auto-hides with controls)
-- Category pill chip navigates back to browse category
+- Category pill chip → mini player + navigate to browse category
+- Volume persisted to localStorage across sessions
+- Escape from fullscreen → mini player (not close); back button consistent
+- Embedded overlay z-index 30 (above ArtPlayer `.art-mask` at 20)
+- Reconnect overlay: 5-attempt exponential backoff with spinner + attempt counter
+- Episode surf: Prev/Next pills in fullscreen player for series episodes (bounded by season, no wrap). Keyboard: PgUp/PgDn + Cmd+↑/↓. `episodeSurfList`/`episodeSurfIndex` in app store.
+- VoD (movie/series) always starts in floating mini player — no embedded zone in detail panels. Mini player is draggable via top-bar drag handle; position persisted to `localStorage` key `fractals:mini-player-pos`.
 
 **Detail panels**
 - Unified spine via `DetailShell` (close + type badge + source indicator + breadcrumbs + scrollable body). All three types share the same chrome.
 - Channel: 380px, logo + title + EPG schedule + tvg-id block
-- Movie: 380px, hero strip + metadata + actions + opportunistic plot/cast (`AboutBlock`)
-- Series: 700px (380 right + 320 left), left column season coins + episode list, right column shares the movie spine
+- Movie: 380px, hero strip + metadata + actions + plot/cast; VoD enrichment (auto-enrich on open, "Not this film?" picker); duration from `md_runtime`. Play always opens floating mini player.
+- Series: 700px (380 right + 320 left), left column season coins + episode list, right column shares the movie spine; `activeSeason` persisted across reopens; play/episode click → floating mini player; resume-aware autoplay gated on continue-watching data
 - Hero strip: backdrop when present, else blurred poster scaled to fit, else a type-accent gradient with title initials. Broken image URLs fall back to the gradient.
 - Action buttons per-type: live = play + favorite; movie = full set (play/resume, favorite, watchlist, rating, clear history); series = play + favorite + watchlist + rating
-- External player + enrichment sections hidden (deferred)
+- 2s autoplay embedded mini player in all three panel types
 
 **Settings**
 - Appearance: theme picker, font picker
@@ -455,7 +471,8 @@ Canonical identity / deduplication is not on the roadmap — it's a permanent g1
 
 ## Known limitations & open work
 
-- **No FTS / enrichment / canonical (g1c)** — Search is LIKE only on `search_title`. No TMDB metadata. No deduplication across sources. FTS was tried and removed; canonical is a permanent g1c tradeoff.
+- **No FTS / canonical** — Search is LIKE only on `search_title`. No deduplication across sources. FTS was tried and removed; canonical is a permanent g1c tradeoff. VoD enrichment (keyless) ships in g2.
+- **ADV search** — `@` prefix activates tokenized parser. Auto-detects year/language/quality/prefix from plain text; `field:value` for power users. Each recognized token → `(md_* = value OR search_title LIKE)`. Unrecognized tokens → title LIKE only. All tokens AND together. Parser: `electron/lib/adv-query-parser.ts`.
 
 - **International character search** — European diacritics + ligatures handled bidirectionally via any-ascii. Arabic, Hebrew, Cyrillic, CJK pass through any-ascii to their closest Latin form; effectiveness varies.
 

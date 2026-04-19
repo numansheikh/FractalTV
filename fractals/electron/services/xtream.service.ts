@@ -37,6 +37,7 @@ export class XtreamService {
     userInfo?: XtreamUserInfo
     serverInfo?: XtreamServerInfo
     error?: string
+    kind?: 'auth' | 'network' | 'server' | 'unknown'
   }> {
     try {
       const base = serverUrl.replace(/\/$/, '')
@@ -44,14 +45,31 @@ export class XtreamService {
         signal: AbortSignal.timeout(10000),
       })
 
+      if (resp.status === 401 || resp.status === 403) {
+        return { success: false, kind: 'auth', error: 'Invalid credentials — check your username and password.' }
+      }
+      if (resp.status >= 500) {
+        return { success: false, kind: 'server', error: `Server error (HTTP ${resp.status}). Try again later.` }
+      }
       if (!resp.ok) {
-        return { success: false, error: `Server returned ${resp.status}` }
+        return { success: false, kind: 'server', error: `Server returned HTTP ${resp.status}.` }
       }
 
-      const data = await resp.json() as { user_info: XtreamUserInfo; server_info: XtreamServerInfo }
+      // Some Xtream servers return 200 with empty body or HTML on auth fail.
+      let data: { user_info?: XtreamUserInfo; server_info?: XtreamServerInfo }
+      try {
+        data = await resp.json() as { user_info?: XtreamUserInfo; server_info?: XtreamServerInfo }
+      } catch {
+        return { success: false, kind: 'auth', error: 'Server did not return valid account info — credentials likely rejected.' }
+      }
 
       if (!data.user_info) {
-        return { success: false, error: 'Invalid credentials or server response' }
+        return { success: false, kind: 'auth', error: 'Invalid credentials — server responded without account info.' }
+      }
+      // Some servers encode "disabled/expired" in user_info.status.
+      const status = (data.user_info.status ?? '').toString().toLowerCase()
+      if (status && status !== 'active' && status !== 'ok' && status !== 'enabled' && status !== '') {
+        return { success: false, kind: 'auth', error: `Account status: ${data.user_info.status}.` }
       }
 
       return {
@@ -60,7 +78,21 @@ export class XtreamService {
         serverInfo: data.server_info,
       }
     } catch (err) {
-      return { success: false, error: String(err) }
+      const msg = err instanceof Error ? err.message : String(err)
+      const name = err instanceof Error ? err.name : ''
+      if (name === 'TimeoutError' || /timeout/i.test(msg)) {
+        return { success: false, kind: 'network', error: 'Timed out reaching the server.' }
+      }
+      if (/abort/i.test(msg)) {
+        return { success: false, kind: 'network', error: 'Connection to the server was aborted.' }
+      }
+      if (/ENOTFOUND|EAI_AGAIN|getaddrinfo/i.test(msg)) {
+        return { success: false, kind: 'network', error: "Can't find that server address — check the URL." }
+      }
+      if (/ECONNREFUSED|ECONNRESET|EHOSTUNREACH|ENETUNREACH|certificate|SSL|TLS|fetch failed/i.test(msg)) {
+        return { success: false, kind: 'network', error: "Can't reach that server — it may be offline or blocking requests." }
+      }
+      return { success: false, kind: 'unknown', error: msg || 'Connection failed.' }
     }
   }
 
@@ -118,7 +150,14 @@ export class XtreamService {
     seriesInfo?: Record<string, any>
   }> {
     const url = this.buildApiUrl(serverUrl, username, password, 'get_series_info', `&series_id=${seriesId}`)
-    const res = await fetch(url)
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 30_000)
+    let res: Response
+    try {
+      res = await fetch(url, { signal: controller.signal })
+    } finally {
+      clearTimeout(timeoutId)
+    }
     const data = await res.json() as any
     const seasons: Record<string, any[]> = {}
     const rawEpisodes = data?.episodes ?? data?.Episodes ?? {}
@@ -139,6 +178,35 @@ export class XtreamService {
       }
     }
     return { seasons, seriesInfo: data?.info ?? {} }
+  }
+
+  async getVodInfo(serverUrl: string, username: string, password: string, vodId: string): Promise<{ runtime: number | null }> {
+    const url = this.buildApiUrl(serverUrl, username, password, 'get_vod_info', `&vod_id=${vodId}`)
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 15_000)
+    try {
+      const res = await fetch(url, { signal: controller.signal })
+      const data = await res.json() as any
+      const info = data?.info ?? {}
+      if (info.duration_secs && Number(info.duration_secs) > 0) {
+        return { runtime: Math.round(Number(info.duration_secs) / 60) }
+      }
+      if (info.duration) {
+        const d = String(info.duration)
+        if (d.includes(':')) {
+          const parts = d.split(':').map(Number)
+          const secs = (parts[0] ?? 0) * 3600 + (parts[1] ?? 0) * 60 + (parts[2] ?? 0)
+          if (secs > 0) return { runtime: Math.round(secs / 60) }
+        }
+        const mins = Number(d)
+        if (mins > 0) return { runtime: mins }
+      }
+      return { runtime: null }
+    } catch {
+      return { runtime: null }
+    } finally {
+      clearTimeout(timeoutId)
+    }
   }
 
   buildCatchupUrl(serverUrl: string, username: string, password: string, streamId: string, start: Date, duration: number): string {

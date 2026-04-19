@@ -68,6 +68,11 @@ async function run() {
   const sourceExistsStmt = db.prepare('SELECT 1 FROM sources WHERE id = ?')
   const sourceExists = (): boolean => !!sourceExistsStmt.get(sourceId)
 
+  // Tracks whether we've started mutating existing rows. Once true, the
+  // catch block can't claim "last snapshot" — current rows are either empty
+  // or partial new data, not the prior good state.
+  let wipeStarted = false
+
   try {
     const base = serverUrl.replace(/\/$/, '')
     const apiBase = `${base}/player_api.php?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`
@@ -88,9 +93,23 @@ async function run() {
     const vodCats = vodCatsResult.data || []
     const seriesCats = seriesCatsResult.data || []
 
+    // Schema guard (replace-all safety): prefetch all content streams BEFORE
+    // wiping. If every content endpoint errored out, abort without touching
+    // existing data — otherwise a transient outage would nuke the catalog.
+    send('categories', 0, 3, 'Fetching catalog…')
+    const [liveResult, vodResult, seriesResult] = await Promise.all([
+      fetchJson<any[]>(`${apiBase}&action=get_live_streams`, FETCH_TIMEOUT, 'live_streams'),
+      fetchJson<any[]>(`${apiBase}&action=get_vod_streams`, FETCH_TIMEOUT, 'vod_streams'),
+      fetchJson<any[]>(`${apiBase}&action=get_series`, FETCH_TIMEOUT, 'series'),
+    ])
+    if (liveResult.error && vodResult.error && seriesResult.error) {
+      throw new Error('All content fetches failed — refusing to wipe existing catalog.')
+    }
+
     // Wipe + repopulate per-type category tables for this source.
     // Content tables are wiped below — this happens first so FK SET NULL is
     // a no-op for now-absent rows.
+    wipeStarted = true
     db.prepare(`DELETE FROM channel_categories WHERE source_id = ?`).run(sourceId)
     db.prepare(`DELETE FROM movie_categories   WHERE source_id = ?`).run(sourceId)
     db.prepare(`DELETE FROM series_categories  WHERE source_id = ?`).run(sourceId)
@@ -163,8 +182,7 @@ async function run() {
     `)
 
     // ── Live channels ──────────────────────────────────────────────────────
-    send('live', 0, 0, 'Fetching channels…')
-    const liveResult = await fetchJson<any[]>(`${apiBase}&action=get_live_streams`, FETCH_TIMEOUT, 'live_streams')
+    // liveResult was prefetched above with the schema guard.
     const liveStreams = liveResult.data || []
     if (liveResult.error) sendWarning('Failed to fetch live channels — timed out or server error')
     send('live', 0, liveStreams.length, `Saving ${liveStreams.length.toLocaleString()} channels…`)
@@ -193,8 +211,7 @@ async function run() {
     }
 
     // ── Movies (VOD) ───────────────────────────────────────────────────────
-    send('movies', 0, 0, 'Fetching movies…')
-    const vodResult = await fetchJson<any[]>(`${apiBase}&action=get_vod_streams`, FETCH_TIMEOUT, 'vod_streams')
+    // vodResult was prefetched above with the schema guard.
     const vodStreams = vodResult.data || []
     if (vodResult.error) sendWarning('Failed to fetch movies — timed out or server error')
     send('movies', 0, vodStreams.length, `Saving ${vodStreams.length.toLocaleString()} movies…`)
@@ -220,8 +237,7 @@ async function run() {
     }
 
     // ── Series parents ─────────────────────────────────────────────────────
-    send('series', 0, 0, 'Fetching series…')
-    const seriesResult = await fetchJson<any[]>(`${apiBase}&action=get_series`, FETCH_TIMEOUT, 'series')
+    // seriesResult was prefetched above with the schema guard.
     const seriesList = seriesResult.data || []
     if (seriesResult.error) sendWarning('Failed to fetch series — timed out or server error')
     send('series', 0, seriesList.length, `Saving ${seriesList.length.toLocaleString()} series…`)
@@ -254,6 +270,23 @@ async function run() {
     const seCount = (db.prepare('SELECT COUNT(*) as n FROM series   WHERE source_id = ?').get(sourceId) as { n: number }).n
     const totalItems = chCount + mvCount + seCount
 
+    // Drop categories with no referencing content for this source (provider-
+    // returned taxonomy sometimes carries rows no stream references).
+    for (const [catTable, contentTable] of [
+      ['channel_categories', 'channels'],
+      ['movie_categories',   'movies'],
+      ['series_categories',  'series'],
+    ] as const) {
+      db.prepare(`
+        DELETE FROM ${catTable}
+        WHERE source_id = ?
+          AND id NOT IN (
+            SELECT DISTINCT category_id FROM ${contentTable}
+            WHERE source_id = ? AND category_id IS NOT NULL
+          )
+      `).run(sourceId, sourceId)
+    }
+
     db.prepare(`
       UPDATE sources SET status = 'active', last_sync = unixepoch(), last_error = NULL, item_count = ?
       WHERE id = ?
@@ -265,7 +298,18 @@ async function run() {
       console.log('[SyncWorker] Source deleted during sync — suppressing error:', String(err))
       sendDone(0, 0)
     } else {
-      db.prepare(`UPDATE sources SET status = 'error', last_error = ? WHERE id = ?`).run(String(err), sourceId)
+      // Only claim "last snapshot" when the failure was BEFORE any wipe —
+      // once wipeStarted=true the rows are either empty or partial new data,
+      // not the prior good state, so a plain error is more honest.
+      const existing = wipeStarted ? 0
+        : (db.prepare('SELECT COUNT(*) as n FROM channels WHERE source_id = ?').get(sourceId) as { n: number }).n
+          + (db.prepare('SELECT COUNT(*) as n FROM movies WHERE source_id = ?').get(sourceId) as { n: number }).n
+          + (db.prepare('SELECT COUNT(*) as n FROM series WHERE source_id = ?').get(sourceId) as { n: number }).n
+      if (existing > 0) {
+        db.prepare(`UPDATE sources SET status = 'active', last_error = ? WHERE id = ?`).run(`Refresh failed — showing last snapshot: ${String(err)}`, sourceId)
+      } else {
+        db.prepare(`UPDATE sources SET status = 'error', last_error = ? WHERE id = ?`).run(String(err), sourceId)
+      }
       sendError(String(err))
     }
   } finally {

@@ -9,6 +9,7 @@ interface Props {
   onPlay: (item: ContentItem) => void
   episodeToPlay?: any
   overridePlayLabel?: string
+  hidePrimary?: boolean
 }
 
 function formatPosition(seconds: number): string {
@@ -19,7 +20,7 @@ function formatPosition(seconds: number): string {
   return `${m}:${String(s).padStart(2, '0')}`
 }
 
-export function ActionButtons({ item, onPlay, episodeToPlay, overridePlayLabel }: Props) {
+export function ActionButtons({ item, onPlay, episodeToPlay, overridePlayLabel, hidePrimary }: Props) {
   const userStore = useUserStore()
   const userData = userStore.data[item.id]
   const qc = useQueryClient()
@@ -123,28 +124,30 @@ export function ActionButtons({ item, onPlay, episodeToPlay, overridePlayLabel }
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {/* Play button */}
-      <button
-        onClick={() => onPlay(episodeToPlay ?? item)}
-        style={{
-          width: '100%',
-          height: 36,
-          borderRadius: 6,
-          background: 'var(--accent-interactive)',
-          color: '#fff',
-          border: 'none',
-          fontSize: 13,
-          fontWeight: 600,
-          cursor: 'pointer',
-          fontFamily: 'var(--font-ui)',
-          transition: 'opacity 0.12s',
-        }}
-        onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.88' }}
-        onMouseLeave={(e) => { e.currentTarget.style.opacity = '1' }}
-      >
-        {playLabel}
-      </button>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: hidePrimary ? 0 : 8 }}>
+      {/* Play button — hidden when primary action is in footer */}
+      {!hidePrimary && (
+        <button
+          onClick={() => onPlay(episodeToPlay ?? item)}
+          style={{
+            width: '100%',
+            height: 36,
+            borderRadius: 6,
+            background: 'var(--accent-interactive)',
+            color: '#fff',
+            border: 'none',
+            fontSize: 13,
+            fontWeight: 600,
+            cursor: 'pointer',
+            fontFamily: 'var(--font-ui)',
+            transition: 'opacity 0.12s',
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.88' }}
+          onMouseLeave={(e) => { e.currentTarget.style.opacity = '1' }}
+        >
+          {playLabel}
+        </button>
+      )}
 
       {/* Icon buttons row */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

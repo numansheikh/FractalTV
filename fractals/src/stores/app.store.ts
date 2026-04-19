@@ -5,7 +5,7 @@ import { ContentItem, ActiveView, ContentType } from '@/lib/types'
 interface AppState {
   // Navigation
   activeView: ActiveView
-  previousView: ActiveView | null
+  viewHistory: ActiveView[]
 
   // Panel stack — topmost is active
   selectedContent: ContentItem | null
@@ -18,6 +18,10 @@ interface AppState {
   channelSurfList: ContentItem[]
   channelSurfIndex: number
   surfSearchQuery: string | null
+
+  // Episode surf context (series episodes in active season)
+  episodeSurfList: ContentItem[]
+  episodeSurfIndex: number
 
   // Filters (persisted per-view)
   typeFilter: ContentType
@@ -46,7 +50,11 @@ interface AppState {
   controlsMode: 'never' | 'auto-2' | 'auto-3' | 'auto-5' | 'always'
 
   // Player mode (persistent mount — controlled separately from playingContent)
-  playerMode: 'hidden' | 'fullscreen' | 'mini'
+  playerMode: 'hidden' | 'fullscreen' | 'mini' | 'embedded'
+
+  // Embedded player anchor — the DOM element the player should overlay when in 'embedded' mode.
+  // Not persisted (DOM references can't be serialized).
+  embeddedAnchor: HTMLElement | null
 
   // Actions
   setView: (view: ActiveView) => void
@@ -61,6 +69,8 @@ interface AppState {
   surfContextAction: 'home-discover' | 'home-channels' | 'browse-favorites' | 'search' | null
   setChannelSurfContext: (list: ContentItem[], index: number, action?: 'home-discover' | 'home-channels' | 'browse-favorites' | 'search' | null, searchQuery?: string | null) => void
   surfChannel: (dir: 1 | -1) => ContentItem | null
+  setEpisodeSurfContext: (list: ContentItem[], index: number) => void
+  surfEpisode: (dir: 1 | -1) => ContentItem | null
   setShowSources: (v: boolean) => void
   setTypeFilter: (type: ContentType) => void
   setCategoryFilter: (cat: string | null) => void
@@ -73,14 +83,15 @@ interface AppState {
   setTimezone: (tz: string | null) => void
   setMinWatchSeconds: (n: number) => void
   setControlsMode: (m: 'never' | 'auto-2' | 'auto-3' | 'auto-5' | 'always') => void
-  setPlayerMode: (m: 'hidden' | 'fullscreen' | 'mini') => void
+  setPlayerMode: (m: 'hidden' | 'fullscreen' | 'mini' | 'embedded') => void
+  setEmbeddedAnchor: (el: HTMLElement | null) => void
 }
 
 export const useAppStore = create<AppState>()(
   persist(
     (set) => ({
       activeView: 'home',
-      previousView: null,
+      viewHistory: [],
       selectedContent: null,
       playingContent: null,
       showSettings: false,
@@ -90,6 +101,8 @@ export const useAppStore = create<AppState>()(
       channelSurfIndex: -1,
       surfContextAction: null,
       surfSearchQuery: null,
+      episodeSurfList: [],
+      episodeSurfIndex: -1,
       typeFilter: 'all',
       categoryFilters: {},
       selectedSourceIds: [],
@@ -103,14 +116,19 @@ export const useAppStore = create<AppState>()(
       minWatchSeconds: 5,
       controlsMode: 'auto-3',
       playerMode: 'hidden',
+      embeddedAnchor: null,
 
-      setView: (activeView) => set((s) => ({ activeView, previousView: s.activeView })),
-      goBack: () => set((s) => ({ activeView: s.previousView ?? 'home', previousView: null })),
+      setView: (activeView) => set((s) => ({ activeView, viewHistory: [...s.viewHistory, s.activeView] })),
+      goBack: () => set((s) => {
+        const history = [...s.viewHistory]
+        const prev = history.pop() ?? 'home'
+        return { activeView: prev, viewHistory: history }
+      }),
       setViewMode: (viewMode) => set({ viewMode }),
       setPageSize: (pageSize) => set({ pageSize }),
       setSort: (sort) => set({ sort }),
       setSelectedContent: (selectedContent) => set({ selectedContent }),
-      setPlayingContent: (playingContent) => set({ playingContent }),
+      setPlayingContent: (playingContent) => set(playingContent === null ? { playingContent, embeddedAnchor: null } : { playingContent }),
       setShowSettings: (showSettings) => set({ showSettings }),
       setLiveViewChannel: (liveViewChannel) => set({ liveViewChannel }),
       setChannelSurfContext: (channelSurfList, channelSurfIndex, action, searchQuery) => set({ channelSurfList, channelSurfIndex, surfContextAction: action ?? null, surfSearchQuery: searchQuery ?? null }),
@@ -124,6 +142,21 @@ export const useAppStore = create<AppState>()(
           const next = (idx + dir + s.channelSurfList.length) % s.channelSurfList.length
           result = s.channelSurfList[next]
           return { channelSurfIndex: next }
+        })
+        return result
+      },
+      setEpisodeSurfContext: (episodeSurfList, episodeSurfIndex) => set({ episodeSurfList, episodeSurfIndex }),
+      surfEpisode: (dir) => {
+        let result: ContentItem | null = null
+        set((s) => {
+          if (s.episodeSurfList.length === 0) return s
+          const currentId = s.playingContent?.id
+          let idx = s.episodeSurfList.findIndex((e) => e.id === currentId)
+          if (idx === -1) idx = s.episodeSurfIndex
+          const next = idx + dir
+          if (next < 0 || next >= s.episodeSurfList.length) return s
+          result = s.episodeSurfList[next]
+          return { episodeSurfIndex: next }
         })
         return result
       },
@@ -145,6 +178,7 @@ export const useAppStore = create<AppState>()(
       setMinWatchSeconds: (minWatchSeconds) => set({ minWatchSeconds }),
       setControlsMode: (controlsMode) => set({ controlsMode }),
       setPlayerMode: (playerMode) => set({ playerMode }),
+      setEmbeddedAnchor: (embeddedAnchor) => set({ embeddedAnchor }),
     }),
     {
       name: 'fractals-app',

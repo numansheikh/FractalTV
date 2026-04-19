@@ -22,6 +22,7 @@ export const api = {
     toggleDisabled: (sourceId: string) => ipcRenderer.invoke('sources:toggle-disabled', sourceId),
     setColor: (sourceId: string, colorIndex: number) => ipcRenderer.invoke('sources:set-color', sourceId, colorIndex),
     sync: (sourceId: string) => ipcRenderer.invoke('sources:sync', sourceId),
+    syncEpg: (sourceId: string) => ipcRenderer.invoke('sources:sync-epg', sourceId),
     cancelSync: (sourceId: string) => ipcRenderer.invoke('sources:sync:cancel', sourceId),
     accountInfo: (sourceId: string) => ipcRenderer.invoke('sources:account-info', sourceId),
     startupCheck: () => ipcRenderer.invoke('sources:startup-check'),
@@ -35,6 +36,8 @@ export const api = {
   categories: {
     list: (args: { type?: 'live' | 'movie' | 'series'; sourceIds?: string[] }) =>
       ipcRenderer.invoke('categories:list', args),
+    setNsfw: (id: string, value: 0 | 1) =>
+      ipcRenderer.invoke('categories:set-nsfw', id, value),
   },
 
   // Search
@@ -52,6 +55,8 @@ export const api = {
       ipcRenderer.invoke('content:get-catchup-url', args),
     browse: (args: { type?: 'live' | 'movie' | 'series'; categoryName?: string; sourceIds?: string[]; sortBy?: string; sortDir?: string; limit?: number; offset?: number }) =>
       ipcRenderer.invoke('content:browse', args),
+    getVodInfo: (args: { contentId: string }) =>
+      ipcRenderer.invoke('content:get-vod-info', args),
   },
 
   // Series
@@ -97,20 +102,15 @@ export const api = {
       ipcRenderer.invoke('channels:reorder-favorites', order),
     getData: (canonicalId: string) =>
       ipcRenderer.invoke('channels:get-data', canonicalId),
+    siblings: (channelId: string) =>
+      ipcRenderer.invoke('channels:siblings', channelId),
   },
 
   // External player
   player: {
-    openExternal: (args: { player: 'mpv' | 'vlc'; url: string; title: string; customPath?: string }) =>
+    openExternal: (args: { player: 'mpv' | 'vlc'; url: string; title: string; customPath?: string; headers?: Record<string, string> }) =>
       ipcRenderer.invoke('player:open-external', args),
     detectExternal: () => ipcRenderer.invoke('player:detect-external'),
-  },
-
-  // Enrichment — stubbed in g1c (no canonical/TMDB layer yet). Kept on the
-  // surface so the renderer's status pollers don't crash; returns zeros.
-  enrichment: {
-    status: () => ipcRenderer.invoke('enrichment:status'),
-    start: () => ipcRenderer.invoke('enrichment:start'),
   },
 
   // EPG
@@ -118,6 +118,7 @@ export const api = {
     nowNext: (contentId: string) => ipcRenderer.invoke('epg:now-next', contentId),
     guide: (args: { contentIds: string[]; startTime?: number; endTime?: number }) =>
       ipcRenderer.invoke('epg:guide', args),
+    fetchShort: (contentId: string) => ipcRenderer.invoke('epg:fetch-short', contentId),
   },
 
   // Dialog
@@ -126,6 +127,29 @@ export const api = {
       ipcRenderer.invoke('dialog:open-file', args),
     saveFile: (args?: { defaultPath?: string; filters?: { name: string; extensions: string[] }[] }) =>
       ipcRenderer.invoke('dialog:save-file', args),
+  },
+
+  // Export playlist
+  export: {
+    buildTree: () => ipcRenderer.invoke('export:build-tree'),
+    pickFile: () => ipcRenderer.invoke('export:pick-file'),
+    run: (args: {
+      selection: {
+        favoritesChannels: boolean
+        favoritesMovies: boolean
+        favoritesSeries: boolean
+        channelCategoryIds: Array<{ sourceId: string; categoryId: string }>
+        movieCategoryIds: Array<{ sourceId: string; categoryId: string }>
+        seriesCategoryIds: Array<{ sourceId: string; categoryId: string }>
+      }
+      outputPath: string
+    }) => ipcRenderer.invoke('export:run', args),
+    reveal: (filePath: string) => ipcRenderer.invoke('export:reveal', filePath),
+    onProgress: (cb: (progress: { phase: string; current: number; total: number; message: string }) => void) => {
+      const handler = (_e: unknown, progress: any) => cb(progress)
+      ipcRenderer.on('export:progress', handler)
+      return () => ipcRenderer.removeListener('export:progress', handler)
+    },
   },
 
   // Window
@@ -142,6 +166,26 @@ export const api = {
   // Settings (key-value store)
   settings: {
     get: (key: string) => ipcRenderer.invoke('settings:get', key),
+    set: (key: string, value: string) => ipcRenderer.invoke('settings:set', key, value),
+  },
+
+  // iptv-org reference database (independent module)
+  iptvOrg: {
+    pull: () => ipcRenderer.invoke('iptvOrg:pull'),
+    status: () => ipcRenderer.invoke('iptvOrg:status'),
+  },
+
+  // VoD enrichment (g2 — keyless)
+  vodEnrich: {
+    status: () => ipcRenderer.invoke('vodEnrich:status'),
+    enrich: (sourceId: string, force?: boolean) => ipcRenderer.invoke('vodEnrich:enrich', sourceId, force ?? false),
+    getForContent: (contentId: string) => ipcRenderer.invoke('vodEnrich:getForContent', contentId),
+    enrichSingle: (contentId: string, force?: boolean) => ipcRenderer.invoke('vodEnrich:enrichSingle', contentId, force ?? false),
+    prefetchVisible: (contentIds: string[]) => ipcRenderer.invoke('vodEnrich:prefetchVisible', contentIds),
+    cancelPrefetch: () => ipcRenderer.invoke('vodEnrich:cancelPrefetch'),
+    pickCandidate: (contentId: string, enrichmentId: number) => ipcRenderer.invoke('vodEnrich:pickCandidate', contentId, enrichmentId),
+    disable: (contentId: string) => ipcRenderer.invoke('vodEnrich:disable', contentId),
+    reset: (contentId: string) => ipcRenderer.invoke('vodEnrich:reset', contentId),
   },
 
   // Events from main process
@@ -161,7 +205,7 @@ contextBridge.exposeInMainWorld('electronDevTools', () => {
 
 declare global {
   interface Window {
-    api: typeof api & { settings: { get: (key: string) => Promise<string | null> } }
+    api: typeof api & { settings: { get: (key: string) => Promise<string | null>; set: (key: string, value: string) => Promise<{ ok: boolean }> } }
     electronDevTools: () => void
   }
 }

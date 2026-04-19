@@ -35,19 +35,116 @@ export function App() {
   )
 }
 
+// ─── Keyboard shortcuts overlay ───────────────────────────────────────────────
+
+const SHORTCUTS = [
+  { keys: ['/', 'Cmd+K'], action: 'Focus search' },
+  { keys: ['Escape'], action: 'Clear search / go back / close' },
+  { keys: ['Cmd+1'], action: 'Home' },
+  { keys: ['Cmd+2'], action: 'Live TV' },
+  { keys: ['Cmd+3'], action: 'Films' },
+  { keys: ['Cmd+4'], action: 'Series' },
+  { keys: ['Cmd+5'], action: 'Library' },
+  { keys: ['Cmd+,'], action: 'Settings' },
+  { keys: ['[', ']'], action: 'Channel surf (Live TV)' },
+  { keys: ['↑', '↓'], action: 'Volume (player)' },
+  { keys: ['←', '→'], action: 'Seek (player)' },
+  { keys: ['Space'], action: 'Play / pause' },
+  { keys: ['F'], action: 'Fullscreen' },
+  { keys: ['M'], action: 'Mute' },
+  { keys: ['?'], action: 'This help' },
+]
+
+function ShortcutsOverlay({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' || e.key === '?') { e.stopImmediatePropagation(); onClose() }
+    }
+    window.addEventListener('keydown', handler, true)
+    return () => window.removeEventListener('keydown', handler, true)
+  }, [onClose])
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 200,
+        background: 'rgba(0,0,0,0.6)',
+        backdropFilter: 'blur(4px)',
+        WebkitBackdropFilter: 'blur(4px)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: 'var(--bg-1)',
+          border: '1px solid var(--border-default)',
+          borderRadius: 12,
+          padding: '20px 24px 24px',
+          width: 400,
+          maxHeight: '80vh',
+          overflowY: 'auto',
+          boxShadow: '0 24px 80px rgba(0,0,0,0.6)',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+          <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-0)', fontFamily: 'var(--font-ui)' }}>
+            Keyboard shortcuts
+          </span>
+          <button
+            onClick={onClose}
+            style={{ background: 'none', border: 'none', color: 'var(--text-2)', cursor: 'pointer', padding: 4, display: 'flex' }}
+          >
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round">
+              <path d="M1 1l10 10M11 1L1 11" />
+            </svg>
+          </button>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          {SHORTCUTS.map(({ keys, action }) => (
+            <div key={action} style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '5px 0',
+              borderBottom: '1px solid var(--border-subtle)',
+            }}>
+              <span style={{ fontSize: 12, color: 'var(--text-1)', fontFamily: 'var(--font-ui)' }}>{action}</span>
+              <div style={{ display: 'flex', gap: 4 }}>
+                {keys.map((k) => (
+                  <span key={k} style={{
+                    fontSize: 11, fontFamily: 'var(--font-mono, monospace)',
+                    background: 'var(--bg-3)', color: 'var(--text-0)',
+                    border: '1px solid var(--border-default)',
+                    borderRadius: 4, padding: '1px 6px',
+                    whiteSpace: 'nowrap',
+                  }}>{k}</span>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function AppShell() {
   const queryClient = useQueryClient()
-  const { setSources, updateSource, setSyncProgress } = useSourcesStore()
+  const { setSources, updateSource, setSyncProgress, setEnrichProgress, setEnrichResult } = useSourcesStore()
   const {
     selectedContent, playingContent, showSettings, showSources,
     liveViewChannel, setLiveViewChannel,
     setSelectedContent, setPlayingContent, setShowSettings, setShowSources,
     setView, setCategoryFilter, clearSourceFilter, toggleSourceFilter,
-    sort, setSort, surfChannel,
+    sort, setSort, surfChannel, surfEpisode,
     playerMode, setPlayerMode,
   } = useAppStore()
 
   const [showAddModal, setShowAddModal] = useState(false)
+  const [showShortcuts, setShowShortcuts] = useState(false)
+  const showShortcutsRef = useRef(false)
+  const openShortcuts = () => { showShortcutsRef.current = true; setShowShortcuts(true) }
+  const closeShortcuts = () => { showShortcutsRef.current = false; setShowShortcuts(false) }
 
   // Guard against StrictMode double-mount triggering duplicate syncs
   const syncingIds = useRef(new Set<string>())
@@ -81,6 +178,7 @@ function AppShell() {
       // Escape — universal "back" chain (bubble phase, so overlays win via capture+stopImmediatePropagation)
       // Works even when an input is focused (intentional — clears search query)
       if (e.key === 'Escape') {
+        if (showShortcutsRef.current) { showShortcutsRef.current = false; setShowShortcuts(false); return }
         const s = useSearchStore.getState()
         const a = useAppStore.getState()
         // 1. Clear search query for current view
@@ -91,6 +189,7 @@ function AppShell() {
       }
 
       if (isTyping()) return
+      if (e.key === '?') { openShortcuts(); return }
       if ((e.metaKey || e.ctrlKey) && e.key === '1') { e.preventDefault(); setView('home') }
       if ((e.metaKey || e.ctrlKey) && e.key === '2') { e.preventDefault(); setView('live') }
       if ((e.metaKey || e.ctrlKey) && e.key === '3') { e.preventDefault(); setView('films') }
@@ -127,13 +226,15 @@ function AppShell() {
     const lastPhase: Record<string, string> = {}
     return api.on('sync:progress', (progress: any) => {
       const p = progress as SyncProgress & { sourceId: string }
-      if (p.phase === 'done' || p.phase === 'cancelled') {
+      if (p.phase === 'done' || p.phase === 'canceled') {
         setSyncProgress(p.sourceId, null)
         api.sources.list().then((list) => setSources(list as Source[]))
         if (p.phase === 'done') invalidateContentQueries()
       } else if (p.phase === 'error') {
         setSyncProgress(p.sourceId, null)
-        updateSource(p.sourceId, { status: 'error', lastError: p.message })
+        // Re-fetch from DB: the worker may have kept status='active' with a
+        // staleness last_error when previous content survived (M3U 404, etc).
+        api.sources.list().then((list) => setSources(list as Source[]))
       } else {
         setSyncProgress(p.sourceId, { phase: p.phase, current: p.current, total: p.total, message: p.message })
         updateSource(p.sourceId, { status: 'syncing' })
@@ -145,7 +246,23 @@ function AppShell() {
     })
   }, [setSources, updateSource, setSyncProgress])
 
-  const handleSync = async (sourceId: string) => {
+  // VoD enrichment progress events (global — survives SourcesPanel open/close)
+  useEffect(() => {
+    return api.on('vodEnrich:progress', (p: any) => {
+      const { sourceId, phase, current, total, message, error } = p
+      if (phase === 'done') {
+        setEnrichProgress(sourceId, null)
+        setEnrichResult(sourceId, { success: true, message: message ?? 'Enrichment complete' })
+      } else if (phase === 'error') {
+        setEnrichProgress(sourceId, null)
+        setEnrichResult(sourceId, { success: false, message: error ?? 'Enrichment failed' })
+      } else {
+        setEnrichProgress(sourceId, { current: current ?? 0, total: total ?? 0, message })
+      }
+    })
+  }, [setEnrichProgress, setEnrichResult])
+
+const handleSync = async (sourceId: string) => {
     if (syncingIds.current.has(sourceId)) return
     syncingIds.current.add(sourceId)
     updateSource(sourceId, { status: 'syncing' })
@@ -176,30 +293,75 @@ function AppShell() {
 
   const handleSelectContent = (item: ContentItem) => {
     if (item.type === 'live') {
+      setSelectedContent(null)
       setLiveViewChannel(item)
     } else {
       setSelectedContent(item)
     }
   }
 
-  const handlePlay = (item: ContentItem) => {
-    setPlayingContent(item)
-    setPlayerMode('fullscreen')
+  const handlePlay = async (item: ContentItem) => {
+    if (item.type === 'live') {
+      const s = useAppStore.getState()
+      if (!s.channelSurfList.some((ch) => ch.id === item.id)) {
+        // Channel isn't in the current surf list (e.g. opened from ChannelDetail).
+        // Try to load the full category so LiveView has a proper channel list to surf.
+        const catName = (item as any).category_name ?? (item as any).categoryName ?? null
+        if (catName) {
+          try {
+            const result = await api.content.browse({ type: 'live', categoryName: catName, limit: 500, offset: 0 })
+            const items = (result?.items ?? []) as ContentItem[]
+            const idx = items.findIndex((ch) => ch.id === item.id)
+            s.setChannelSurfContext(items, idx >= 0 ? idx : 0, null, null)
+          } catch {
+            s.setChannelSurfContext([item], 0, null, null)
+          }
+        } else {
+          s.setChannelSurfContext([item], 0, null, null)
+        }
+      }
+      setSelectedContent(null)
+      setLiveViewChannel(item)
+    } else {
+      // VoD — start in mini player; expand button in mini player goes fullscreen
+      setPlayingContent(item)
+      setPlayerMode('mini')
+    }
   }
 
   const handlePlayerClose = () => {
+    const wasLive = playingContent?.type === 'live'
     setPlayingContent(null)
     setPlayerMode('hidden')
+    // Only close LiveView when the closed stream was actually a live channel
+    if (wasLive) setLiveViewChannel(null)
+  }
+
+  const handlePlayerMinimize = () => {
+    const content = playingContent
+    if (!content) { setPlayerMode('hidden'); return }
+    if (content.type === 'live') {
+      // Return to live view rather than mini player
+      setPlayerMode('hidden')
+      if (!liveViewChannel) setLiveViewChannel(content)
+    } else {
+      setPlayerMode('mini')
+    }
   }
 
   const handlePlayerChipClick = (item: ContentItem) => {
-    setPlayerMode('mini')
     const parent = (item as any)._parent
     if (parent) {
-      // Episode — open series detail panel
+      // Episode — minimize to mini, open series detail panel
+      setPlayerMode('mini')
+      setLiveViewChannel(null)
       setSelectedContent({ ...item, id: parent.id, title: parent.title, type: 'series' } as ContentItem)
     } else {
-      // Navigate to category in the appropriate view
+      // Navigate to category — shrink to mini player, keep stream going
+      setPlayerMode('mini')
+      setLiveViewChannel(null)
+      setSelectedContent(null)
+      useSearchStore.getState().setQuery('')
       const cat = (item as any).category_name
       const viewMap = { live: 'live', movie: 'films', series: 'series' } as const
       setView(viewMap[item.type as keyof typeof viewMap] ?? 'films')
@@ -249,14 +411,19 @@ function AppShell() {
         />
       </div>
 
-      {/* Player — always mounted for persistent stream (mini-player support) */}
+      {/* Player — always mounted; drives embedded, fullscreen, and mini modes */}
       <PlayerOverlay
         content={playingContent}
         mode={playerMode}
         onClose={handlePlayerClose}
-        onMinimize={() => setPlayerMode('mini')}
+        onMinimize={handlePlayerMinimize}
         onExpand={() => setPlayerMode('fullscreen')}
         onSurfChannel={surfChannel}
+        onSurfEpisode={(dir) => {
+          const next = surfEpisode(dir)
+          if (next) setPlayingContent(next)
+          return next
+        }}
         onChipClick={handlePlayerChipClick}
       />
 
@@ -283,7 +450,7 @@ function AppShell() {
             onPlay={handlePlay}
             onClose={() => { setSelectedContent(null) }}
             onNavigate={handleBreadcrumbNav}
-            isPlaying={!!playingContent}
+            isPlaying={playerMode === 'fullscreen'}
           />
         )}
         {/* Series detail */}
@@ -293,7 +460,7 @@ function AppShell() {
             onPlay={handlePlay}
             onClose={() => { setSelectedContent(null) }}
             onNavigate={handleBreadcrumbNav}
-            isPlaying={!!playingContent}
+            isPlaying={playerMode === 'fullscreen'}
           />
         )}
         {/* Channel detail */}
@@ -306,27 +473,24 @@ function AppShell() {
             isPlaying={!!playingContent}
           />
         )}
-        {/* Live View */}
-        {liveViewChannel && playerMode === 'hidden' && (
+        {/* Live View — stays mounted during embedded mode; hidden only when fullscreen */}
+        {liveViewChannel && playerMode !== 'fullscreen' && (
           <LiveView
             channel={liveViewChannel}
-            onFullscreen={(ch) => handlePlay(ch)}
-            onSwitchChannel={(ch) => setLiveViewChannel(ch)}
-            onClose={() => setLiveViewChannel(null)}
+            onFullscreen={() => setPlayerMode('fullscreen')}
+            onSwitchChannel={(ch) => { setSelectedContent(null); setLiveViewChannel(ch) }}
+            onClose={() => { setLiveViewChannel(null) }}
           />
         )}
-        {/* Settings — suppressScrim: shared scrim above handles it */}
         {showSettings && (
-          <SettingsPanel onClose={() => setShowSettings(false)} suppressScrim />
+          <SettingsPanel onClose={() => setShowSettings(false)} />
         )}
-        {/* Sources — suppressScrim: shared scrim above handles it */}
         {showSources && (
           <SourcesPanel
             onClose={() => setShowSources(false)}
             onSync={handleSync}
             onRemove={handleRemove}
             onAdded={async (_sourceId: string) => { await handleSourceAdded() }}
-            suppressScrim
           />
         )}
         {/* First-launch / direct add source modal */}
@@ -338,6 +502,7 @@ function AppShell() {
         )}
       </Suspense>
       <ContextMenu />
+      {showShortcuts && <ShortcutsOverlay onClose={closeShortcuts} />}
     </div>
   )
 }

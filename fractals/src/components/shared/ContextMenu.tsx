@@ -23,7 +23,9 @@ export function ContextMenu() {
   useEffect(() => {
     if (!visible) return
     const close = () => hide()
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') hide() }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.stopImmediatePropagation(); hide() }
+    }
     window.addEventListener('click', close)
     window.addEventListener('keydown', onKey, true)
     window.addEventListener('scroll', close, true)

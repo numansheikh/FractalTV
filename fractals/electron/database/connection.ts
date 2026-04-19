@@ -65,17 +65,136 @@ function createTables(db: Database.Database) {
     }
   }
 
+  // g2: ensure `channels.iptv_org_id` exists on pre-existing dev DBs
+  // BEFORE running G1C_SCHEMA_SQL — the schema's index on that column
+  // would fail on an existing `channels` table lacking the column.
+  addIptvOrgIdColumn(db)
+  addNsfwColumns(db)
+
   db.exec(G1C_SCHEMA_SQL)
+
+  // g2: add enrichment selection columns to movies + series (after schema exec
+  // so the enrichment tables already exist as FK targets).
+  addVodEnrichmentColumns(db)
+  addMovieRuntimeColumn(db)
+  renameMdOriginToPrefix(db)
+  addEpgUrlColumn(db)
+  addTvmazeIdColumn(db)
 
   // Drop FTS tables from older g1c builds — search is now plain LIKE on
   // `search_title`, FTS is gone.
   dropLegacyFtsTables(db)
+
+  // One-time: wipe v1 enrichment data so v2 starts clean
+  wipeEnrichmentDataOnce(db)
 
   // Reset any sources stuck in 'syncing' from a previous crashed/killed run
   db.prepare(`UPDATE sources SET status = 'active' WHERE status = 'syncing'`).run()
 
   // Insert default profile if not exists
   db.prepare(`INSERT OR IGNORE INTO profiles (id, name) VALUES ('default', 'Default')`).run()
+}
+
+/** g2: add channels.iptv_org_id on pre-existing DBs. FK enforced via schema.sql. */
+function addIptvOrgIdColumn(db: Database.Database) {
+  const cols = db.prepare(`PRAGMA table_info(channels)`).all() as { name: string }[]
+  if (!cols.length) return
+  if (cols.some((c) => c.name === 'iptv_org_id')) return
+  console.log('[DB] migrating: adding channels.iptv_org_id')
+  db.exec(`ALTER TABLE channels ADD COLUMN iptv_org_id TEXT REFERENCES iptv_channels(id) ON DELETE SET NULL`)
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_channels_iptv_org_id ON channels(iptv_org_id)`)
+}
+
+/** Add is_nsfw column to category + content tables on pre-existing DBs. */
+function addNsfwColumns(db: Database.Database) {
+  const migrations: [string, string][] = [
+    ['channel_categories', 'is_nsfw INTEGER NOT NULL DEFAULT 0'],
+    ['movie_categories',   'is_nsfw INTEGER NOT NULL DEFAULT 0'],
+    ['series_categories',  'is_nsfw INTEGER NOT NULL DEFAULT 0'],
+    ['channels',           'is_nsfw INTEGER NOT NULL DEFAULT 0'],
+    ['movies',             'is_nsfw INTEGER NOT NULL DEFAULT 0'],
+    ['series',             'is_nsfw INTEGER NOT NULL DEFAULT 0'],
+  ]
+  for (const [table, colDef] of migrations) {
+    const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]
+    if (!cols.length) continue
+    if (cols.some((c) => c.name === 'is_nsfw')) continue
+    console.log(`[DB] migrating: adding ${table}.is_nsfw`)
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${colDef}`)
+  }
+}
+
+/**
+ * g2: add enrichment selection columns to movies + series on pre-existing DBs.
+ * The enrichment tables are created by G1C_SCHEMA_SQL (CREATE TABLE IF NOT EXISTS),
+ * so this runs AFTER db.exec(G1C_SCHEMA_SQL).
+ */
+function addVodEnrichmentColumns(db: Database.Database) {
+  const migrations: [string, string][] = [
+    ['movies', 'selected_enrichment_id INTEGER REFERENCES movie_enrichment_g2(id) ON DELETE SET NULL'],
+    ['movies', 'enrichment_disabled INTEGER NOT NULL DEFAULT 0'],
+    ['series', 'selected_enrichment_id INTEGER REFERENCES series_enrichment_g2(id) ON DELETE SET NULL'],
+    ['series', 'enrichment_disabled INTEGER NOT NULL DEFAULT 0'],
+  ]
+  for (const [table, colDef] of migrations) {
+    const colName = colDef.split(' ')[0]
+    const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]
+    if (!cols.length) continue
+    if (cols.some((c) => c.name === colName)) continue
+    console.log(`[DB] migrating: adding ${table}.${colName}`)
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${colDef}`)
+  }
+}
+
+/** Rename md_origin → md_prefix on movies, series, channels on pre-existing DBs. */
+function renameMdOriginToPrefix(db: Database.Database) {
+  for (const table of ['movies', 'series', 'channels']) {
+    const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]
+    if (!cols.length) continue
+    if (!cols.some((c) => c.name === 'md_origin')) continue
+    console.log(`[DB] migrating: renaming ${table}.md_origin → md_prefix`)
+    db.exec(`ALTER TABLE ${table} RENAME COLUMN md_origin TO md_prefix`)
+  }
+}
+
+/** Add md_runtime column to movies on pre-existing DBs. */
+function addMovieRuntimeColumn(db: Database.Database) {
+  const cols = db.prepare(`PRAGMA table_info(movies)`).all() as { name: string }[]
+  if (!cols.length) return
+  if (cols.some((c) => c.name === 'md_runtime')) return
+  console.log('[DB] migrating: adding movies.md_runtime')
+  db.exec(`ALTER TABLE movies ADD COLUMN md_runtime INTEGER`)
+}
+
+/** g2: add epg_url column to sources for M3U EPG support. */
+function addEpgUrlColumn(db: Database.Database) {
+  const cols = db.prepare(`PRAGMA table_info(sources)`).all() as { name: string }[]
+  if (!cols.length) return
+  if (cols.some((c) => c.name === 'epg_url')) return
+  console.log('[DB] migrating: adding sources.epg_url')
+  db.exec(`ALTER TABLE sources ADD COLUMN epg_url TEXT`)
+}
+
+/** g3: add tvmaze_id column to series_enrichment_g2. */
+function addTvmazeIdColumn(db: Database.Database) {
+  const cols = db.prepare(`PRAGMA table_info(series_enrichment_g2)`).all() as { name: string }[]
+  if (!cols.length) return
+  if (cols.some((c) => c.name === 'tvmaze_id')) return
+  console.log('[DB] migrating: adding series_enrichment_g2.tvmaze_id')
+  db.exec(`ALTER TABLE series_enrichment_g2 ADD COLUMN tvmaze_id TEXT`)
+}
+
+/** One-shot: wipe all enrichment rows so v2 algo starts from scratch. Runs once per key. */
+function wipeEnrichmentDataOnce(db: Database.Database) {
+  const WIPE_KEY = 'enrichment_wipe_3'
+  const done = db.prepare(`SELECT value FROM settings WHERE key = ?`).get(WIPE_KEY)
+  if (done) return
+  console.log('[DB] one-time: wiping enrichment data (wipe key: ' + WIPE_KEY + ')')
+  db.exec(`DELETE FROM movie_enrichment_g2`)
+  db.exec(`DELETE FROM series_enrichment_g2`)
+  db.exec(`UPDATE movies SET selected_enrichment_id = NULL, enrichment_disabled = 0`)
+  db.exec(`UPDATE series SET selected_enrichment_id = NULL, enrichment_disabled = 0`)
+  db.prepare(`INSERT OR REPLACE INTO settings (key, value) VALUES (?, '1')`).run(WIPE_KEY)
 }
 
 /** One-shot cleanup: drop any leftover FTS virtual tables from earlier builds. */

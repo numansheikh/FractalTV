@@ -170,6 +170,130 @@ export async function syncEpg(
   return { inserted: programs.length }
 }
 
+/**
+ * Sync EPG from an arbitrary XMLTV URL (for M3U sources that provide url-tvg).
+ * Same logic as syncEpg but takes a direct URL instead of Xtream credentials.
+ */
+export async function syncEpgFromUrl(
+  sourceId: string,
+  epgUrl: string,
+  onProgress?: (msg: string) => void
+): Promise<{ inserted: number; error?: string }> {
+  const sqlite = getSqlite()
+
+  onProgress?.(`Fetching EPG…`)
+
+  let xml: string
+  try {
+    xml = await fetchUrl(epgUrl)
+  } catch (err) {
+    return { inserted: 0, error: `EPG fetch failed: ${String(err)}` }
+  }
+
+  if (!xml.includes('<programme') && !xml.includes('<channel')) {
+    return { inserted: 0, error: 'No EPG data returned' }
+  }
+
+  onProgress?.('Parsing EPG…')
+  const { programs } = parseXmltv(xml)
+
+  if (programs.length === 0) {
+    return { inserted: 0, error: 'EPG parsed but contained no programmes' }
+  }
+
+  onProgress?.(`Storing ${programs.length} EPG entries…`)
+
+  sqlite.prepare(`DELETE FROM epg WHERE source_id = ?`).run(sourceId)
+
+  const insert = sqlite.prepare(`
+    INSERT OR REPLACE INTO epg (id, channel_external_id, source_id, title, description, start_time, end_time, category)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `)
+
+  const batch = sqlite.transaction((items: ParsedProgram[]) => {
+    for (const p of items) {
+      const id = `${sourceId}:${p.channelId}:${p.start}`
+      insert.run(id, p.channelId, sourceId, p.title, p.description, p.start, p.end, p.category)
+    }
+  })
+
+  const BATCH = 1000
+  for (let i = 0; i < programs.length; i += BATCH) {
+    batch(programs.slice(i, i + BATCH))
+  }
+
+  return { inserted: programs.length }
+}
+
+/**
+ * On-demand short-EPG fallback for a single Xtream channel. Called when a
+ * channel has no programmes from the full xmltv.php sync. Writes into the
+ * same `epg` table so lookup paths (`getNowNext`, full guide) pick it up
+ * transparently.
+ *
+ * Xtream `get_short_epg` returns JSON: `{ epg_listings: [{ title, description,
+ * start_timestamp, stop_timestamp, ... }] }`. title and description are
+ * base64-encoded. Timestamps are unix-seconds as strings.
+ */
+export async function fetchShortEpgForChannel(
+  sourceId: string,
+  serverUrl: string,
+  username: string,
+  password: string,
+  streamId: string,
+  epgChannelId: string,
+): Promise<{ inserted: number; error?: string }> {
+  const sqlite = getSqlite()
+  const base = serverUrl.replace(/\/$/, '')
+  const url = `${base}/player_api.php?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&action=get_short_epg&stream_id=${encodeURIComponent(streamId)}`
+
+  let body: string
+  try {
+    body = await fetchUrl(url)
+  } catch (err) {
+    return { inserted: 0, error: String(err) }
+  }
+
+  let parsed: { epg_listings?: Array<Record<string, unknown>> }
+  try {
+    parsed = JSON.parse(body)
+  } catch {
+    return { inserted: 0, error: 'Invalid JSON from provider' }
+  }
+
+  const listings = parsed.epg_listings ?? []
+  if (listings.length === 0) return { inserted: 0 }
+
+  const decode = (s: unknown): string => {
+    if (typeof s !== 'string' || !s) return ''
+    try { return Buffer.from(s, 'base64').toString('utf8') } catch { return s }
+  }
+
+  const insert = sqlite.prepare(`
+    INSERT OR REPLACE INTO epg (id, channel_external_id, source_id, title, description, start_time, end_time, category)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `)
+
+  let inserted = 0
+  sqlite.transaction(() => {
+    for (const l of listings) {
+      const start = Number(l.start_timestamp)
+      const end = Number(l.stop_timestamp)
+      if (!start || !end) continue
+      const id = `${sourceId}:${epgChannelId}:${start}`
+      insert.run(
+        id, epgChannelId, sourceId,
+        decode(l.title) || 'Unknown',
+        decode(l.description) || null,
+        start, end, null,
+      )
+      inserted++
+    }
+  })()
+
+  return { inserted }
+}
+
 // ── Query ─────────────────────────────────────────────────────────────────────
 
 export function getNowNext(contentId: string): NowNext {

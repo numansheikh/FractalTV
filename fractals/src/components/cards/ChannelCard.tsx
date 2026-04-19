@@ -1,10 +1,9 @@
-import { useState } from 'react'
+import { memo, useState } from 'react'
 import { ContentItem } from '@/lib/types'
 import { useAppStore } from '@/stores/app.store'
 import { useSourcesStore } from '@/stores/sources.store'
 import { useUserStore } from '@/stores/user.store'
 import { useContextMenuStore } from '@/stores/contextMenu.store'
-import { buildColorMapFromSources } from '@/lib/sourceColors'
 import { CardActions } from './CardActions'
 
 interface Props {
@@ -14,23 +13,22 @@ interface Props {
 
 const OVERHANG = 12
 
-export function ChannelCard({ item, onClick }: Props) {
+export const ChannelCard = memo(function ChannelCard({ item, onClick }: Props) {
   const [hovered, setHovered] = useState(false)
   const [detailsHovered, setDetailsHovered] = useState(false)
   const [imgError, setImgError] = useState(false)
 
-  const sources = useSourcesStore((s) => s.sources)
-  const colorMap = buildColorMapFromSources(sources)
+  const primarySourceId = item.primarySourceId ?? item.primary_source_id ?? (item as any).source_ids ?? item.id?.split(':')[0]
+  const sourceColor = useSourcesStore((s) => (primarySourceId ? s._colorMap[primarySourceId] : undefined))
+  const sourceName = useSourcesStore((s) => (primarySourceId ? s._sourceNames[primarySourceId] : undefined))
+  const multiSource = useSourcesStore((s) => s._sourceCount > 1)
   const userData = useUserStore((s) => s.data[item.id])
   const showCtxMenu = useContextMenuStore((s) => s.show)
   const setSelectedContent = useAppStore((s) => s.setSelectedContent)
 
   const poster = item.posterUrl ?? item.poster_url
   const hasPoster = poster && !imgError
-  const primarySourceId = item.primarySourceId ?? item.primary_source_id ?? (item as any).source_ids ?? item.id?.split(':')[0]
-  const sourceColor = primarySourceId ? colorMap[primarySourceId] : undefined
-  const sourceName = primarySourceId ? sources.find((s) => s.id === primarySourceId)?.name : undefined
-  const showSourceBar = sources.length > 1 && !!sourceColor
+  const showSourceBar = multiSource && !!sourceColor
   const isFavorite = userData?.favorite === 1
 
   const initials = item.title
@@ -192,4 +190,4 @@ export function ChannelCard({ item, onClick }: Props) {
       })()}
     </div>
   )
-}
+})

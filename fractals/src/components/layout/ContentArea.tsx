@@ -252,11 +252,13 @@ export function ContentArea({ sort, onSelectContent, onAddSource }: Props) {
               )
             }
             if (query && !isFavoritesFilter) {
+              const alreadyAdv = rawQuery.trim().startsWith('@')
               return (
                 <EmptyState
                   icon={<PlayIcon />}
                   title="No results"
                   description={`Nothing matched "${rawQuery}" in this view.`}
+                  hint={alreadyAdv ? undefined : 'Tip: prefix with @ for advanced search — e.g. @ year:2020, @ hindi 4k'}
                 />
               )
             }
@@ -265,7 +267,7 @@ export function ContentArea({ sort, onSelectContent, onAddSource }: Props) {
                 <EmptyState
                   icon={<PlayIcon />}
                   title="Add your first source"
-                  description="Connect an Xtream Codes account to start browsing your content."
+                  description="Connect an Xtream Codes source to start browsing your content."
                   action={{ label: 'Add source', onClick: onAddSource }}
                   hint="⌘, to open settings"
                 />
@@ -317,7 +319,7 @@ export function ContentArea({ sort, onSelectContent, onAddSource }: Props) {
             <>
               <div style={{ flex: 1, minHeight: 0 }}>
                 {ready && VirtualGrid
-                  ? <VirtualGrid items={items} onSelect={handleSelect} viewMode={activeView === 'live' ? viewMode : 'grid'} isLoading={isLoading} contentType={contentType} />
+                  ? <VirtualGrid items={items} onSelect={handleSelect} viewMode={activeView === 'live' ? viewMode : 'grid'} isLoading={isLoading} contentType={contentType} scrollKey={`${activeView}-${categoryFilter ?? ''}`} />
                   : <FallbackGrid items={items} onSelect={handleSelect} />
                 }
               </div>

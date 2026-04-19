@@ -1,7 +1,9 @@
 import { useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { SlidePanel } from '@/components/layout/SlidePanel'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { useSourcesStore } from '@/stores/sources.store'
+import { api } from '@/lib/api'
 import { SourceCard } from './SourceCard'
 import { AddSourceModal } from './AddSourceForm'
 
@@ -10,12 +12,39 @@ interface Props {
   onSync: (id: string) => void
   onRemove: (id: string) => void
   onAdded: (sourceId: string) => void
-  suppressScrim?: boolean
 }
 
-export function SourcesPanel({ onClose, onSync, onRemove, onAdded, suppressScrim }: Props) {
-  const { sources } = useSourcesStore()
+export function SourcesPanel({ onClose, onSync, onRemove, onAdded }: Props) {
+  const queryClient = useQueryClient()
+  const { sources, updateSource } = useSourcesStore()
   const [showAddModal, setShowAddModal] = useState(false)
+
+  // Source enable/disable changes visible content across every view —
+  // invalidate all queries rather than chasing individual keys.
+  const invalidateAll = () => queryClient.invalidateQueries()
+
+  const handleEnableAll = async () => {
+    for (const src of sources) {
+      if (src.disabled) {
+        await api.sources.toggleDisabled(src.id)
+        updateSource(src.id, { disabled: false })
+      }
+    }
+    invalidateAll()
+  }
+
+  const handleDisableAll = async () => {
+    for (const src of sources) {
+      if (!src.disabled) {
+        await api.sources.toggleDisabled(src.id)
+        updateSource(src.id, { disabled: true })
+      }
+    }
+    invalidateAll()
+  }
+
+  const allEnabled = sources.length > 0 && sources.every((s) => !s.disabled)
+  const allDisabled = sources.length > 0 && sources.every((s) => s.disabled)
 
   const handleAdded = (sourceId: string) => {
     setShowAddModal(false)
@@ -24,7 +53,7 @@ export function SourcesPanel({ onClose, onSync, onRemove, onAdded, suppressScrim
 
   return (
     <>
-      <SlidePanel open={true} onClose={onClose} width={480} suppressScrim={suppressScrim}>
+      <SlidePanel open={true} onClose={onClose} width={480}>
         {/* Header */}
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -38,6 +67,43 @@ export function SourcesPanel({ onClose, onSync, onRemove, onAdded, suppressScrim
           }}>
             Sources
           </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {sources.length > 1 && (
+              <>
+                <button
+                  onClick={handleEnableAll}
+                  disabled={allEnabled}
+                  title="Enable all sources"
+                  style={{
+                    fontSize: 11, fontWeight: 600, fontFamily: 'var(--font-ui)',
+                    padding: '3px 8px', borderRadius: 5, cursor: allEnabled ? 'default' : 'pointer',
+                    background: 'transparent', border: '1px solid var(--border-default)',
+                    color: allEnabled ? 'var(--text-3)' : 'var(--text-1)',
+                    transition: 'all 0.1s',
+                  }}
+                  onMouseEnter={(e) => { if (!allEnabled) e.currentTarget.style.color = 'var(--text-0)' }}
+                  onMouseLeave={(e) => { if (!allEnabled) e.currentTarget.style.color = 'var(--text-1)' }}
+                >
+                  Enable all
+                </button>
+                <button
+                  onClick={handleDisableAll}
+                  disabled={allDisabled}
+                  title="Disable all sources"
+                  style={{
+                    fontSize: 11, fontWeight: 600, fontFamily: 'var(--font-ui)',
+                    padding: '3px 8px', borderRadius: 5, cursor: allDisabled ? 'default' : 'pointer',
+                    background: 'transparent', border: '1px solid var(--border-default)',
+                    color: allDisabled ? 'var(--text-3)' : 'var(--text-1)',
+                    transition: 'all 0.1s',
+                  }}
+                  onMouseEnter={(e) => { if (!allDisabled) e.currentTarget.style.color = 'var(--text-0)' }}
+                  onMouseLeave={(e) => { if (!allDisabled) e.currentTarget.style.color = 'var(--text-1)' }}
+                >
+                  Disable all
+                </button>
+              </>
+            )}
           <button
             onClick={onClose}
             style={{
@@ -59,6 +125,7 @@ export function SourcesPanel({ onClose, onSync, onRemove, onAdded, suppressScrim
               <path d="M1 1l10 10M11 1L1 11" />
             </svg>
           </button>
+          </div>
         </div>
 
         {/* Scrollable body */}
@@ -73,7 +140,7 @@ export function SourcesPanel({ onClose, onSync, onRemove, onAdded, suppressScrim
                 </svg>
               }
               title="No sources yet"
-              description="Add an Xtream Codes account or M3U playlist to start browsing your IPTV library."
+              description="Add an Xtream Codes source or M3U playlist to start browsing your IPTV library."
               action={{ label: '＋ Add source', onClick: () => setShowAddModal(true) }}
             />
           ) : (

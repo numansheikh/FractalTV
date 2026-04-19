@@ -1,10 +1,9 @@
-import { useState } from 'react'
+import { memo, useState } from 'react'
 import { ContentItem } from '@/lib/types'
 import { useAppStore } from '@/stores/app.store'
 import { useSourcesStore } from '@/stores/sources.store'
 import { useUserStore } from '@/stores/user.store'
 import { useContextMenuStore } from '@/stores/contextMenu.store'
-import { buildColorMapFromSources } from '@/lib/sourceColors'
 import { PosterPlaceholder } from './PosterPlaceholder'
 import { CardActions } from './CardActions'
 
@@ -16,20 +15,19 @@ interface Props {
 // Overhang: how far the Details button hangs below the blue caption
 const OVERHANG = 12
 
-export function SeriesPosterCard({ item, onClick }: Props) {
+export const SeriesPosterCard = memo(function SeriesPosterCard({ item, onClick }: Props) {
   const [hovered, setHovered] = useState(false)
   const [detailsHovered, setDetailsHovered] = useState(false)
   const [imgError, setImgError] = useState(false)
 
-  const sources = useSourcesStore((s) => s.sources)
-  const colorMap = buildColorMapFromSources(sources)
+  const primarySourceId = item.primarySourceId ?? item.primary_source_id ?? (item as any).source_ids ?? item.id?.split(':')[0]
+  const source = useSourcesStore((s) => (primarySourceId ? s.sources.find((src) => src.id === primarySourceId) : undefined))
+  const sourceColor = useSourcesStore((s) => (primarySourceId ? s._colorMap[primarySourceId] : undefined))
+  const multiSource = useSourcesStore((s) => s._sourceCount > 1)
   const userData = useUserStore((s) => s.data[item.id])
   const showCtxMenu = useContextMenuStore((s) => s.show)
   const setPlayingContent = useAppStore((s) => s.setPlayingContent)
   const setPlayerMode = useAppStore((s) => s.setPlayerMode)
-
-  const primarySourceId = item.primarySourceId ?? item.primary_source_id ?? (item as any).source_ids ?? item.id?.split(':')[0]
-  const source = primarySourceId ? sources.find((s) => s.id === primarySourceId) : undefined
 
   // Resume is available when continue-watching / history queries attach episode fields AND we have
   // credentials to actually play it. Otherwise Play button is hidden + whole-card click opens details.
@@ -47,11 +45,15 @@ export function SeriesPosterCard({ item, onClick }: Props) {
     const sn = String(item.resume_season_number).padStart(2, '0')
     const en = String(item.resume_episode_number).padStart(2, '0')
     const epTitle = item.resume_episode_title ? ` · ${item.resume_episode_title}` : ''
+    const resumeId = String(item.resume_episode_id)
+    // resume_episode_id is already a full content ID ({sourceId}:episode:{streamId})
+    const epId = resumeId.includes(':episode:') ? resumeId : `${primarySourceId}:episode:${resumeId}`
+    const streamId = resumeId.includes(':episode:') ? resumeId.split(':episode:')[1] : resumeId
     setPlayingContent({
       ...item,
-      id: `${primarySourceId}:episode:${item.resume_episode_id}`,
+      id: epId,
       title: `S${sn}E${en}${epTitle}`,
-      _streamId: String(item.resume_episode_id),
+      _streamId: streamId,
       _serverUrl: source.serverUrl,
       _username: source.username,
       _password: source.password,
@@ -69,9 +71,8 @@ export function SeriesPosterCard({ item, onClick }: Props) {
   const poster = item.posterUrl ?? item.poster_url
   const hasPoster = poster && !imgError
   const rating = item.ratingTmdb ?? item.rating_tmdb ?? item.ratingImdb ?? item.rating_imdb
-  const sourceColor = primarySourceId ? colorMap[primarySourceId] : undefined
   const sourceName = source?.name
-  const showSourceBadge = sources.length > 1 && !!sourceColor
+  const showSourceBadge = multiSource && !!sourceColor
 
   const isFavorite = userData?.favorite === 1
   const isCompleted = userData?.completed === 1
@@ -125,19 +126,35 @@ export function SeriesPosterCard({ item, onClick }: Props) {
             <PosterPlaceholder id={item.id} title={item.title} style={{ position: 'absolute', inset: 0 }} />
           )}
 
-          {/* Top-left: type pill (S) */}
+          {/* Top-left: type pill + NSFW badge stack */}
           <div style={{
             position: 'absolute', top: 3, left: 3,
-            minWidth: 16, height: 16, padding: '0 4px',
-            borderRadius: 4,
-            background: 'var(--accent-series)',
-            color: '#fff',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 10, fontWeight: 700, letterSpacing: '0.02em',
-            fontFamily: 'var(--font-ui)',
-            zIndex: 1,
+            display: 'flex', flexDirection: 'column', gap: 3, zIndex: 1,
           }}>
-            S
+            <div style={{
+              minWidth: 16, height: 16, padding: '0 4px',
+              borderRadius: 4,
+              background: 'var(--accent-series)',
+              color: '#fff',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 10, fontWeight: 700, letterSpacing: '0.02em',
+              fontFamily: 'var(--font-ui)',
+            }}>
+              S
+            </div>
+            {(item as any).is_nsfw === 1 && (
+              <div style={{
+                padding: '1px 4px', borderRadius: 4,
+                background: 'rgba(180,0,0,0.85)',
+                color: '#fff',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 9, fontWeight: 700, letterSpacing: '0.04em',
+                fontFamily: 'var(--font-ui)',
+                border: '1px solid rgba(255,80,80,0.35)',
+              }}>
+                18+
+              </div>
+            )}
           </div>
 
           {/* Top-right cluster: completed checkmark + favorite heart (when not hovered) */}
@@ -309,4 +326,4 @@ export function SeriesPosterCard({ item, onClick }: Props) {
       })()}
     </div>
   )
-}
+})

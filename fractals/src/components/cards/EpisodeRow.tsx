@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { CopyUrlContext } from '@/components/shared/CopyUrlMenu'
 
 interface Episode {
   id: string
@@ -16,14 +17,16 @@ interface Props {
   isPlaying?: boolean
   isCompleted?: boolean
   progress?: number
+  copyItem?: Parameters<typeof CopyUrlContext>[0]['item']
 }
 
-export function EpisodeRow({ episode, onPlay, isPlaying = false, isCompleted = false, progress = 0 }: Props) {
+export function EpisodeRow({ episode, onPlay, isPlaying = false, isCompleted = false, progress = 0, copyItem }: Props) {
   const [hovered, setHovered] = useState(false)
 
   const episodeLabel = `E${String(episode.num).padStart(2, '0')}`
 
   return (
+    <CopyUrlContext item={copyItem}>
     <div
       onClick={onPlay}
       onMouseEnter={() => setHovered(true)}
@@ -159,5 +162,6 @@ export function EpisodeRow({ episode, onPlay, isPlaying = false, isCompleted = f
       )}
 
     </div>
+    </CopyUrlContext>
   )
 }

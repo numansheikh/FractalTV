@@ -1,8 +1,7 @@
-import { useState } from 'react'
+import { memo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useSourcesStore } from '@/stores/sources.store'
 import { useUserStore } from '@/stores/user.store'
-import { buildColorMapFromSources } from '@/lib/sourceColors'
 import { ContentItem } from '@/lib/types'
 import { api } from '@/lib/api'
 
@@ -33,9 +32,9 @@ interface Props {
   onClick: (item: ContentItem) => void
 }
 
-export function PosterCard({ item, onClick }: Props) {
-  const { sources } = useSourcesStore()
-  const colorMap = buildColorMapFromSources(sources)
+export const PosterCard = memo(function PosterCard({ item, onClick }: Props) {
+  const primarySourceId = item.primarySourceId ?? item.primary_source_id ?? (item as any).source_ids ?? item.id?.split(':')[0]
+  const sourceColor = useSourcesStore((s) => (primarySourceId ? s._colorMap[primarySourceId] : undefined))
   const userData = useUserStore((s) => s.data[item.id])
   const setFav = useUserStore((s) => s.setFavorite)
   const setWl = useUserStore((s) => s.setWatchlist)
@@ -44,8 +43,6 @@ export function PosterCard({ item, onClick }: Props) {
 
   const poster = item.posterUrl ?? item.poster_url
   const rating = item.ratingTmdb ?? item.rating_tmdb ?? item.ratingImdb ?? item.rating_imdb
-  const primarySourceId = item.primarySourceId ?? item.primary_source_id ?? (item as any).source_ids ?? item.id?.split(':')[0]
-  const sourceColor = primarySourceId ? colorMap[primarySourceId] : undefined
   const isFavorite = userData?.favorite === 1
   const isWatchlist = userData?.watchlist === 1
   const isCompleted = userData?.completed === 1
@@ -119,17 +116,34 @@ export function PosterCard({ item, onClick }: Props) {
           background: 'linear-gradient(to top, rgba(0,0,0,0.82) 0%, rgba(0,0,0,0.15) 45%, transparent 100%)',
         }} />
 
-        {/* Type badge — top left */}
-        {item.type === 'series' && (
+        {/* Badge stack — top left (type + NSFW) */}
+        {(item.type === 'series' || (item as any).is_nsfw === 1) && (
           <div style={{
             position: 'absolute', top: 7, left: 7,
-            padding: '2px 5px', borderRadius: 4,
-            background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(4px)',
-            fontSize: 9, fontWeight: 700, letterSpacing: '0.06em',
-            color: 'rgba(255,255,255,0.75)', lineHeight: 1,
-            border: '1px solid rgba(255,255,255,0.12)',
+            display: 'flex', flexDirection: 'column', gap: 3,
           }}>
-            SERIES
+            {item.type === 'series' && (
+              <div style={{
+                padding: '2px 5px', borderRadius: 4,
+                background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(4px)',
+                fontSize: 9, fontWeight: 700, letterSpacing: '0.06em',
+                color: 'rgba(255,255,255,0.75)', lineHeight: 1,
+                border: '1px solid rgba(255,255,255,0.12)',
+              }}>
+                SERIES
+              </div>
+            )}
+            {(item as any).is_nsfw === 1 && (
+              <div style={{
+                padding: '2px 5px', borderRadius: 4,
+                background: 'rgba(180,0,0,0.82)', backdropFilter: 'blur(4px)',
+                fontSize: 9, fontWeight: 700, letterSpacing: '0.06em',
+                color: '#fff', lineHeight: 1,
+                border: '1px solid rgba(255,80,80,0.35)',
+              }}>
+                18+
+              </div>
+            )}
           </div>
         )}
 
@@ -204,6 +218,7 @@ export function PosterCard({ item, onClick }: Props) {
           }} />
         )}
 
+
         {/* Title + meta overlay at bottom */}
         <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: '8px 10px' }}>
           <p style={{
@@ -246,4 +261,4 @@ export function PosterCard({ item, onClick }: Props) {
       </div>
     </div>
   )
-}
+})

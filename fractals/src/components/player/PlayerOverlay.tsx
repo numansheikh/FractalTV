@@ -1,7 +1,18 @@
 import { useEffect, useRef, useState, useCallback, useMemo, type CSSProperties } from 'react'
+
+const MINI_STORAGE_KEY = 'fractals:mini-player-pos'
+function loadMiniPos(): { top: number; right: number } {
+  try {
+    const raw = localStorage.getItem(MINI_STORAGE_KEY)
+    if (raw) return JSON.parse(raw)
+  } catch {}
+  return { top: -1, right: 20 }  // -1 = use bottom default (set in first render)
+}
 import { useQueryClient } from '@tanstack/react-query'
 import Hls from 'hls.js'
 import Artplayer from 'artplayer'
+
+type ArtWithHls = Artplayer & { hls?: Hls | null; resize?: () => void; on: (name: string, fn: (...args: unknown[]) => unknown) => Artplayer }
 import { motion, AnimatePresence } from 'framer-motion'
 import { ContentItem } from '@/lib/types'
 import { api } from '@/lib/api'
@@ -13,11 +24,12 @@ import { buildColorMapFromSources } from '@/lib/sourceColors'
 
 interface Props {
   content: ContentItem | null
-  mode: 'hidden' | 'fullscreen' | 'mini'
+  mode: 'hidden' | 'fullscreen' | 'mini' | 'embedded'
   onClose: () => void
   onMinimize: () => void
   onExpand: () => void
   onSurfChannel?: (dir: 1 | -1) => ContentItem | null
+  onSurfEpisode?: (dir: 1 | -1) => ContentItem | null
   onChipClick?: (content: ContentItem) => void
 }
 
@@ -26,21 +38,76 @@ const FULLSCREEN_STYLE: React.CSSProperties = {
   zIndex: 60, background: '#000', isolation: 'isolate',
 }
 
-const MINI_STYLE: React.CSSProperties = {
-  position: 'fixed', bottom: 20, right: 20,
-  width: 400, height: 225,
-  zIndex: 200, borderRadius: 12, overflow: 'hidden',
-  boxShadow: '0 8px 40px rgba(0,0,0,0.7)',
-  border: '1px solid rgba(255,255,255,0.12)',
-  background: '#000',
-}
+// MINI_STYLE is now generated dynamically from drag state — see miniPlayerStyle()
 
-export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, onSurfChannel, onChipClick }: Props) {
+export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, onSurfChannel, onSurfEpisode, onChipClick }: Props) {
+  // ── Draggable mini player ─────────────────────────────────────────────────
+  const [miniPos, setMiniPos] = useState<{ top: number; right: number } | null>(null)
+  // Clamp a position against current viewport; mini player is 400x225.
+  const clampPos = useCallback((pos: { top: number; right: number }) => ({
+    top: Math.max(0, Math.min(window.innerHeight - 225, pos.top)),
+    right: Math.max(0, Math.min(window.innerWidth - 400, pos.right)),
+  }), [])
+  // Initialize from localStorage on first render
+  useEffect(() => {
+    const saved = loadMiniPos()
+    if (saved.top < 0) {
+      // Default: bottom-right (20px from bottom, 20px from right)
+      setMiniPos({ top: window.innerHeight - 225 - 20, right: 20 })
+    } else {
+      setMiniPos(clampPos(saved))
+    }
+  }, [clampPos])
+  // Reclamp on viewport resize so the mini player never ends up off-screen.
+  useEffect(() => {
+    const onResize = () => {
+      setMiniPos((cur) => {
+        if (!cur) return cur
+        const next = clampPos(cur)
+        if (next.top === cur.top && next.right === cur.right) return cur
+        try { localStorage.setItem(MINI_STORAGE_KEY, JSON.stringify(next)) } catch {}
+        return next
+      })
+    }
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [clampPos])
+  const handleDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    const pos = miniPos ?? { top: window.innerHeight - 225 - 20, right: 20 }
+    const startX = e.clientX
+    const startY = e.clientY
+    const startTop = pos.top
+    const startRight = pos.right
+    let lastTop = startTop
+    let lastRight = startRight
+    const onMove = (me: MouseEvent) => {
+      const dx = me.clientX - startX
+      const dy = me.clientY - startY
+      lastTop = Math.max(0, Math.min(window.innerHeight - 225, startTop + dy))
+      lastRight = Math.max(0, Math.min(window.innerWidth - 400, startRight - dx))
+      setMiniPos({ top: lastTop, right: lastRight })
+    }
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      try { localStorage.setItem(MINI_STORAGE_KEY, JSON.stringify({ top: lastTop, right: lastRight })) } catch {}
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }, [miniPos])
+
+  const miniPlayerStyle: CSSProperties = miniPos
+    ? { position: 'fixed', top: miniPos.top, right: miniPos.right, width: 400, height: 225, zIndex: 200, borderRadius: 12, overflow: 'hidden', boxShadow: '0 8px 40px rgba(0,0,0,0.7)', border: '1px solid rgba(255,255,255,0.12)', background: '#000' }
+    : { position: 'fixed', bottom: 20, right: 20, width: 400, height: 225, zIndex: 200, borderRadius: 12, overflow: 'hidden', boxShadow: '0 8px 40px rgba(0,0,0,0.7)', border: '1px solid rgba(255,255,255,0.12)', background: '#000' }
+
   const containerRef = useRef<HTMLDivElement>(null)
   const artRef = useRef<Artplayer | null>(null)
   const qc = useQueryClient()
   const minWatchSeconds = useAppStore((s) => s.minWatchSeconds)
   const controlsMode = useAppStore((s) => s.controlsMode)
+  const episodeSurfList = useAppStore((s) => s.episodeSurfList)
+  const episodeSurfIndex = useAppStore((s) => s.episodeSurfIndex)
   const sources = useSourcesStore((s) => s.sources)
   const colorMap = useMemo(() => buildColorMapFromSources(sources), [sources])
 
@@ -106,7 +173,48 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
   const [showDebug, setShowDebug] = useState(false)
   const completionMarkedRef = useRef(false)
   const suppressRebuildRef = useRef(false)
+  const switchSeqRef = useRef(0)
   const [isOsFullscreen, setIsOsFullscreen] = useState(false)
+  const [reconnectAttempt, setReconnectAttempt] = useState<number | null>(null)
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const MAX_RECONNECT = 5
+  const RECONNECT_BACKOFF = [2000, 4000, 8000, 16000, 32000]
+  const [externalPlayers, setExternalPlayers] = useState<{ mpv: boolean; vlc: boolean }>({ mpv: false, vlc: false })
+
+  // ── Audio / subtitle tracks ───────────────────────────────────────────────
+  const [audioTracks, setAudioTracks] = useState<{ id: number; name: string; lang: string }[]>([])
+  const [activeAudioTrack, setActiveAudioTrack] = useState<number>(-1)
+  const [subtitleTracks, setSubtitleTracks] = useState<{ id: number; name: string; lang: string }[]>([])
+  const [activeSubTrack, setActiveSubTrack] = useState<number>(-1)
+  const [showTrackPicker, setShowTrackPicker] = useState<'audio' | 'subtitle' | null>(null)
+  useEffect(() => {
+    setAudioTracks([]); setActiveAudioTrack(-1)
+    setSubtitleTracks([]); setActiveSubTrack(-1)
+    setShowTrackPicker(null)
+  }, [content?.id])
+
+  useEffect(() => {
+    let alive = true
+    api.player.detectExternal().then((res: any) => {
+      if (!alive || !res) return
+      setExternalPlayers({ mpv: !!res.mpv, vlc: !!res.vlc })
+    }).catch(() => {})
+    return () => { alive = false }
+  }, [])
+
+  // Embedded mode — track anchor element rect via ResizeObserver
+  const embeddedAnchor = useAppStore((s) => s.embeddedAnchor)
+  const [embeddedRect, setEmbeddedRect] = useState<DOMRect | null>(null)
+  useEffect(() => {
+    if (mode !== 'embedded' || !embeddedAnchor) { setEmbeddedRect(null); return }
+    const update = () => setEmbeddedRect(embeddedAnchor.getBoundingClientRect())
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(embeddedAnchor)
+    window.addEventListener('resize', update)
+    window.addEventListener('scroll', update, true)
+    return () => { ro.disconnect(); window.removeEventListener('resize', update); window.removeEventListener('scroll', update, true) }
+  }, [mode, embeddedAnchor])
 
   // Loading elapsed timer
   const [loadingElapsed, setLoadingElapsed] = useState(0)
@@ -168,6 +276,7 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
       }
 
       const url: string = result.url
+      const streamHeaders: Record<string, string> | undefined = result.headers
       setStreamUrl(url)
       if (content.type === 'live') liveStreamUrlRef.current = url
 
@@ -183,7 +292,7 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
       const pref = localStorage.getItem('fractals-player') as 'artplayer' | 'mpv' | 'vlc' | null
       if (pref === 'mpv' || pref === 'vlc') {
         const customPath = localStorage.getItem(`fractals-player-${pref}-path`) ?? undefined
-        api.player.openExternal({ player: pref, url, title: content.title, customPath }).then((res: any) => {
+        api.player.openExternal({ player: pref, url, title: content.title, customPath, headers: streamHeaders }).then((res: any) => {
           if (cancelled) return
           clearLoadingTimer()
           if (res?.success) { onClose() } else { setError(`Failed to launch ${pref.toUpperCase()}: ${res?.error ?? 'not found'}`); setPlayerState('error') }
@@ -203,16 +312,20 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
 
       // Destroy previous ArtPlayer instance if it exists
       if (artRef.current) {
-        const oldHls = (artRef.current as any).hls
+        const oldHls = (artRef.current as ArtWithHls).hls
         oldHls?.destroy()
         artRef.current.destroy()
         artRef.current = null
       }
 
+      const savedVolume = parseFloat(localStorage.getItem('fractals-volume') ?? '1')
+      const savedMuted = localStorage.getItem('fractals-muted') === 'true'
+
       const art = new Artplayer({
         container: containerRef.current,
         url,
         autoplay: true,
+        volume: isNaN(savedVolume) ? 1 : Math.max(0, Math.min(1, savedVolume)),
         ...({ autoHide: autoHideMs === 0 ? false : autoHideMs } as Record<string, unknown>),
         pip: false,
         fullscreen: false, // OS fullscreen handled via Electron IPC
@@ -238,20 +351,60 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
         ...(isHls && Hls.isSupported() && {
           customType: {
             m3u8: (video: HTMLVideoElement, src: string) => {
-              const hls = new Hls({ enableWorker: true, lowLatencyMode: isLive })
-              ;(art as any).hls = hls
+              const hls = new Hls({
+                enableWorker: true,
+                lowLatencyMode: isLive,
+                // Referer works; User-Agent and Origin are forbidden header names
+              // in browsers — silently ignored here but work in mpv/VLC.
+              ...(streamHeaders && {
+                  xhrSetup: (xhr: XMLHttpRequest) => {
+                    for (const [k, v] of Object.entries(streamHeaders)) {
+                      try { xhr.setRequestHeader(k, v) } catch {}
+                    }
+                  },
+                }),
+              })
+              ;(art as ArtWithHls).hls = hls
               hls.loadSource(src)
               hls.attachMedia(video)
-              let networkRecoveryCount = 0
-              let mediaRecoveryCount = 0
+
+              hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                const aTracks = hls.audioTracks.map((t) => ({ id: t.id, name: t.name || t.lang || `Track ${t.id + 1}`, lang: t.lang || '' }))
+                const sTracks = hls.subtitleTracks.map((t) => ({ id: t.id, name: t.name || t.lang || `Track ${t.id + 1}`, lang: t.lang || '' }))
+                setAudioTracks(aTracks)
+                setSubtitleTracks(sTracks)
+                // Auto-pick preferred audio language
+                if (aTracks.length > 1) {
+                  const pref = localStorage.getItem('fractals-audio-lang') ?? ''
+                  const match = pref ? aTracks.findIndex((t) => t.lang.toLowerCase().startsWith(pref.toLowerCase()) || t.name.toLowerCase().includes(pref.toLowerCase())) : -1
+                  if (match >= 0) { hls.audioTrack = aTracks[match].id; setActiveAudioTrack(aTracks[match].id) }
+                  else setActiveAudioTrack(hls.audioTrack)
+                }
+                setActiveSubTrack(hls.subtitleTrack)
+              })
+              hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, (_: any, data: any) => setActiveAudioTrack(data.id))
+              hls.on(Hls.Events.SUBTITLE_TRACK_SWITCH, (_: any, data: any) => setActiveSubTrack(data.id))
+
+              let reconnectCount = 0
               hls.on(Hls.Events.ERROR, (_e: any, data: any) => {
                 if (data.fatal && !cancelled) {
-                  if (data.type === Hls.ErrorTypes.NETWORK_ERROR && networkRecoveryCount < 3) {
-                    networkRecoveryCount++; hls.startLoad()
-                  } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR && mediaRecoveryCount < 3) {
-                    mediaRecoveryCount++; hls.recoverMediaError()
+                  if (reconnectCount < MAX_RECONNECT) {
+                    reconnectCount++
+                    setReconnectAttempt(reconnectCount)
+                    clearLoadingTimer()
+                    reconnectTimerRef.current = setTimeout(() => {
+                      if (!cancelled) {
+                        setReconnectAttempt(null)
+                        if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+                          hls.recoverMediaError()
+                        } else {
+                          hls.startLoad()
+                        }
+                      }
+                    }, RECONNECT_BACKOFF[reconnectCount - 1])
                   } else {
-                    setError(`Playback error: ${data.details ?? data.type}`)
+                    setReconnectAttempt(null)
+                    setError('Stream unavailable')
                     setPlayerState('error')
                   }
                 }
@@ -266,6 +419,18 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
       art.on('ready', () => {
         clearLoadingTimer()
         if (!cancelled) setPlayerState('playing')
+
+        if (savedMuted) art.muted = true
+
+        const v = art.template?.$video as HTMLVideoElement | undefined
+        if (v) {
+          v.addEventListener('volumechange', () => {
+            try {
+              localStorage.setItem('fractals-volume', String(v.volume))
+              localStorage.setItem('fractals-muted', String(v.muted))
+            } catch {}
+          })
+        }
 
         // Hide ArtPlayer's live badge (we have our own)
         const liveEdge = containerRef.current?.querySelector('.art-live-edge') as HTMLElement | null
@@ -325,12 +490,12 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
         if (!cancelled) { setError(null); setPlayerState('playing') }
       })
 
-      ;(art as any).on('error', (_e: any, msg: string) => {
+      ;(art as ArtWithHls).on('error', (_e: unknown, msg: unknown) => {
         clearLoadingTimer()
         if (!cancelled) {
           const video = art.template?.$video as HTMLVideoElement | undefined
           if (video && !video.paused && video.currentTime > 0) return
-          setError(msg || 'Playback error')
+          setError(String(msg || 'Playback error'))
           setPlayerState('error')
         }
       })
@@ -340,8 +505,10 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
       if (suppressRebuildRef.current) return
       cancelled = true
       clearLoadingTimer()
+      if (reconnectTimerRef.current) { clearTimeout(reconnectTimerRef.current); reconnectTimerRef.current = null }
+      setReconnectAttempt(null)
       if (artRef.current) {
-        const hls = (artRef.current as any).hls
+        const hls = (artRef.current as ArtWithHls).hls
         hls?.destroy()
         artRef.current.destroy()
         artRef.current = null
@@ -350,14 +517,15 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
   }, [content?.id, content?.type])
 
   // ── Resize ArtPlayer on mode change ──────────────────────────────────────
+  // Do NOT pause on mode='hidden' — stream teardown is driven by content→null in the init effect.
+  // Pausing here would stall the stream during the transient hidden→embedded transition
+  // that occurs when minimizing fullscreen back to an anchor panel.
   useEffect(() => {
-    if (mode === 'hidden') {
-      artRef.current?.pause?.()
-      return
-    }
-    const t = setTimeout(() => (artRef.current as any)?.resize?.(), 300)
+    if (mode === 'hidden') return
+    // Resize after layout settles (embedded rect may differ from fullscreen dims)
+    const t = setTimeout(() => (artRef.current as ArtWithHls)?.resize?.(), 100)
     return () => clearTimeout(t)
-  }, [mode])
+  }, [mode, embeddedRect])
 
   // ── Position save + resume + completion (skip live) ──────────────────────
   useEffect(() => {
@@ -368,13 +536,33 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
       qc.invalidateQueries({ queryKey: ['library', 'continue-watching'] })
     }
 
-    // Fetch saved position — only show resume if not completed
-    api.user.getData(content.id).then((data: any) => {
-      if (data?.last_position > 5 && !data?.completed) {
-        setResumePrompt(data.last_position)
-        // Auto-dismiss timer starts in the playerState === 'playing' effect below
+    // _startAt: direct handoff from mini player — seek immediately, no prompt
+    const startAt = (content as any)._startAt as number | undefined
+    if (startAt && startAt > 5) {
+      const trySeek = (attempts = 0) => {
+        const art = artRef.current
+        if (art && art.duration > 0) { art.seek = startAt; return }
+        if (attempts < 20) setTimeout(() => trySeek(attempts + 1), 200)
       }
-    })
+      setTimeout(() => trySeek(), 300)
+    } else {
+      // In embedded mode — silently seek to saved position (no prompt)
+      // In fullscreen mode — show resume prompt
+      api.user.getData(content.id).then((data: any) => {
+        if (!data?.last_position || data.last_position <= 5 || data.completed) return
+        if (useAppStore.getState().playerMode === 'embedded') {
+          const trySeek = (attempts = 0) => {
+            const art = artRef.current
+            if (art && art.duration > 0) { art.seek = data.last_position; return }
+            if (attempts < 20) setTimeout(() => trySeek(attempts + 1), 200)
+          }
+          setTimeout(() => trySeek(), 300)
+        } else {
+          setResumePrompt(data.last_position)
+          // Auto-dismiss timer starts in the playerState === 'playing' effect below
+        }
+      })
+    }
 
     // Save every 10s while playing. Invalidate continue-watching so the strips
     // light up mid-session (user may still be in mini-player watching).
@@ -439,8 +627,12 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
 
   // ── In-place channel switch ───────────────────────────────────────────────
   const doChannelSwitch = useCallback((next: ContentItem) => {
+    const seq = ++switchSeqRef.current
     setLocalContent(next)
     setIsAudioOnly(false); isAudioOnlyRef.current = false
+    setPlayerState('loading')
+    setError(null)
+    setLoadingElapsed(0)
     setShowSurfer(true)
     if (surferTimerRef.current) clearTimeout(surferTimerRef.current)
     surferTimerRef.current = setTimeout(() => setShowSurfer(false), 3000)
@@ -452,16 +644,17 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
     if (!art) return
 
     api.content.getStreamUrl({ contentId: next.id }).then((result: any) => {
+      if (seq !== switchSeqRef.current) return // stale — a newer switch won the race
       if (!result?.url || !artRef.current) return
       const url: string = result.url
       const video = artRef.current.template.$video as HTMLVideoElement
       const isHls = url.includes('.m3u8') || url.includes('m3u8')
-      const oldHls = (artRef.current as any).hls
+      const oldHls = (artRef.current as ArtWithHls).hls
       oldHls?.destroy()
-      ;(artRef.current as any).hls = null
+      ;(artRef.current as ArtWithHls).hls = null
       if (isHls && Hls.isSupported()) {
         const hls = new Hls({ enableWorker: true, lowLatencyMode: true })
-        ;(artRef.current as any).hls = hls
+        ;(artRef.current as ArtWithHls).hls = hls
         hls.loadSource(url)
         hls.attachMedia(video)
       } else {
@@ -476,23 +669,15 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
     if (!art) return
     const video = art.template.$video as HTMLVideoElement
     const isHls = url.includes('.m3u8') || url.includes('m3u8')
-    const oldHls = (art as any).hls
-    oldHls?.destroy();(art as any).hls = null
+    const oldHls = (art as ArtWithHls).hls
+    oldHls?.destroy();(art as ArtWithHls).hls = null
     if (isHls && Hls.isSupported()) {
       const hls = new Hls({ enableWorker: true, lowLatencyMode: true })
-      ;(art as any).hls = hls; hls.loadSource(url); hls.attachMedia(video)
+      ;(art as ArtWithHls).hls = hls; hls.loadSource(url); hls.attachMedia(video)
     } else {
       video.src = url; video.load(); video.play().catch(() => {})
     }
   }, [])
-
-  // Catchup playback — wired up when TimeshiftBar is integrated
-  // const handlePlayCatchup = useCallback(async (prog: { id: string; title: string; startTime: number; endTime: number }) => {
-  //   if (!localContent) return
-  //   const result = await api.content.getCatchupUrl({ contentId: localContent.id, startTime: prog.startTime, duration: prog.endTime - prog.startTime })
-  //   if (!result?.url) { setError('Catchup not available for this programme'); setPlayerState('error'); return }
-  //   switchToUrl(result.url); setIsTimeshift(true); setTimeshiftProg(prog)
-  // }, [localContent, switchToUrl])
 
   const handleGoLive = useCallback(() => {
     const liveUrl = liveStreamUrlRef.current
@@ -521,9 +706,9 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
   }, [])
 
   // ── Keyboard handler ──────────────────────────────────────────────────────
-  // Single handler, capture phase. Only active when player is visible.
+  // Single handler, capture phase. Only active when fullscreen or mini.
   useEffect(() => {
-    if (mode === 'hidden') return
+    if (mode === 'hidden' || mode === 'embedded') return
 
     const seekState = { dir: 0 as -1 | 1 | 0, count: 0, timer: null as ReturnType<typeof setTimeout> | null }
     const SEEK_AMOUNTS = [5, 10, 25]
@@ -544,6 +729,11 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
     }
 
     const handler = (e: KeyboardEvent) => {
+      // Let typing in inputs/textareas/contenteditables pass through
+      // (e.g., Settings fields open over a mini player).
+      const target = e.target as HTMLElement | null
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return
+
       e.stopImmediatePropagation()
 
       // ── Escape hierarchy ──
@@ -557,11 +747,7 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
           onClose()
         } else {
           // Windowed fullscreen
-          if (localContent?.type !== 'live') {
-            onMinimize()
-          } else {
-            onClose()
-          }
+          onMinimize()
         }
         return
       }
@@ -569,8 +755,14 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
       // ── Debug ──
       if (e.key === 'd' || e.key === 'D') { setShowDebug((x) => !x); return }
 
-      // ── Mini-player: only Esc + expand work ──
-      if (mode === 'mini') return
+      // ── Mini → fullscreen (F expands the content player) ──
+      if (mode === 'mini') {
+        if (e.key === 'f' || e.key === 'F') {
+          e.preventDefault()
+          onExpand()
+        }
+        return
+      }
 
       // ── OS fullscreen toggle ──
       if (e.key === 'f' || e.key === 'F') {
@@ -593,6 +785,18 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
         }
       }
 
+      // ── Episode surf (series episodes only) ──
+      if (localContent?._parent && onSurfEpisode) {
+        const isMacUp = e.metaKey && e.key === 'ArrowUp'
+        const isMacDown = e.metaKey && e.key === 'ArrowDown'
+        const dir = (e.key === 'PageUp' || isMacUp) ? -1 : (e.key === 'PageDown' || isMacDown) ? 1 : null
+        if (dir !== null) {
+          e.preventDefault()
+          onSurfEpisode(dir)
+          return
+        }
+      }
+
       const art = artRef.current
       if (!art) return
 
@@ -607,6 +811,7 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
       if (e.key === 'm' || e.key === 'M') {
         e.preventDefault()
         art.muted = !art.muted
+        try { localStorage.setItem('fractals-muted', String(art.muted)) } catch {}
         showOsd(art.muted ? 'Muted' : `${Math.round(art.volume * 100)}%`, 'vol-up')
         return
       }
@@ -616,6 +821,7 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
         e.preventDefault()
         const vol = Math.min(1, art.volume + 0.1)
         art.volume = vol
+        localStorage.setItem('fractals-volume', String(vol))
         showOsd(`${Math.round(vol * 100)}%`, 'vol-up')
         return
       }
@@ -623,6 +829,7 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
         e.preventDefault()
         const vol = Math.max(0, art.volume - 0.1)
         art.volume = vol
+        localStorage.setItem('fractals-volume', String(vol))
         showOsd(vol === 0 ? 'Muted' : `${Math.round(vol * 100)}%`, 'vol-down')
         return
       }
@@ -650,15 +857,21 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
     window.addEventListener('keydown', handler, true)
     return () => {
       window.removeEventListener('keydown', handler, true)
-      if (osdTimer.current) clearTimeout(osdTimer.current)
+      if (osdTimer.current) { clearTimeout(osdTimer.current); osdTimer.current = null }
+      setOsd(null)
       if (seekState.timer) clearTimeout(seekState.timer)
     }
-  }, [mode, isOsFullscreen, localContent?.type, isTimeshift, onClose, onMinimize, onSurfChannel, doChannelSwitch, showOsd])
+  }, [mode, isOsFullscreen, localContent?.type, localContent?._parent, isTimeshift, onClose, onMinimize, onSurfChannel, onSurfEpisode, doChannelSwitch, showOsd])
 
   // ── Render ────────────────────────────────────────────────────────────────
-  const containerStyle = mode === 'hidden'
-    ? { display: 'none' } as React.CSSProperties
-    : mode === 'mini' ? MINI_STYLE : FULLSCREEN_STYLE
+  const containerStyle: React.CSSProperties = mode === 'hidden'
+    ? { display: 'none' }
+    : mode === 'mini' ? miniPlayerStyle
+    : mode === 'embedded'
+      ? embeddedRect
+        ? { position: 'fixed', top: embeddedRect.top, left: embeddedRect.left, width: embeddedRect.width, height: embeddedRect.height, zIndex: 55, background: '#000', borderRadius: 8, overflow: 'hidden' }
+        : { display: 'none' }
+      : FULLSCREEN_STYLE
 
   const isLoading = playerState === 'loading'
   const isError = playerState === 'error'
@@ -666,21 +879,54 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
   return (
     <div style={containerStyle} onMouseMove={mode === 'fullscreen' ? handlePlayerMouseMove : undefined}>
 
+      {/* ── Embedded click-to-expand overlay ── */}
+      {mode === 'embedded' && (
+        <div
+          onClick={onExpand}
+          style={{
+            position: 'absolute', inset: 0, zIndex: 30,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            opacity: 0, transition: 'opacity 0.15s',
+            cursor: 'pointer',
+            background: 'rgba(0,0,0,0.0)',
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.background = 'rgba(0,0,0,0.35)' }}
+          onMouseLeave={(e) => { e.currentTarget.style.opacity = '0'; e.currentTarget.style.background = 'rgba(0,0,0,0.0)' }}
+          title="Click to expand"
+        >
+          <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'rgba(255,255,255,0.18)', border: '1.5px solid rgba(255,255,255,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="15 3 21 3 21 9" /><polyline points="9 21 3 21 3 15" />
+              <line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" />
+            </svg>
+          </div>
+        </div>
+      )}
+
       {/* ── Mini-player top bar ── */}
       {mode === 'mini' && localContent && (
         <div style={{
           position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10,
-          height: 28, background: 'rgba(0,0,0,0.85)',
+          height: 28, background: 'rgba(0,0,0,0.6)',
           display: 'flex', alignItems: 'center', gap: 6, padding: '0 8px',
           borderBottom: '1px solid rgba(255,255,255,0.08)',
-        }}>
+          cursor: 'grab',
+          userSelect: 'none',
+        }}
+          onMouseDown={handleDragStart}
+        >
+          {/* Drag handle dots */}
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="rgba(255,255,255,0.35)" style={{ flexShrink: 0, pointerEvents: 'none' }}>
+            <circle cx="2" cy="2" r="1.2" /><circle cx="5" cy="2" r="1.2" /><circle cx="8" cy="2" r="1.2" />
+            <circle cx="2" cy="7" r="1.2" /><circle cx="5" cy="7" r="1.2" /><circle cx="8" cy="7" r="1.2" />
+          </svg>
           <span style={{ flex: 1, fontSize: 10, fontWeight: 600, color: 'rgba(255,255,255,0.8)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'var(--font-ui)' }}>
             {localContent.title}
           </span>
-          <button onClick={onExpand} title="Expand" style={miniIconBtn}>
+          <button onClick={(e) => { e.stopPropagation(); onExpand() }} title="Expand" style={{ ...miniIconBtn, cursor: 'pointer' }} onMouseDown={(e) => e.stopPropagation()}>
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" /></svg>
           </button>
-          <button onClick={onClose} title="Close" style={miniIconBtn}>
+          <button onClick={(e) => { e.stopPropagation(); onClose() }} title="Close" style={{ ...miniIconBtn, cursor: 'pointer' }} onMouseDown={(e) => e.stopPropagation()}>
             <svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M1 1l10 10M11 1L1 11" /></svg>
           </button>
         </div>
@@ -695,7 +941,7 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
           display: 'flex', alignItems: 'center', gap: 12,
           pointerEvents: 'none',
         }}>
-          <button onClick={onClose} title="Back (Esc)" style={{ ...backBtnStyle, pointerEvents: 'all' }}>
+          <button onClick={onMinimize} title="Back (Esc)" style={{ ...backBtnStyle, pointerEvents: 'all' }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="m12 19-7-7 7-7" /><path d="M19 12H5" /></svg>
           </button>
           {srcColor && <span style={{ width: 7, height: 7, borderRadius: '50%', background: srcColor.accent, flexShrink: 0 }} />}
@@ -727,14 +973,14 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
 
       {/* ── Fullscreen close button (VOD) ── */}
       {mode === 'fullscreen' && localContent?.type !== 'live' && (
-        <button onClick={onClose} title="Close (Esc)" style={{
+        <button onClick={onMinimize} title="Back (Esc)" style={{
           position: 'absolute', top: 14, left: 14, zIndex: 100,
           width: 36, height: 36, borderRadius: '50%',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.12)',
           color: '#fff', cursor: 'pointer', backdropFilter: 'blur(8px)', transition: 'background 0.1s',
         }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.85)' }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.6)' }}
           onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.6)' }}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="m12 19-7-7 7-7" /><path d="M19 12H5" /></svg>
@@ -766,17 +1012,40 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
       <AnimatePresence>
         {resumePrompt !== null && !isLoading && !isError && mode === 'fullscreen' && (
           <motion.div key="resume" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }} transition={{ duration: 0.25 }}
-            style={{ position: 'absolute', bottom: 80, left: '50%', transform: 'translateX(-50%)', zIndex: 96, display: 'flex', alignItems: 'center', gap: 12, background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(12px)', borderRadius: 12, padding: '12px 20px', border: '1px solid rgba(124,77,255,0.3)' }}>
+            style={{ position: 'absolute', bottom: 80, left: '50%', transform: 'translateX(-50%)', zIndex: 96, display: 'flex', alignItems: 'center', gap: 12, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(12px)', borderRadius: 12, padding: '12px 20px', border: '1px solid rgba(124,77,255,0.3)' }}>
             <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.8)' }}>Resume from {fmt(resumePrompt)}?</span>
-            <button onClick={handleResume} style={{ padding: '6px 14px', borderRadius: 8, fontSize: 12, fontWeight: 600, background: 'var(--accent-interactive)', color: '#fff', border: 'none', cursor: 'pointer' }}>Resume</button>
+            <div
+              style={{
+                position: 'relative',
+                padding: 2,
+                borderRadius: 10,
+                background: 'conic-gradient(var(--accent-interactive) var(--drain, 360deg), rgba(255,255,255,0.1) 0)',
+                animation: playerState === 'playing' ? 'drain 5s linear forwards' : 'none',
+              }}
+            >
+              <button onClick={handleResume} style={{ display: 'block', padding: '6px 14px', borderRadius: 8, fontSize: 12, fontWeight: 600, background: 'var(--accent-interactive)', color: '#fff', border: 'none', cursor: 'pointer' }}>Resume</button>
+            </div>
             <button onClick={handleStartOver} style={{ padding: '6px 14px', borderRadius: 8, fontSize: 12, fontWeight: 500, background: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.7)', border: 'none', cursor: 'pointer' }}>Start Over</button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Reconnect overlay ── */}
+      <AnimatePresence>
+        {reconnectAttempt !== null && !isError && (
+          <motion.div key="reconnect" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, zIndex: 90, background: 'rgba(0,0,0,0.7)', pointerEvents: 'none' }}>
+            <div style={{ width: 32, height: 32, borderRadius: '50%', border: '2px solid rgba(255,255,255,0.15)', borderTopColor: '#fff', animation: 'spin 0.8s linear infinite' }} />
+            <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)', fontFamily: 'var(--font-ui)' }}>
+              Reconnecting… ({reconnectAttempt}/{MAX_RECONNECT})
+            </p>
           </motion.div>
         )}
       </AnimatePresence>
 
       {/* ── Loading overlay ── */}
       <AnimatePresence>
-        {isLoading && (
+        {isLoading && !reconnectAttempt && (
           <motion.div key="loader" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, pointerEvents: 'none', zIndex: 90 }}>
             <div style={{ width: 36, height: 36, borderRadius: '50%', border: '2px solid rgba(124,77,255,0.25)', borderTopColor: 'var(--accent-interactive)', animation: 'spin 0.8s linear infinite' }} />
@@ -792,7 +1061,9 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
       <AnimatePresence>
         {isError && (
           <motion.div key="error" initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-            style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 20, padding: 32, zIndex: 90 }}>
+            style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 20, padding: 32, zIndex: 90, background: 'rgba(0,0,0,0.72)' }}>
+            {/* Hide ArtPlayer's own loading/mask layers while the error overlay is up. */}
+            <style>{`.art-video-player .art-mask, .art-video-player .art-loading { display: none !important; }`}</style>
             <div style={{ width: 56, height: 56, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(248,113,113,0.12)', border: '1px solid rgba(248,113,113,0.3)' }}>
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#f87171" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
             </div>
@@ -800,17 +1071,58 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
               <p style={{ fontSize: 14, fontWeight: 600, color: '#f87171', marginBottom: 6 }}>Playback failed</p>
               <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)' }}>{error}</p>
             </div>
-            <div style={{ display: 'flex', gap: 10 }}>
+            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center' }}>
+              {/* Primary group: Retry + Go back */}
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  onClick={() => { setPlayerState('idle'); setError(null); useAppStore.getState().setPlayingContent({ ...content! }) }}
+                  style={{ padding: '8px 20px', borderRadius: 8, fontSize: 12, fontWeight: 600, background: 'var(--accent-interactive)', color: '#fff', border: 'none', cursor: 'pointer' }}>
+                  ↻ Retry
+                </button>
+                <button onClick={onClose} style={{ padding: '8px 20px', borderRadius: 8, fontSize: 12, fontWeight: 500, background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.7)', border: 'none', cursor: 'pointer' }}>
+                  Go back
+                </button>
+              </div>
+              {/* External players group */}
+              {streamUrl && (externalPlayers.mpv || externalPlayers.vlc) && (
+                <>
+                  <div style={{ width: 1, height: 22, background: 'rgba(255,255,255,0.12)' }} />
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    {externalPlayers.mpv && (
+                      <button
+                        onClick={() => {
+                          const customPath = localStorage.getItem('fractals-player-mpv-path') ?? undefined
+                          api.player.openExternal({ player: 'mpv', url: streamUrl, title: content?.title ?? '', customPath }).then((res: any) => {
+                            if (res?.success) onClose()
+                          })
+                        }}
+                        style={{ padding: '8px 16px', borderRadius: 8, fontSize: 12, fontWeight: 500, background: 'rgba(255,255,255,0.08)', color: '#fff', border: '1px solid rgba(255,255,255,0.15)', cursor: 'pointer' }}>
+                        ▶ MPV
+                      </button>
+                    )}
+                    {externalPlayers.vlc && (
+                      <button
+                        onClick={() => {
+                          const customPath = localStorage.getItem('fractals-player-vlc-path') ?? undefined
+                          api.player.openExternal({ player: 'vlc', url: streamUrl, title: content?.title ?? '', customPath }).then((res: any) => {
+                            if (res?.success) onClose()
+                          })
+                        }}
+                        style={{ padding: '8px 16px', borderRadius: 8, fontSize: 12, fontWeight: 500, background: 'rgba(255,255,255,0.08)', color: '#fff', border: '1px solid rgba(255,255,255,0.15)', cursor: 'pointer' }}>
+                        ▶ VLC
+                      </button>
+                    )}
+                  </div>
+                </>
+              )}
+              {/* Info group: icon-only Stream info */}
+              <div style={{ width: 1, height: 22, background: 'rgba(255,255,255,0.12)' }} />
               <button
-                onClick={() => { setPlayerState('idle'); setError(null); /* Re-trigger load */ useAppStore.getState().setPlayingContent({ ...content! }) }}
-                style={{ padding: '8px 20px', borderRadius: 8, fontSize: 12, fontWeight: 600, background: 'var(--accent-interactive)', color: '#fff', border: 'none', cursor: 'pointer' }}>
-                Retry
-              </button>
-              <button onClick={onClose} style={{ padding: '8px 20px', borderRadius: 8, fontSize: 12, fontWeight: 500, background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.7)', border: 'none', cursor: 'pointer' }}>
-                Go back
-              </button>
-              <button onClick={() => setShowDebug((x) => !x)} style={{ padding: '8px 20px', borderRadius: 8, fontSize: 12, fontWeight: 500, background: 'rgba(124,77,255,0.15)', color: '#b388ff', border: 'none', cursor: 'pointer' }}>
-                Stream info
+                onClick={() => setShowDebug((x) => !x)}
+                title="Stream info"
+                aria-label="Stream info"
+                style={{ width: 32, height: 32, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 500, background: 'rgba(124,77,255,0.15)', color: '#b388ff', border: 'none', cursor: 'pointer' }}>
+                ⓘ
               </button>
             </div>
           </motion.div>
@@ -842,6 +1154,75 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
           currentProg={timeshiftProg}
         />
       )}
+
+      {/* ── Episode prev/next pills (fullscreen, episodes only) ── */}
+      {mode === 'fullscreen' && localContent?._parent && onSurfEpisode && (() => {
+        // Compute index live from the currently-playing episode id. The store's
+        // episodeSurfIndex only updates on surf actions, not when the user
+        // clicks a specific episode — so it goes stale and wrongly disables Prev.
+        const liveIdx = localContent?.id
+          ? episodeSurfList.findIndex((e) => e.id === localContent.id)
+          : -1
+        const currentIdx = liveIdx >= 0 ? liveIdx : episodeSurfIndex
+        const canPrev = currentIdx > 0
+        const canNext = currentIdx >= 0 && currentIdx < episodeSurfList.length - 1
+
+        const pillStyle: CSSProperties = {
+          display: 'flex', alignItems: 'center', gap: 5,
+          padding: '4px 10px', borderRadius: 12,
+          background: 'rgba(0,0,0,0.3)',
+          border: '1px solid rgba(255,255,255,0.18)',
+          color: 'rgba(255,255,255,0.9)', fontSize: 11, fontWeight: 500,
+          cursor: 'pointer', fontFamily: 'var(--font-ui)',
+          backdropFilter: 'blur(8px)',
+          transition: 'background 0.15s',
+        }
+        const disabledPillStyle: CSSProperties = {
+          ...pillStyle,
+          cursor: 'default',
+        }
+
+        return (
+          <>
+          <button
+            onClick={() => canPrev && onSurfEpisode(-1)}
+            style={{
+              ...(canPrev ? pillStyle : disabledPillStyle),
+              position: 'absolute', bottom: 70, left: 20, zIndex: 100,
+              opacity: showControls ? (canPrev ? 1 : 0.35) : 0,
+              pointerEvents: showControls && canPrev ? 'all' : 'none',
+              transition: 'opacity 0.2s, background 0.15s',
+            }}
+            onMouseEnter={(e) => { if (canPrev) e.currentTarget.style.background = 'rgba(0,0,0,0.6)' }}
+            onMouseLeave={(e) => { if (canPrev) e.currentTarget.style.background = 'rgba(0,0,0,0.65)' }}
+            title="Previous episode (PgUp / Cmd+↑)"
+          >
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="15 18 9 12 15 6"/>
+            </svg>
+            Prev
+          </button>
+          <button
+            onClick={() => canNext && onSurfEpisode(1)}
+            style={{
+              ...(canNext ? pillStyle : disabledPillStyle),
+              position: 'absolute', bottom: 70, right: 20, zIndex: 100,
+              opacity: showControls ? (canNext ? 1 : 0.35) : 0,
+              pointerEvents: showControls && canNext ? 'all' : 'none',
+              transition: 'opacity 0.2s, background 0.15s',
+            }}
+            onMouseEnter={(e) => { if (canNext) e.currentTarget.style.background = 'rgba(0,0,0,0.6)' }}
+            onMouseLeave={(e) => { if (canNext) e.currentTarget.style.background = 'rgba(0,0,0,0.65)' }}
+            title="Next episode (PgDn / Cmd+↓)"
+          >
+            Next
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="9 18 15 12 9 6"/>
+            </svg>
+          </button>
+          </>
+        )
+      })()}
 
       {/* ── Series-episode + category chips (fullscreen only).
            Episode playback gets two pills: left = series·S/E (opens series detail for episode picker),
@@ -920,13 +1301,145 @@ export function PlayerOverlay({ content, mode, onClose, onMinimize, onExpand, on
         )
       })()}
 
+      {/* ── Audio / subtitle track badges ── */}
+      {mode === 'fullscreen' && (audioTracks.length > 1 || subtitleTracks.length > 0) && (
+        <div style={{
+          position: 'absolute', bottom: 58, right: 16, zIndex: 102,
+          display: 'flex', gap: 6, alignItems: 'center',
+          opacity: showControls ? 1 : 0,
+          pointerEvents: showControls ? 'all' : 'none',
+          transition: 'opacity 0.2s',
+        }}>
+          {audioTracks.length > 1 && (
+            <div style={{ position: 'relative' }}>
+              <button
+                onClick={() => setShowTrackPicker(showTrackPicker === 'audio' ? null : 'audio')}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 5,
+                  padding: '4px 9px', borderRadius: 12,
+                  background: showTrackPicker === 'audio' ? 'rgba(124,77,255,0.35)' : 'rgba(0,0,0,0.45)',
+                  border: `1px solid ${showTrackPicker === 'audio' ? 'rgba(124,77,255,0.6)' : 'rgba(255,255,255,0.2)'}`,
+                  color: 'rgba(255,255,255,0.9)', fontSize: 11, fontWeight: 500,
+                  cursor: 'pointer', fontFamily: 'var(--font-ui)',
+                  backdropFilter: 'blur(8px)',
+                }}
+              >
+                <span>♫</span>
+                <span>{audioTracks.length}</span>
+              </button>
+              {showTrackPicker === 'audio' && (
+                <div style={{
+                  position: 'absolute', bottom: 'calc(100% + 8px)', right: 0,
+                  background: 'rgba(15,15,25,0.95)', backdropFilter: 'blur(12px)',
+                  border: '1px solid rgba(255,255,255,0.12)', borderRadius: 10,
+                  padding: '6px 4px', minWidth: 180, zIndex: 110,
+                }}>
+                  {audioTracks.map((t) => (
+                    <button
+                      key={t.id}
+                      onClick={() => {
+                        const hls = (artRef.current as ArtWithHls)?.hls
+                        if (hls) { hls.audioTrack = t.id; setActiveAudioTrack(t.id) }
+                        if (t.lang) localStorage.setItem('fractals-audio-lang', t.lang)
+                        setShowTrackPicker(null)
+                      }}
+                      style={{
+                        width: '100%', textAlign: 'left', padding: '6px 12px',
+                        background: 'none', border: 'none', cursor: 'pointer',
+                        color: activeAudioTrack === t.id ? 'var(--accent-interactive)' : 'rgba(255,255,255,0.8)',
+                        fontSize: 12, fontFamily: 'var(--font-ui)',
+                        display: 'flex', alignItems: 'center', gap: 8, borderRadius: 6,
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.08)' }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = 'none' }}
+                    >
+                      <span style={{ fontSize: 10, opacity: activeAudioTrack === t.id ? 1 : 0 }}>✓</span>
+                      {t.name}{t.lang ? ` · ${t.lang}` : ''}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {subtitleTracks.length > 0 && (
+            <div style={{ position: 'relative' }}>
+              <button
+                onClick={() => setShowTrackPicker(showTrackPicker === 'subtitle' ? null : 'subtitle')}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 5,
+                  padding: '4px 9px', borderRadius: 12,
+                  background: showTrackPicker === 'subtitle' ? 'rgba(124,77,255,0.35)' : 'rgba(0,0,0,0.45)',
+                  border: `1px solid ${showTrackPicker === 'subtitle' ? 'rgba(124,77,255,0.6)' : 'rgba(255,255,255,0.2)'}`,
+                  color: 'rgba(255,255,255,0.9)', fontSize: 11, fontWeight: 500,
+                  cursor: 'pointer', fontFamily: 'var(--font-ui)',
+                  backdropFilter: 'blur(8px)',
+                }}
+              >
+                <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.02em' }}>CC</span>
+                {activeSubTrack >= 0 && <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--accent-interactive)', display: 'inline-block' }} />}
+              </button>
+              {showTrackPicker === 'subtitle' && (
+                <div style={{
+                  position: 'absolute', bottom: 'calc(100% + 8px)', right: 0,
+                  background: 'rgba(15,15,25,0.95)', backdropFilter: 'blur(12px)',
+                  border: '1px solid rgba(255,255,255,0.12)', borderRadius: 10,
+                  padding: '6px 4px', minWidth: 180, zIndex: 110,
+                }}>
+                  <button
+                    onClick={() => {
+                      const hls = (artRef.current as ArtWithHls)?.hls
+                      if (hls) { hls.subtitleTrack = -1; setActiveSubTrack(-1) }
+                      setShowTrackPicker(null)
+                    }}
+                    style={{
+                      width: '100%', textAlign: 'left', padding: '6px 12px',
+                      background: 'none', border: 'none', cursor: 'pointer',
+                      color: activeSubTrack === -1 ? 'var(--accent-interactive)' : 'rgba(255,255,255,0.8)',
+                      fontSize: 12, fontFamily: 'var(--font-ui)',
+                      display: 'flex', alignItems: 'center', gap: 8, borderRadius: 6,
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.08)' }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = 'none' }}
+                  >
+                    <span style={{ fontSize: 10, opacity: activeSubTrack === -1 ? 1 : 0 }}>✓</span>
+                    Off
+                  </button>
+                  {subtitleTracks.map((t) => (
+                    <button
+                      key={t.id}
+                      onClick={() => {
+                        const hls = (artRef.current as ArtWithHls)?.hls
+                        if (hls) { hls.subtitleTrack = t.id; setActiveSubTrack(t.id) }
+                        setShowTrackPicker(null)
+                      }}
+                      style={{
+                        width: '100%', textAlign: 'left', padding: '6px 12px',
+                        background: 'none', border: 'none', cursor: 'pointer',
+                        color: activeSubTrack === t.id ? 'var(--accent-interactive)' : 'rgba(255,255,255,0.8)',
+                        fontSize: 12, fontFamily: 'var(--font-ui)',
+                        display: 'flex', alignItems: 'center', gap: 8, borderRadius: 6,
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.08)' }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = 'none' }}
+                    >
+                      <span style={{ fontSize: 10, opacity: activeSubTrack === t.id ? 1 : 0 }}>✓</span>
+                      {t.name}{t.lang ? ` · ${t.lang}` : ''}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ── Channel surfer overlay ── */}
       {localContent?.type === 'live' && showSurfer && mode === 'fullscreen' && (
         <ChannelSurfer
           channels={useAppStore.getState().channelSurfList}
           activeId={localContent.id}
           onSwitch={(ch) => {
-            useAppStore.getState().setPlayingContent(ch)
+            doChannelSwitch(ch)
             if (surferTimerRef.current) clearTimeout(surferTimerRef.current)
             surferTimerRef.current = setTimeout(() => setShowSurfer(false), 3000)
           }}

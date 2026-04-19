@@ -1,10 +1,9 @@
-import { useState } from 'react'
+import { memo, useState } from 'react'
 import { ContentItem } from '@/lib/types'
 import { useAppStore } from '@/stores/app.store'
 import { useSourcesStore } from '@/stores/sources.store'
 import { useUserStore } from '@/stores/user.store'
 import { useContextMenuStore } from '@/stores/contextMenu.store'
-import { buildColorMapFromSources } from '@/lib/sourceColors'
 import { PosterPlaceholder } from './PosterPlaceholder'
 import { CardActions } from './CardActions'
 
@@ -16,12 +15,14 @@ interface Props {
 // Overhang: how far the Details button hangs below the blue caption
 const OVERHANG = 12
 
-export function MoviePosterCard({ item, onClick }: Props) {
+export const MoviePosterCard = memo(function MoviePosterCard({ item, onClick }: Props) {
   const [hovered, setHovered] = useState(false)
   const [imgError, setImgError] = useState(false)
 
-  const sources = useSourcesStore((s) => s.sources)
-  const colorMap = buildColorMapFromSources(sources)
+  const primarySourceId = item.primarySourceId ?? item.primary_source_id ?? (item as any).source_ids ?? item.id?.split(':')[0]
+  const sourceColor = useSourcesStore((s) => (primarySourceId ? s._colorMap[primarySourceId] : undefined))
+  const sourceName = useSourcesStore((s) => (primarySourceId ? s._sourceNames[primarySourceId] : undefined))
+  const multiSource = useSourcesStore((s) => s._sourceCount > 1)
   const userData = useUserStore((s) => s.data[item.id])
   const showCtxMenu = useContextMenuStore((s) => s.show)
   const setPlayingContent = useAppStore((s) => s.setPlayingContent)
@@ -35,10 +36,7 @@ export function MoviePosterCard({ item, onClick }: Props) {
   const poster = item.posterUrl ?? item.poster_url
   const hasPoster = poster && !imgError
   const rating = item.ratingTmdb ?? item.rating_tmdb ?? item.ratingImdb ?? item.rating_imdb
-  const primarySourceId = item.primarySourceId ?? item.primary_source_id ?? (item as any).source_ids ?? item.id?.split(':')[0]
-  const sourceColor = primarySourceId ? colorMap[primarySourceId] : undefined
-  const sourceName = primarySourceId ? sources.find((s) => s.id === primarySourceId)?.name : undefined
-  const showSourceBadge = sources.length > 1 && !!sourceColor
+  const showSourceBadge = multiSource && !!sourceColor
 
   const isFavorite = userData?.favorite === 1
   const isCompleted = userData?.completed === 1
@@ -92,19 +90,35 @@ export function MoviePosterCard({ item, onClick }: Props) {
             <PosterPlaceholder id={item.id} title={item.title} style={{ position: 'absolute', inset: 0 }} />
           )}
 
-          {/* Top-left: type pill (M) */}
+          {/* Top-left: type pill + NSFW badge stack */}
           <div style={{
             position: 'absolute', top: 3, left: 3,
-            minWidth: 16, height: 16, padding: '0 4px',
-            borderRadius: 4,
-            background: 'var(--accent-film)',
-            color: '#fff',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 10, fontWeight: 700, letterSpacing: '0.02em',
-            fontFamily: 'var(--font-ui)',
-            zIndex: 1,
+            display: 'flex', flexDirection: 'column', gap: 3, zIndex: 1,
           }}>
-            M
+            <div style={{
+              minWidth: 16, height: 16, padding: '0 4px',
+              borderRadius: 4,
+              background: 'var(--accent-film)',
+              color: '#fff',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 10, fontWeight: 700, letterSpacing: '0.02em',
+              fontFamily: 'var(--font-ui)',
+            }}>
+              M
+            </div>
+            {(item as any).is_nsfw === 1 && (
+              <div style={{
+                padding: '1px 4px', borderRadius: 4,
+                background: 'rgba(180,0,0,0.85)',
+                color: '#fff',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 9, fontWeight: 700, letterSpacing: '0.04em',
+                fontFamily: 'var(--font-ui)',
+                border: '1px solid rgba(255,80,80,0.35)',
+              }}>
+                18+
+              </div>
+            )}
           </div>
 
           {/* Top-right cluster: completed checkmark + favorite heart (when not hovered) */}
@@ -270,4 +284,4 @@ export function MoviePosterCard({ item, onClick }: Props) {
       </button>
     </div>
   )
-}
+})

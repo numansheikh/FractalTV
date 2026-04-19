@@ -4,7 +4,7 @@ A local-first IPTV client — like Plex, but for IPTV streams you already have a
 
 Add your Xtream Codes or M3U sources once. Fractals merges everything into a single unified library and lets you search across all content by title.
 
-**Status:** Active branch is **`g1c`** (shipped; being promoted to `master`). 15-table per-type schema (channels / movies / series / episodes, each with its own categories + user_data). Search is plain LIKE on a persisted `search_title` column (any-ascii + lowercase), populated inline at sync. No canonical identity layer, no FTS, no TMDB enrichment. See [`../PLAN.md`](../PLAN.md) for the full phase map and future buckets.
+**Status:** Active branch is **`g3`**. g0–g2 shipped: 15-table per-type schema, LIKE search on `search_title`, unified detail panels, mini player, M3U parity, VoD enrichment (keyless + TVmaze), ADV search, NSFW filtering, iptv-org channel DB. g3 shipped so far: TMDB enrichment (key-gated), 3-level enrichment picker, post-sync auto-chain. g3 remaining: design revamp, code sweep. See [`../PLAN.md`](../PLAN.md) for phase history and [`../BACKLOG.md`](../BACKLOG.md) for actionable work.
 
 ---
 
@@ -102,11 +102,7 @@ CLAUDE.md          Full architecture, design language, conventions
 
 ## Roadmap
 
-Tracked in [`../PLAN.md`](../PLAN.md). Key future buckets:
-
-1. **g2 — Search improvements** (no commitments) — denormalized corpus, trigram for CJK / Arabic, ranking signals, embeddings. FTS5 tried and rejected at this catalog scale.
-2. **Multi-platform reach** (Phase 3) — Android, iOS, Android TV, Samsung Tizen via Capacitor.
-3. **Tech health** — remaining `as any` cast triage across the IPC layer.
-4. **Product shape** (discussion only) — three-tier split (M3U Player / Xtream Lite / Fractals Pro).
+- [`../PLAN.md`](../PLAN.md) — phase map, shipped history
+- [`../BACKLOG.md`](../BACKLOG.md) — actionable bugs, gaps, debt, planned work
 
 The legacy Angular reference implementation lives in `../legacy/`.

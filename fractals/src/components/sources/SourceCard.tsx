@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { Source, useSourcesStore } from '@/stores/sources.store'
 import { useAppStore } from '@/stores/app.store'
 import { getSourceColor, PALETTE_HEX } from '@/lib/sourceColors'
@@ -50,8 +51,14 @@ const PHASE_LABELS: Record<string, string> = {
 }
 
 export function SourceCard({ source, onSync, onRemove }: Props) {
-  const { sources, syncProgress } = useSourcesStore()
+  const queryClient = useQueryClient()
+  const {
+    sources, syncProgress,
+    epgSyncing: allEpgSyncing, epgResult: allEpgResult, setEpgSyncing, setEpgResult,
+  } = useSourcesStore()
   const progress = syncProgress[source.id] ?? null
+  const epgSyncing = allEpgSyncing[source.id] ?? false
+  const epgResult = allEpgResult[source.id] ?? null
 
   // Resolve color: use stored colorIndex if set, else auto-assign by position
   const autoIndex = sources.findIndex(s => s.id === source.id)
@@ -71,6 +78,25 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
   const [saveError, setSaveError] = useState('')
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null)
+
+  // EPG-only sync (Xtream only) — state lives in sources store so it survives
+  // SourceCard collapse/unmount while a sync is running.
+  const handleEpgSync = async () => {
+    setEpgSyncing(source.id, true)
+    setEpgResult(source.id, null)
+    try {
+      const r = await api.sources.syncEpg(source.id)
+      if (r.success) {
+        setEpgResult(source.id, { success: true, message: r.inserted != null ? `${Number(r.inserted).toLocaleString()} entries` : 'Done' })
+      } else {
+        setEpgResult(source.id, { success: false, message: r.error ?? 'EPG sync failed' })
+      }
+    } catch (e) {
+      setEpgResult(source.id, { success: false, message: String(e) })
+    } finally {
+      setEpgSyncing(source.id, false)
+    }
+  }
 
   // Pipeline Test — tests the already-added source and advances ingest_state.
   const handlePipelineTest = async () => {
@@ -179,6 +205,8 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
       const { selectedSourceIds, toggleSourceFilter } = useAppStore.getState()
       if (selectedSourceIds.includes(source.id)) toggleSourceFilter(source.id)
     }
+    // Source enable/disable changes visible content across every view
+    queryClient.invalidateQueries()
   }
 
   const [deleting, setDeleting] = useState(false)
@@ -312,8 +340,57 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
             done={source.ingestState === 'synced' || source.ingestState === 'epg_fetched'}
             enabled={source.ingestState !== 'added' && !isSyncing}
             loading={isSyncing}
-            onClick={() => onSync(source.id)}
+            onClick={() => {
+              const isResync = source.ingestState === 'synced' || source.ingestState === 'epg_fetched'
+              if (isResync && !window.confirm(
+                `Re-sync "${source.name}"?\n\n` +
+                'This will wipe your favorites, watch history, and ratings for this source. ' +
+                'Content rows are replaced and user data cascades with them.\n\n' +
+                'Continue?'
+              )) return
+              onSync(source.id)
+            }}
           />
+          {(source.type === 'xtream' || source.epgUrl) && (
+            <PipelineButton
+              step={3}
+              label={epgSyncing ? 'Refreshing…' : 'Refresh EPG'}
+              done={source.ingestState === 'epg_fetched'}
+              enabled={(source.ingestState === 'synced' || source.ingestState === 'epg_fetched') && !isSyncing && !epgSyncing}
+              loading={epgSyncing}
+              onClick={handleEpgSync}
+            />
+          )}
+          {source.type === 'm3u' && !source.epgUrl && (source.ingestState === 'synced' || source.ingestState === 'epg_fetched') && (
+            <span
+              title="This M3U playlist does not include a url-tvg / x-tvg-url header. Live TV will have no EPG."
+              style={{
+                alignSelf: 'center',
+                fontSize: 10,
+                color: 'var(--text-2)',
+                padding: '4px 8px',
+                borderRadius: 5,
+                background: 'var(--bg-2)',
+                border: '1px solid var(--border-subtle)',
+              }}
+            >
+              No EPG URL in playlist
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* EPG sync result */}
+      {!editMode && epgResult && (
+        <div style={{
+          padding: '5px 8px', borderRadius: 5, fontSize: 10,
+          background: epgResult.success
+            ? 'color-mix(in srgb, var(--accent-success) 10%, transparent)'
+            : 'color-mix(in srgb, var(--accent-danger) 10%, transparent)',
+          border: `1px solid color-mix(in srgb, ${epgResult.success ? 'var(--accent-success)' : 'var(--accent-danger)'} 25%, transparent)`,
+          color: epgResult.success ? 'var(--accent-success)' : 'var(--accent-danger)',
+        }}>
+          {epgResult.success ? '✓' : '✗'} EPG {epgResult.message}
         </div>
       )}
 
@@ -351,13 +428,26 @@ export function SourceCard({ source, onSync, onRemove }: Props) {
         </div>
       )}
 
-      {/* Error message */}
+      {/* Error message — hard error (no content left) */}
       {source.status === 'error' && source.lastError && !isSyncing && (
         <div style={{
           fontSize: 10, color: 'var(--accent-danger)',
           padding: '5px 8px', borderRadius: 5,
           background: 'color-mix(in srgb, var(--accent-danger) 8%, transparent)',
           border: '1px solid color-mix(in srgb, var(--accent-danger) 20%, transparent)',
+          lineHeight: 1.5,
+        }}>
+          {source.lastError}
+        </div>
+      )}
+
+      {/* Staleness banner — last refresh failed but previous snapshot is intact */}
+      {source.status === 'active' && source.lastError && !isSyncing && (
+        <div style={{
+          fontSize: 10, color: 'var(--accent-warning, #d4a34a)',
+          padding: '5px 8px', borderRadius: 5,
+          background: 'color-mix(in srgb, var(--accent-warning, #d4a34a) 8%, transparent)',
+          border: '1px solid color-mix(in srgb, var(--accent-warning, #d4a34a) 20%, transparent)',
           lineHeight: 1.5,
         }}>
           {source.lastError}

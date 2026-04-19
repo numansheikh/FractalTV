@@ -15,6 +15,7 @@ export const sources = sqliteTable('sources', {
   password: text('password'),
   // M3U fields
   m3uUrl: text('m3u_url'),
+  epgUrl: text('epg_url'),
   // Status
   status: text('status', { enum: ['active', 'error', 'syncing'] }).notNull().default('active'),
   disabled: integer('disabled', { mode: 'boolean' }).notNull().default(false),

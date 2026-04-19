@@ -41,6 +41,44 @@ export interface ContentItem {
   // Set when returned from channels:favorites (new schema)
   canonical_id?: string
 
+  // iptv-org enrichment — present when channel has an iptv_org_id match
+  io_name?: string
+  io_alt_names?: string       // JSON array
+  io_network?: string
+  io_owners?: string          // JSON array
+  io_country?: string
+  io_country_name?: string
+  io_country_flag?: string
+  io_category_labels?: string // JSON array
+  io_is_nsfw?: number
+  io_is_blocked?: number
+  io_launched?: string
+  io_closed?: string
+  io_replaced_by?: string
+  io_website?: string
+  io_logo_url?: string
+
+  // EPG — computed from DB, 1 if EPG data exists for this channel
+  has_epg_data?: number
+
+  // g2 title-parsed metadata (Tier 1 — deterministic, populated by Populate Metadata)
+  md_prefix?: string | null
+  md_language?: string | null
+  md_quality?: string | null
+  is_nsfw?: number
+
+  // TVmaze enrichment fields — series only
+  tvmazeStatus?: string | null
+  tvmazeNetwork?: string | null
+  tvmazeRating?: number | null
+
+  // TMDB enrichment fields
+  tmdbRating?: number | null
+  tmdbVoteCount?: number | null
+  tmdbCreator?: string | null   // series — equivalent of director
+  seasonCount?: number | null
+  episodeCount?: number | null
+
   // Continue-watching fields — present when returned from user:continue-watching
   last_position?: number
   last_watched_at?: number

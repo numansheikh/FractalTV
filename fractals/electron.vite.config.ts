@@ -14,6 +14,7 @@ export default defineConfig({
           'sync.worker': resolve(__dirname, 'electron/workers/sync.worker.ts'),
           'delete.worker': resolve(__dirname, 'electron/workers/delete.worker.ts'),
           'm3u-sync.worker': resolve(__dirname, 'electron/workers/m3u-sync.worker.ts'),
+          'export.worker': resolve(__dirname, 'electron/workers/export.worker.ts'),
         },
       },
     },
@@ -33,6 +34,16 @@ export default defineConfig({
       outDir: 'dist',
       rollupOptions: {
         input: resolve(__dirname, 'index.html'),
+        output: {
+          manualChunks(id) {
+            if (!id.includes('node_modules')) return
+            if (id.includes('framer-motion')) return 'motion'
+            if (id.includes('artplayer') || id.includes('hls.js')) return 'player'
+            if (id.includes('@dnd-kit')) return 'vendor'
+            if (id.includes('@tanstack')) return 'vendor'
+            if (id.includes('/react/') || id.includes('/react-dom/') || id.includes('/scheduler/')) return 'react'
+          },
+        },
       },
     },
     plugins: [react(), tailwindcss()],

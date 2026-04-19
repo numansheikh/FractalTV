@@ -19,6 +19,7 @@ import { MoviePosterCard } from '@/components/cards/MoviePosterCard'
 import { SeriesPosterCard } from '@/components/cards/SeriesPosterCard'
 import { ChannelCard as RichChannelCard } from '@/components/cards/ChannelCard'
 import { useTheme } from '@/hooks/useTheme'
+import { useIdleMount } from '@/hooks/useIdleMount'
 
 // ── Hero search field ────────────────────────────────────────────────────────
 // Single rounded input with internal positioning. The visible value strips the
@@ -69,9 +70,8 @@ function HeroSearch({ query, setQuery, inputRef }: {
   // by tinting the input border (which would compete with the chip color).
   const borderColor = focused ? 'var(--accent-interactive)' : 'var(--border-strong)'
 
-  // Amber palette for the ADV chip — distinct from accent-interactive (purple)
-  // so the chip and the focused input border don't blend into one color.
-  const ADV_AMBER = '#f59e0b'
+  const ADV_ACTIVE_BG = 'color-mix(in srgb, var(--accent-interactive) 50%, transparent)'
+  const ADV_GLOW = 'color-mix(in srgb, var(--accent-interactive) 20%, transparent)'
 
   return (
     <div style={{ flex: 1, position: 'relative', height: 40, minWidth: 0 }}>
@@ -88,8 +88,8 @@ function HeroSearch({ query, setQuery, inputRef }: {
         <line x1="21" y1="21" x2="16.65" y2="16.65" />
       </svg>
 
-      {/* Mode chip — fixed label 'ADV @'. Amber when active (solid fill, dark
-          text); subtle outline when inactive. Click toggles. */}
+      {/* Mode chip — fixed label 'ADV @'. Accent fill when active (white text);
+          subtle outline when inactive. Click toggles. */}
       <button
         onMouseDown={(e) => e.preventDefault() /* don't steal focus from input */}
         onClick={toggleAdvanced}
@@ -99,18 +99,18 @@ function HeroSearch({ query, setQuery, inputRef }: {
           height: 24, padding: '0 9px',
           display: 'flex', alignItems: 'center', gap: 5,
           borderRadius: 5,
-          border: `1px solid ${isAdvanced ? ADV_AMBER : 'var(--border-strong)'}`,
-          background: isAdvanced ? ADV_AMBER : 'var(--bg-2)',
-          color: isAdvanced ? '#1a1305' : 'var(--text-2)',
+          border: `1px solid ${isAdvanced ? 'var(--accent-interactive)' : 'var(--border-strong)'}`,
+          background: isAdvanced ? ADV_ACTIVE_BG : 'var(--bg-2)',
+          color: isAdvanced ? '#fff' : 'var(--text-2)',
           fontSize: 10, fontWeight: 800, fontFamily: 'var(--font-mono)',
           letterSpacing: '0.08em', cursor: 'pointer', userSelect: 'none',
-          boxShadow: isAdvanced ? `0 0 0 2px color-mix(in srgb, ${ADV_AMBER} 22%, transparent)` : 'none',
+          boxShadow: isAdvanced ? `0 0 0 2px ${ADV_GLOW}` : 'none',
           transition: 'color 0.12s, border-color 0.12s, background 0.12s, box-shadow 0.12s',
         }}
         onMouseEnter={(e) => {
           if (!isAdvanced) {
-            e.currentTarget.style.color = ADV_AMBER
-            e.currentTarget.style.borderColor = ADV_AMBER
+            e.currentTarget.style.color = 'var(--accent-interactive)'
+            e.currentTarget.style.borderColor = 'var(--accent-interactive)'
           }
         }}
         onMouseLeave={(e) => {
@@ -173,6 +173,17 @@ function HeroSearch({ query, setQuery, inputRef }: {
           /
         </span>
       </div>
+
+      {/* ADV legend — shown below the search bar when @ mode is active */}
+      {isAdvanced && (
+        <div style={{
+          position: 'absolute', right: 0, top: '100%', marginTop: 6,
+          fontSize: 10, color: 'var(--text-3)', fontFamily: 'var(--font-mono)',
+          pointerEvents: 'none', whiteSpace: 'nowrap',
+        }}>
+          year:2024 &nbsp; lang:en &nbsp; quality:4K &nbsp; prefix:GR &nbsp; country:US
+        </div>
+      )}
     </div>
   )
 }
@@ -254,7 +265,8 @@ export function HomeView({ onSelectContent }: Props) {
   const { queries, debouncedQueries, setQuery } = useSearchStore()
   const query = queries['home'] ?? ''
   const debouncedQuery = debouncedQueries['home'] ?? ''
-  const { sources, syncProgress } = useSourcesStore()
+  const sources = useSourcesStore((s) => s.sources)
+  const syncProgress = useSourcesStore((s) => s.syncProgress)
   const { theme } = useTheme()
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -316,7 +328,7 @@ export function HomeView({ onSelectContent }: Props) {
             No sources yet
           </p>
           <p style={{ fontSize: 13, color: 'var(--text-1)', fontFamily: 'var(--font-ui)', lineHeight: 1.5, maxWidth: 280 }}>
-            Add an Xtream Codes account to start browsing your IPTV library.
+            Add an Xtream Codes source to start browsing your IPTV library.
           </p>
         </div>
         <button
@@ -462,15 +474,20 @@ function DiscoverMode({ favChannels, selectedSourceIds, onSelectContent, onNavig
     queryFn: () => api.user.continueWatching(),
     staleTime: 30_000,
   })
+  // Defer below-the-fold strips to the first idle tick so watchlist +
+  // continue-watching + favorite channels can paint first.
+  const belowFoldReady = useIdleMount()
   const { data: moviesData, isLoading: moviesLoading } = useQuery({
     queryKey: ['home-latest-movies', selectedSourceIds],
     queryFn: () => api.content.browse({ type: 'movie', sortBy: 'updated', sortDir: 'desc', limit: STRIP_FETCH, offset: 0, sourceIds: selectedSourceIds.length > 0 ? selectedSourceIds : undefined }),
     staleTime: 60_000,
+    enabled: belowFoldReady,
   })
   const { data: seriesData, isLoading: seriesLoading } = useQuery({
     queryKey: ['home-latest-series', selectedSourceIds],
     queryFn: () => api.content.browse({ type: 'series', sortBy: 'updated', sortDir: 'desc', limit: STRIP_FETCH, offset: 0, sourceIds: selectedSourceIds.length > 0 ? selectedSourceIds : undefined }),
     staleTime: 60_000,
+    enabled: belowFoldReady,
   })
 
   const watchlist = filterBySrc(watchlistRaw)

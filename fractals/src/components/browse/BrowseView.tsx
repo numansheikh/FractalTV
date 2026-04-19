@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { AnimatePresence, motion } from 'framer-motion'
 import { api } from '@/lib/api'
@@ -10,7 +10,6 @@ import { useSearchStore, ContentType } from '@/stores/search.store'
 import { useAppStore } from '@/stores/app.store'
 import { useSourcesStore } from '@/stores/sources.store'
 import { useUserStore } from '@/stores/user.store'
-import { buildColorMapFromSources } from '@/lib/sourceColors'
 import { SourceTabBar } from '@/components/settings/SourceTabBar'
 import { FractalsIcon } from '@/components/shared/FractalsIcon'
 import { PersonalizedRows } from './PersonalizedRows'
@@ -29,10 +28,12 @@ const TYPE_COLORS: Record<string, string> = {
   series: 'var(--color-series)',
 }
 
-function getPageSize() { return Number(localStorage.getItem('fractals-browse-page-size')) || 60 }
-function getSearchLimit(type: 'live' | 'movie' | 'series') {
-  const key = `fractals-search-${type}-limit`
-  return Number(localStorage.getItem(key)) || (type === 'live' ? 20 : type === 'movie' ? 45 : 35)
+// Read once at module load — these don't change within a session.
+const PAGE_SIZE = Number(localStorage.getItem('fractals-browse-page-size')) || 60
+const SEARCH_LIMIT_DEFAULTS = {
+  live:   Number(localStorage.getItem('fractals-search-live-limit'))   || 20,
+  movie:  Number(localStorage.getItem('fractals-search-movie-limit'))  || 45,
+  series: Number(localStorage.getItem('fractals-search-series-limit')) || 35,
 }
 
 type SortBy = 'updated' | 'title' | 'year' | 'rating'
@@ -56,11 +57,16 @@ interface Props {
 }
 
 export function BrowseView({ onAddSource, onSyncSource, onRemoveSource, onSelectContent, sourcesCount }: Props) {
-  const { debouncedQueries, type, setType, activeCategory, setActiveCategory } = useSearchStore()
-  const { activeView } = useAppStore()
+  const debouncedQueries = useSearchStore((s) => s.debouncedQueries)
+  const type = useSearchStore((s) => s.type)
+  const setType = useSearchStore((s) => s.setType)
+  const activeCategory = useSearchStore((s) => s.activeCategory)
+  const setActiveCategory = useSearchStore((s) => s.setActiveCategory)
+  const activeView = useAppStore((s) => s.activeView)
   const query = debouncedQueries[activeView] ?? ''
-  const { sources, selectedSourceIds } = useSourcesStore()
-  const colorMap = buildColorMapFromSources(sources)
+  const sources = useSourcesStore((s) => s.sources)
+  const selectedSourceIds = useSourcesStore((s) => s.selectedSourceIds)
+  const colorMap = useSourcesStore((s) => s._colorMap)
 
   const [categoryFilter, setCategoryFilter] = useState('')
   const [page, setPage] = useState(1)
@@ -102,10 +108,8 @@ export function BrowseView({ onAddSource, onSyncSource, onRemoveSource, onSelect
     !categoryFilter || c.name.toLowerCase().includes(categoryFilter.toLowerCase())
   )
 
-  const PAGE_SIZE = getPageSize()
-
   // ── Per-type search limits (independent so each section can load more) ─────
-  const defaultLive = getSearchLimit('live'), defaultMovie = getSearchLimit('movie'), defaultSeries = getSearchLimit('series')
+  const defaultLive = SEARCH_LIMIT_DEFAULTS.live, defaultMovie = SEARCH_LIMIT_DEFAULTS.movie, defaultSeries = SEARCH_LIMIT_DEFAULTS.series
   const [liveLimit,   setLiveLimit]   = useState(defaultLive)
   const [movieLimit,  setMovieLimit]  = useState(defaultMovie)
   const [seriesLimit, setSeriesLimit] = useState(defaultSeries)
@@ -156,12 +160,14 @@ export function BrowseView({ onAddSource, onSyncSource, onRemoveSource, onSelect
 
   // Bulk-load user data for visible items (card indicators)
   const loadBulk = useUserStore((s) => s.loadBulk)
-  const allVisibleIds = isSearching
-    ? [...(liveSearchResults as any[]), ...(movieSearchResults as any[]), ...(seriesSearchResults as any[])].map((i: any) => i.id)
-    : items.map((i: any) => i.id)
+  const allVisibleIds = useMemo(() => (
+    isSearching
+      ? [...(liveSearchResults as any[]), ...(movieSearchResults as any[]), ...(seriesSearchResults as any[])].map((i: any) => i.id)
+      : items.map((i: any) => i.id)
+  ), [isSearching, liveSearchResults, movieSearchResults, seriesSearchResults, items])
   useEffect(() => {
     if (allVisibleIds.length > 0) loadBulk(allVisibleIds)
-  }, [allVisibleIds.join(',')])
+  }, [allVisibleIds, loadBulk])
 
   // ── Empty state ─────────────────────────────────────────────────────────
   if (sourcesCount === 0) {
@@ -171,7 +177,7 @@ export function BrowseView({ onAddSource, onSyncSource, onRemoveSource, onSelect
         <div style={{ textAlign: 'center' }}>
           <h2 style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-text-primary)', marginBottom: 8 }}>No sources yet</h2>
           <p style={{ fontSize: 12, color: 'var(--color-text-secondary)', maxWidth: 240, lineHeight: 1.7 }}>
-            Add an Xtream Codes account to start browsing.
+            Add an Xtream Codes source to start browsing.
           </p>
         </div>
         <button onClick={onAddSource} style={{ borderRadius: 8, padding: '7px 20px', fontSize: 12, fontWeight: 600, background: 'var(--color-primary)', color: '#fff', border: 'none', cursor: 'pointer' }}>
@@ -367,7 +373,7 @@ export function BrowseView({ onAddSource, onSyncSource, onRemoveSource, onSelect
               onSelect={onSelectContent} scopedTo={activeCategory}
             />
           ) : (
-            <BrowsePane key={`browse-${type}-${activeCategory ?? ''}`} items={items} fetching={browseFetching} onSelect={onSelectContent} type={type} hasCategory={!!activeCategory} />
+            <BrowsePane key={`browse-${type}-${activeCategory ?? ''}`} items={items} fetching={browseFetching} onSelect={onSelectContent} type={type} hasCategory={!!activeCategory} query={query} isSearching={isSearching} />
           )}
         </AnimatePresence>
       </div>
@@ -471,8 +477,9 @@ function LoadMoreBtn({ onClick }: { onClick: () => void }) {
 
 // ── Browse pane ─────────────────────────────────────────────────────────────
 
-function BrowsePane({ items, fetching, onSelect, type, hasCategory }: {
+function BrowsePane({ items, fetching, onSelect, type, hasCategory, query, isSearching }: {
   items: ContentItem[]; fetching: boolean; onSelect: (item: ContentItem) => void; type: ContentType; hasCategory: boolean
+  query: string; isSearching: boolean
 }) {
   const liveItems = items.filter(i => i.type === 'live')
   const mediaItems = items.filter(i => i.type !== 'live')
@@ -485,10 +492,15 @@ function BrowsePane({ items, fetching, onSelect, type, hasCategory }: {
       {!hasCategory && <PersonalizedRows onSelect={onSelect} type={type} />}
 
       {items.length === 0 && (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', paddingTop: 80 }}>
-          <p style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
-            {fetching ? 'Loading…' : 'No content found'}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', paddingTop: 80, gap: 8 }}>
+          <p style={{ fontSize: 12, color: 'var(--color-text-muted)', margin: 0 }}>
+            {fetching ? 'Loading…' : (isSearching ? `No results for "${query}"` : 'No content found')}
           </p>
+          {!fetching && isSearching && !query.trim().startsWith('@') && (
+            <p style={{ fontSize: 11, color: 'var(--text-3)', margin: 0, fontFamily: 'var(--font-ui)' }}>
+              Tip: prefix with <code style={{ fontFamily: 'var(--font-mono)' }}>@</code> for advanced search — e.g. <code style={{ fontFamily: 'var(--font-mono)' }}>@ year:2020</code>
+            </p>
+          )}
         </div>
       )}
 

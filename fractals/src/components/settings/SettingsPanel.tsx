@@ -5,6 +5,8 @@ import { useSourcesStore } from '@/stores/sources.store'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useQueryClient } from '@tanstack/react-query'
 import { SlidePanel } from '@/components/layout/SlidePanel'
+import { IptvOrgRow } from '@/components/settings/IptvOrgRow'
+import { ExportPlaylistDialog } from '@/components/settings/ExportPlaylistDialog'
 import { api } from '@/lib/api'
 import {
   useTheme,
@@ -15,7 +17,6 @@ import {
 
 interface Props {
   onClose: () => void
-  suppressScrim?: boolean
 }
 
 type PlayerPref = 'artplayer' | 'mpv' | 'vlc'
@@ -31,7 +32,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'about',      label: 'About' },
 ]
 
-export function SettingsPanel({ onClose, suppressScrim }: Props) {
+export function SettingsPanel({ onClose }: Props) {
   const { theme, font, setTheme, setFont } = useTheme()
   const [activeTab, setActiveTab] = useState<Tab>('appearance')
 
@@ -41,7 +42,7 @@ export function SettingsPanel({ onClose, suppressScrim }: Props) {
   const [mpvPath, setMpvPath] = useState(() => localStorage.getItem('fractals-player-mpv-path') ?? '')
   const [vlcPath, setVlcPath] = useState(() => localStorage.getItem('fractals-player-vlc-path') ?? '')
   return (
-    <SlidePanel open={true} onClose={onClose} width={480} suppressScrim={suppressScrim}>
+    <SlidePanel open={true} onClose={onClose} width={480}>
       {/* Header */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -236,6 +237,11 @@ const COMMON_TIMEZONES = Intl.supportedValuesOf('timeZone')
 
 function InterfaceTab() {
   const { pageSize, setPageSize, homeMode, setHomeMode, homeStripSize, setHomeStripSize, timezone, setTimezone } = useAppStore()
+  const queryClient = useQueryClient()
+  const [allowAdult, setAllowAdult] = useState(true)
+  useEffect(() => {
+    api.settings.get('allow_adult').then((v) => setAllowAdult(v !== '0'))
+  }, [])
   const systemTz = Intl.DateTimeFormat().resolvedOptions().timeZone
   const [tzSearch, setTzSearch] = useState('')
   const filteredTz = tzSearch
@@ -360,6 +366,38 @@ function InterfaceTab() {
               </div>
             </div>
           )}
+        </div>
+      </section>
+
+      <section>
+        <SectionLabel>Content</SectionLabel>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div>
+            <div style={{ fontSize: 12, color: 'var(--text-0)', fontFamily: 'var(--font-ui)' }}>Allow adult content</div>
+            <div style={{ fontSize: 11, color: 'var(--text-2)', fontFamily: 'var(--font-ui)', marginTop: 2 }}>
+              Show categories marked as adult (18+)
+            </div>
+          </div>
+          <button
+            onClick={async () => {
+              const next = !allowAdult
+              setAllowAdult(next)
+              await api.settings.set('allow_adult', next ? '1' : '0')
+              queryClient.invalidateQueries()
+            }}
+            style={{
+              width: 36, height: 20, borderRadius: 10, border: 'none', cursor: 'pointer',
+              background: allowAdult ? 'var(--accent-interactive)' : 'var(--bg-3)',
+              position: 'relative', transition: 'background 0.15s', flexShrink: 0,
+            }}
+          >
+            <div style={{
+              width: 16, height: 16, borderRadius: 8, background: '#fff',
+              position: 'absolute', top: 2,
+              left: allowAdult ? 18 : 2,
+              transition: 'left 0.15s',
+            }} />
+          </button>
         </div>
       </section>
     </div>
@@ -547,6 +585,136 @@ function PlayerNote({ title, color, children }: { title: string; color: string; 
   )
 }
 
+/* ── Enrichment section (inside Data tab) ─────────────────────── */
+function EnrichmentSection() {
+  const [level, setLevel] = useState<'0' | '1' | '2'>('1')
+  const [apiKey, setApiKey] = useState('')
+  const [showKey, setShowKey] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [keyInvalid, setKeyInvalid] = useState(false)
+
+  useEffect(() => {
+    api.settings.get('enrichment_level').then((v) => setLevel(((v as string) || '1') as '0' | '1' | '2'))
+    api.settings.get('tmdb_api_key').then((v) => setApiKey(v ?? ''))
+    api.settings.get('tmdb_key_invalid').then((v) => setKeyInvalid(v === '1'))
+    const off = window.api.on('enrichment:tmdb-invalid', () => {
+      setKeyInvalid(true)
+      setLevel('1')
+    })
+    return off
+  }, [])
+
+  const saveLevel = async (next: '0' | '1' | '2') => {
+    setLevel(next)
+    await api.settings.set('enrichment_level', next)
+    await api.settings.set('tmdb_enabled', next === '2' ? '1' : '0')
+    setSaved(true)
+    setTimeout(() => setSaved(false), 2000)
+  }
+
+  const saveKey = async (key: string) => {
+    await api.settings.set('tmdb_api_key', key)
+    setKeyInvalid(false)
+    setSaved(true)
+    setTimeout(() => setSaved(false), 2000)
+  }
+
+  const LEVELS = [
+    { id: '0' as const, label: 'Off', desc: 'Stream data only, no lookups' },
+    { id: '1' as const, label: 'Keyless', desc: 'IMDb ID + Wikidata, Wikipedia, TVmaze — no API key needed' },
+    { id: '2' as const, label: 'TMDB', desc: 'Best quality — backdrops, ratings, full cast. Free API key required.' },
+  ]
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {LEVELS.map(({ id, label, desc }) => {
+        const active = level === id
+        return (
+          <button
+            key={id}
+            onClick={() => saveLevel(id)}
+            style={{
+              display: 'flex', alignItems: 'flex-start', gap: 10,
+              padding: '10px 12px', borderRadius: 8, textAlign: 'left', cursor: 'pointer',
+              border: `1px solid ${active ? 'var(--accent-interactive)' : 'var(--border-subtle)'}`,
+              background: active ? 'var(--accent-interactive-dim)' : 'var(--bg-2)',
+              transition: 'all 0.1s', width: '100%',
+            }}
+          >
+            <div style={{
+              width: 14, height: 14, borderRadius: '50%', flexShrink: 0, marginTop: 1,
+              border: `2px solid ${active ? 'var(--accent-interactive)' : 'var(--border-default)'}`,
+              background: active ? 'var(--accent-interactive)' : 'transparent',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              {active && <div style={{ width: 5, height: 5, borderRadius: '50%', background: '#fff' }} />}
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: active ? 'var(--accent-interactive)' : 'var(--text-0)', marginBottom: 2, fontFamily: 'var(--font-ui)' }}>
+                {label}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-1)', lineHeight: 1.45, fontFamily: 'var(--font-ui)' }}>{desc}</div>
+            </div>
+          </button>
+        )
+      })}
+      {keyInvalid && (
+        <div style={{
+          padding: '8px 12px', borderRadius: 8,
+          background: 'rgba(224,85,85,0.12)',
+          border: '1px solid rgba(224,85,85,0.4)',
+          color: 'var(--text-0)', fontSize: 11, lineHeight: 1.45,
+          fontFamily: 'var(--font-ui)',
+        }}>
+          Your TMDB API key was rejected. Enrichment has been demoted to Keyless — re-enter a valid key to resume Level 2.
+        </div>
+      )}
+      {level === '2' && (
+        <div style={{ padding: '10px 12px', borderRadius: 8, background: 'var(--bg-2)', border: '1px solid var(--border-subtle)' }}>
+          <label style={{
+            fontSize: 10, color: 'var(--text-2)', fontWeight: 600,
+            letterSpacing: '0.04em', textTransform: 'uppercase',
+            display: 'block', marginBottom: 6, fontFamily: 'var(--font-ui)',
+          }}>
+            TMDB API Key
+          </label>
+          <div style={{ position: 'relative' }}>
+            <input
+              type={showKey ? 'text' : 'password'}
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--border-default)'; saveKey(apiKey) }}
+              onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--accent-interactive)' }}
+              placeholder="Paste your TMDB API key here"
+              style={{
+                width: '100%', boxSizing: 'border-box',
+                background: 'var(--bg-1)', border: '1px solid var(--border-default)',
+                borderRadius: 7, padding: '7px 32px 7px 10px',
+                fontSize: 11, fontFamily: 'var(--font-mono)',
+                color: 'var(--text-0)', outline: 'none',
+              }}
+            />
+            <button
+              onClick={() => setShowKey((s) => !s)}
+              style={{
+                position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+                background: 'none', border: 'none', cursor: 'pointer',
+                color: 'var(--text-3)', padding: 2,
+              }}
+            >
+              {showKey
+                ? <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                : <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+              }
+            </button>
+          </div>
+        </div>
+      )}
+      {saved && <span style={{ fontSize: 10, color: 'var(--accent-success)', fontFamily: 'var(--font-ui)' }}>Saved</span>}
+    </div>
+  )
+}
+
 /* ── Data tab ──────────────────────────────────────────────────── */
 function DataTab() {
   const qc = useQueryClient()
@@ -556,6 +724,7 @@ function DataTab() {
   const [msg, setMsg] = useState<string | null>(null)
   const [importMsg, setImportMsg] = useState<string | null>(null)
   const [includeUserData, setIncludeUserData] = useState(false)
+  const [exportOpen, setExportOpen] = useState(false)
 
   const run = async (action: 'history' | 'favorites' | 'all' | 'prefs' | 'factory') => {
     setBusy(true)
@@ -667,7 +836,46 @@ function DataTab() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
-      {/* ── Enrichment — hidden until TMDB integration (g2+) ── */}
+      {/* ── Enrichment ── */}
+      <section>
+        <SectionLabel>Enrichment</SectionLabel>
+        <EnrichmentSection />
+      </section>
+
+      {/* ── iptv-org reference database ── */}
+      <IptvOrgRow />
+
+      {/* ── Export playlist ── */}
+      <section>
+        <SectionLabel>Export playlist</SectionLabel>
+        <div style={{
+          padding: '12px 14px',
+          borderRadius: 8,
+          background: 'var(--bg-2)',
+          border: '1px solid var(--border-subtle)',
+          display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12,
+        }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-0)', marginBottom: 3 }}>
+              Export as .m3u
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-1)', lineHeight: 1.45 }}>
+              Build a playlist from selected favorites or source categories. Series categories flatten to per-episode entries (episodes are fetched on demand). The file includes credential-bearing stream URLs — treat it as private.
+            </div>
+          </div>
+          <button
+            onClick={() => setExportOpen(true)}
+            style={{
+              padding: '6px 14px', borderRadius: 6, fontSize: 12, fontWeight: 600,
+              background: 'var(--accent-interactive)', color: '#fff',
+              border: 'none', cursor: 'pointer', flexShrink: 0, whiteSpace: 'nowrap',
+            }}
+          >
+            Open picker…
+          </button>
+        </div>
+      </section>
+      {exportOpen && <ExportPlaylistDialog onClose={() => setExportOpen(false)} />}
 
       {/* ── User data ── */}
       <section>

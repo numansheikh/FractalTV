@@ -6,13 +6,11 @@ interface Props {
   onClose: () => void
   width?: number
   children: React.ReactNode
-  /** When true, the scrim and Escape handler are suppressed (player is on top) */
+  /** When true, the Escape handler is suppressed (player is on top, panel should not close) */
   suppressClose?: boolean
-  /** When true, the scrim is not rendered (caller manages it externally) */
-  suppressScrim?: boolean
 }
 
-export function SlidePanel({ open, onClose, width = 420, children, suppressClose = false, suppressScrim = false }: Props) {
+export function SlidePanel({ open, onClose, width = 420, children, suppressClose = false }: Props) {
   // Capture-phase Escape handler
   useEffect(() => {
     if (!open || suppressClose) return
@@ -29,49 +27,31 @@ export function SlidePanel({ open, onClose, width = 420, children, suppressClose
   return (
     <AnimatePresence>
       {open && (
-        <>
-          {/* Scrim — suppressed when caller manages it (e.g. shared scrim across exclusive panels) */}
-          {!suppressClose && !suppressScrim && (
-            <motion.div
-              key="scrim"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.15 }}
-              onClick={onClose}
-              style={{
-                position: 'fixed', inset: 0,
-                background: 'rgba(0,0,0,0.45)',
-                backdropFilter: 'blur(3px)',
-                WebkitBackdropFilter: 'blur(3px)',
-                zIndex: 40,
-              }}
-            />
-          )}
-          {/* Panel */}
-          <motion.div
-            key="panel"
-            role="dialog"
-            aria-modal="true"
-            initial={{ x: width }}
-            animate={{ x: 0 }}
-            exit={{ x: width }}
-            transition={{ duration: 0.18, ease: [0.32, 0.72, 0, 1] }}
-            style={{
-              position: 'fixed',
-              top: 0, right: 0, bottom: 0,
-              width,
-              background: 'var(--bg-1)',
-              borderLeft: '1px solid var(--border-default)',
-              zIndex: 50,
-              display: 'flex',
-              flexDirection: 'column',
-              overflow: 'hidden',
-            }}
-          >
-            {children}
-          </motion.div>
-        </>
+        <motion.div
+          key="panel"
+          role="dialog"
+          aria-modal="true"
+          initial={{ x: width }}
+          animate={{ x: 0 }}
+          exit={{ x: width }}
+          transition={{ duration: 0.18, ease: [0.32, 0.72, 0, 1] }}
+          style={{
+            position: 'fixed',
+            top: 0, right: 0, bottom: 0,
+            width,
+            background: 'var(--bg-2)',
+            boxShadow: 'var(--panel-shadow)',
+            zIndex: 50,
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            // Scope bg tokens so all children inherit the tinted panel surface
+            ['--bg-2' as string]: 'var(--bg-panel)',
+            ['--bg-1' as string]: 'var(--bg-panel-sub)',
+          } as React.CSSProperties}
+        >
+          {children}
+        </motion.div>
       )}
     </AnimatePresence>
   )

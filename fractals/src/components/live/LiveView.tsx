@@ -1,9 +1,8 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
-import Hls from 'hls.js'
-import Artplayer from 'artplayer'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ContentItem } from '@/lib/types'
 import { useAppStore } from '@/stores/app.store'
+import { useSearchStore } from '@/stores/search.store'
 import { useSourcesStore } from '@/stores/sources.store'
 import { useUserStore } from '@/stores/user.store'
 import { buildColorMapFromSources } from '@/lib/sourceColors'
@@ -13,7 +12,7 @@ import { EpgGuide } from './EpgGuide'
 
 interface Props {
   channel: ContentItem
-  onFullscreen: (ch: ContentItem) => void
+  onFullscreen: () => void
   onSwitchChannel: (ch: ContentItem) => void
   onClose: () => void
 }
@@ -28,23 +27,68 @@ export function LiveView({ channel, onFullscreen, onSwitchChannel, onClose }: Pr
   const [epgExpanded, setEpgExpanded] = useState(true)
   const [showGuide, setShowGuide] = useState(false)
   const [categoryName, setCategoryName] = useState<string | null>(null)
+  const [iptvInfo, setIptvInfo] = useState<ContentItem | null>(null)
 
-  // Fetch category name for the active channel (not always in the ContentItem)
+  const { data: siblings = [] } = useQuery({
+    queryKey: ['channel-siblings-lv', iptvInfo?.id],
+    queryFn: () => api.channels.siblings(iptvInfo!.id),
+    enabled: !!iptvInfo?.id,
+    staleTime: 10 * 60_000,
+  })
+
+  // Fetch enriched channel data (category name + iptv-org fields)
   useEffect(() => {
     setCategoryName(null)
+    setIptvInfo(null)
+    // Default to expanded only if EPG data is known to exist on this channel.
+    // iptv-org data isn't loaded yet — we'll expand once it arrives if needed.
+    setEpgExpanded(!!channel.has_epg_data)
     api.content.get(channel.id).then((item: any) => {
       if (item?.category_name) setCategoryName(item.category_name.split(',')[0])
+      if (item?.io_name) {
+        setIptvInfo(item as ContentItem)
+        // iptv-org data arrived — ensure the panel is expanded to show it
+        setEpgExpanded(true)
+      }
     })
   }, [channel.id])
 
   const handleBrowseCategory = () => {
     if (!categoryName) return
+    useSearchStore.getState().setQuery('')
     setView('live')
     setCategoryFilter(categoryName)
     onClose()
   }
   const activeChannelRef = useRef<HTMLDivElement>(null)
   const isFirstMount = useRef(true)
+  const playerZoneRef = useRef<HTMLDivElement>(null)
+
+  // Register this view's player zone as the embedded anchor and start playback.
+  // Runs once on mount; channel changes go through setPlayingContent only.
+  useEffect(() => {
+    const el = playerZoneRef.current
+    if (!el) return
+    const { setEmbeddedAnchor, setPlayingContent, setPlayerMode } = useAppStore.getState()
+    setEmbeddedAnchor(el)
+    setPlayingContent(channel)
+    setPlayerMode('embedded')
+    return () => {
+      const s = useAppStore.getState()
+      s.setEmbeddedAnchor(null)
+      // Only stop stream if embedded (fullscreen transition keeps playing;
+      // NavRail handles the fullscreen-nav-away case separately)
+      if (s.playerMode === 'embedded') {
+        s.setPlayerMode('hidden')
+        s.setPlayingContent(null)
+      }
+    }
+  }, [])
+
+  // Update playing content when channel changes (channel surf, list click)
+  useEffect(() => {
+    useAppStore.getState().setPlayingContent(channel)
+  }, [channel.id])
 
   const { loadBulk, data: userData, setFavorite } = useUserStore()
 
@@ -80,7 +124,7 @@ export function LiveView({ channel, onFullscreen, onSwitchChannel, onClose }: Pr
       }
       // All other shortcuts are suppressed while typing
       if (isTyping()) return
-      if (e.key === 'f' || e.key === 'F') { e.stopImmediatePropagation(); onFullscreen(channel); return }
+      if (e.key === 'f' || e.key === 'F') { e.stopImmediatePropagation(); onFullscreen(); return }
       // Channel surf: PgUp/PgDn or Cmd+↑↓
       const isSurfUp = e.key === 'PageUp' || (e.metaKey && e.key === 'ArrowUp')
       const isSurfDown = e.key === 'PageDown' || (e.metaKey && e.key === 'ArrowDown')
@@ -244,7 +288,7 @@ export function LiveView({ channel, onFullscreen, onSwitchChannel, onClose }: Pr
                 onToggleFav={handleToggleFav}
                 onClick={() => {
                   if (ch.id === channel.id) {
-                    onFullscreen(ch)
+                    onFullscreen()
                   } else {
                     onSwitchChannel(ch)
                   }
@@ -258,7 +302,7 @@ export function LiveView({ channel, onFullscreen, onSwitchChannel, onClose }: Pr
             borderTop: '1px solid var(--border-default)', padding: '7px 12px',
             display: 'flex', gap: 6,
           }}>
-            <HintBtn label="Full screen" shortcut="F" onClick={() => onFullscreen(channel)} />
+            <HintBtn label="Full screen" shortcut="F" onClick={() => onFullscreen()} />
             <HintBtn label="Close" shortcut="Esc" onClick={onClose} />
           </div>
         </div>
@@ -266,16 +310,16 @@ export function LiveView({ channel, onFullscreen, onSwitchChannel, onClose }: Pr
         {/* ── Right: player + EPG ── */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
 
-          {/* Player zone */}
+          {/* Player zone — PlayerOverlay overlays playerZoneRef in 'embedded' mode */}
           <div
             style={{ flex: 1, position: 'relative', background: '#000', overflow: 'hidden', cursor: 'pointer', minHeight: 0 }}
             onClick={(e) => {
               if ((e.target as HTMLElement).closest('.art-bottom, .art-controls, .art-volume, .art-control')) return
-              onFullscreen(channel)
+              onFullscreen()
             }}
             title="Click to go fullscreen"
           >
-            <MiniPlayer key={channel.id} channel={channel} />
+            <div ref={playerZoneRef} style={{ width: '100%', height: '100%' }} />
 
             {/* Top overlay — channel name + live badge only, no interactive elements */}
             <div style={{
@@ -320,8 +364,19 @@ export function LiveView({ channel, onFullscreen, onSwitchChannel, onClose }: Pr
             </div>
           )}
 
-          {/* EPG strip */}
-          <EpgStrip channel={channel} expanded={epgExpanded} onToggle={() => setEpgExpanded((v) => !v)} onOpenGuide={() => setShowGuide(true)} />
+          {/* Bottom panel: iptv identity (left) + EPG (right) */}
+          <div style={{
+            flexShrink: 0,
+            height: epgExpanded ? 260 : 86,
+            transition: 'height 220ms cubic-bezier(0.32,0.72,0,1)',
+            borderTop: '1px solid var(--border-default)',
+            display: 'flex', overflow: 'hidden',
+          }}>
+            {iptvInfo && (
+              <IptvStrip item={iptvInfo} expanded={epgExpanded} onClick={() => setEpgExpanded((v) => !v)} siblings={siblings} onSwitchChannel={onSwitchChannel} />
+            )}
+            <EpgStrip channel={channel} expanded={epgExpanded} onToggle={() => setEpgExpanded((v) => !v)} onOpenGuide={() => setShowGuide(true)} onNoData={() => setEpgExpanded(false)} />
+          </div>
         </div>
       </div>
 
@@ -331,7 +386,7 @@ export function LiveView({ channel, onFullscreen, onSwitchChannel, onClose }: Pr
           channels={channelSurfList}
           activeChannel={channel}
           onSwitchChannel={(ch) => { onSwitchChannel(ch); setShowGuide(false) }}
-          onFullscreen={(ch) => { onFullscreen(ch); setShowGuide(false) }}
+          onFullscreen={(ch) => { useAppStore.getState().setPlayingContent(ch); onFullscreen(); setShowGuide(false) }}
           onClose={() => setShowGuide(false)}
         />
       )}
@@ -339,145 +394,140 @@ export function LiveView({ channel, onFullscreen, onSwitchChannel, onClose }: Pr
   )
 }
 
-// ── Mini player (ArtPlayer, no controls) ─────────────────────────────────────
+// ── Iptv-org identity strip (left panel of bottom section) ───────────────────
 
-function MiniPlayer({ channel }: { channel: ContentItem }) {
-  const containerRef = useRef<HTMLDivElement>(null)
-  const artRef = useRef<Artplayer | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [isAudioOnly, setIsAudioOnly] = useState(false)
+function IptvStrip({ item, expanded, onClick, siblings, onSwitchChannel }: {
+  item: ContentItem; expanded: boolean; onClick: () => void
+  siblings?: { id: string; title: string; source_id: string }[]
+  onSwitchChannel?: (ch: ContentItem) => void
+}) {
+  const [imgError, setImgError] = useState(false)
+  const { sources } = useSourcesStore()
+  const siblingColorMap = buildColorMapFromSources(sources)
+  const sourceNames: Record<string, string> = {}
+  for (const s of sources) sourceNames[s.id] = s.name
+  const logoUrl = item.io_logo_url ?? item.posterUrl ?? item.poster_url ?? null
+  const logo: string | null = imgError ? null : logoUrl
+  const initials = item.title.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('')
 
-  useEffect(() => {
-    let cancelled = false
-
-    setLoading(true)
-    setError(null)
-    setIsAudioOnly(false)
-
-    api.content.getStreamUrl({ contentId: channel.id }).then((result: any) => {
-      if (cancelled || !containerRef.current) return
-
-      if (!result?.url) {
-        setError(result?.error ?? 'Could not get stream URL')
-        setLoading(false)
-        return
-      }
-
-      const url: string = result.url
-      const isHls = url.includes('.m3u8') || url.includes('m3u8')
-
-      const art = new Artplayer({
-        container: containerRef.current!,
-        url,
-        autoplay: true,
-        controls: [],
-        settings: [],
-        contextmenu: [],
-        pip: false,
-        fullscreen: false,
-        hotkey: false,
-        playbackRate: false,
-        aspectRatio: false,
-        setting: false,
-        flip: false,
-        miniProgressBar: false,
-        mutex: true,
-        backdrop: false,
-        playsInline: true,
-        autoMini: false,
-        screenshot: false,
-        lock: false,
-        isLive: true,
-        theme: 'transparent',
-        moreVideoAttr: { crossOrigin: 'anonymous' },
-        ...(isHls && Hls.isSupported() && {
-          customType: {
-            m3u8: (video: HTMLVideoElement, src: string) => {
-              const hls = new Hls({ enableWorker: true, lowLatencyMode: true })
-              ;(art as any).hls = hls
-              hls.loadSource(src)
-              hls.attachMedia(video)
-              hls.on(Hls.Events.ERROR, (_e: any, data: any) => {
-                if (data.fatal && !cancelled) {
-                  setError('Stream unavailable')
-                  setLoading(false)
-                }
-              })
-            },
-          },
-        }),
-      })
-
-      artRef.current = art
-      art.on('ready', () => {
-        if (!cancelled) setLoading(false)
-        const video = art.template.$video as HTMLVideoElement
-        if (video) {
-          const checkAudioOnly = () => {
-            if (cancelled) return
-            if (video.videoWidth === 0 && video.videoHeight === 0) {
-              setIsAudioOnly(true)
-            } else {
-              setIsAudioOnly(false)
-            }
-          }
-          video.addEventListener('loadedmetadata', checkAudioOnly, { once: true })
-          art.on('video:playing', checkAudioOnly)
-          setTimeout(checkAudioOnly, 3000)
-          setTimeout(checkAudioOnly, 6000)
-        }
-      })
-      art.on('error', () => { if (!cancelled) { setError('Playback error'); setLoading(false) } })
-    })
-
-    return () => {
-      cancelled = true
-      if (artRef.current) {
-        try {
-          ;(artRef.current as any).hls?.destroy()
-          artRef.current.destroy(true)
-        } catch {}
-        artRef.current = null
-      }
-    }
-  }, [channel.id])
+  const categoryLabels: string[] = (() => {
+    if (!item.io_category_labels) return []
+    try { const p = JSON.parse(item.io_category_labels); return Array.isArray(p) ? p.filter((v: unknown) => typeof v === 'string') : [] } catch { return [] }
+  })()
 
   return (
-    <div style={{ width: '100%', height: '100%', position: 'relative' }}>
-      <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
-      {/* Audio-only overlay (radio stations) */}
-      {isAudioOnly && !loading && !error && (
+    <div
+      onClick={onClick}
+      style={{
+        width: 240, flexShrink: 0,
+        borderRight: '1px solid var(--border-default)',
+        background: 'var(--bg-2)',
+        display: 'flex', flexDirection: 'column',
+        overflow: 'hidden', cursor: 'pointer',
+        height: '100%',
+      }}
+    >
+      {/* Always-visible row */}
+      <div style={{ height: 86, minHeight: 86, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '0 12px' }}>
+        {/* Logo */}
         <div style={{
-          position: 'absolute', inset: 0, zIndex: 5,
-          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-          background: 'radial-gradient(ellipse at center, rgba(20,10,40,0.95) 0%, rgba(5,5,15,0.98) 100%)',
-          pointerEvents: 'none', gap: 10,
+          width: 48, height: 48, borderRadius: 7, flexShrink: 0,
+          background: 'var(--bg-3)', border: '1px solid var(--border-default)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
         }}>
-          {(channel.posterUrl || channel.poster_url) && (
-            <img src={channel.posterUrl ?? channel.poster_url} alt="" style={{
-              width: 52, height: 52, borderRadius: 10, objectFit: 'cover',
-              boxShadow: '0 4px 16px rgba(124,77,255,0.3)',
-              border: '1px solid rgba(124,77,255,0.25)',
-            }} />
+          {logo
+            ? <img src={logo} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain', padding: 5 }} onError={() => setImgError(true)} />
+            : <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-1)', letterSpacing: '-0.02em' }}>{initials}</span>
+          }
+        </div>
+        {/* Name + flag + chip */}
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
+          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-0)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {item.io_name ?? item.title}
+          </span>
+          {(item.io_country_flag || item.io_country_name) && (
+            <span style={{ fontSize: 11, color: 'var(--text-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {item.io_country_flag} {item.io_country_name}
+            </span>
           )}
-          <MiniAudioBars />
+          {categoryLabels[0] && (
+            <span style={{
+              fontSize: 9, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em',
+              color: 'var(--text-1)', background: 'var(--bg-4)',
+              border: '1px solid var(--border-default)',
+              padding: '1px 5px', borderRadius: 8, alignSelf: 'flex-start',
+            }}>
+              {categoryLabels[0]}
+            </span>
+          )}
         </div>
-      )}
-      {loading && !error && (
-        <div style={{
-          position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-          background: 'rgba(0,0,0,0.6)',
-        }}>
-          <div style={{ width: 28, height: 28, border: '2px solid rgba(255,255,255,0.15)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
-        </div>
-      )}
-      {error && (
-        <div style={{
-          position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-          background: 'rgba(0,0,0,0.8)', gap: 8,
-        }}>
-          <span style={{ fontSize: 13, color: 'var(--text-2)' }}>{error}</span>
+      </div>
+
+      {/* Expanded content */}
+      {expanded && (
+        <div style={{ flex: 1, overflow: 'auto', borderTop: '1px solid var(--border-subtle)', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 6 }} onClick={(e) => e.stopPropagation()}>
+          {item.io_network && (
+            <div style={{ display: 'flex', gap: 6, alignItems: 'baseline' }}>
+              <span style={{ fontSize: 10, color: 'var(--text-1)', minWidth: 60, flexShrink: 0 }}>Network</span>
+              <span style={{ fontSize: 11, color: 'var(--text-0)', fontWeight: 500 }}>{item.io_network}</span>
+            </div>
+          )}
+          {categoryLabels.length > 1 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
+              {categoryLabels.map((l) => (
+                <span key={l} style={{
+                  fontSize: 9, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em',
+                  color: 'var(--text-1)', background: 'var(--bg-4)',
+                  border: '1px solid var(--border-default)',
+                  padding: '1px 5px', borderRadius: 8,
+                }}>
+                  {l}
+                </span>
+              ))}
+            </div>
+          )}
+          {item.io_is_nsfw ? (
+            <span style={{ fontSize: 10, fontWeight: 700, color: '#fff', background: '#e05555', padding: '2px 6px', borderRadius: 4, alignSelf: 'flex-start' }}>NSFW</span>
+          ) : null}
+
+          {siblings && siblings.length > 0 && (
+            <div style={{ borderRadius: 8, border: '1px solid var(--border-default)', flexShrink: 0 }}>
+              <div style={{ padding: '6px 10px', background: 'var(--accent-interactive)', borderBottom: '1px solid rgba(0,0,0,0.18)', borderRadius: '8px 8px 0 0' }}>
+                <p style={{ fontSize: 9, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#fff', margin: 0, fontFamily: 'var(--font-ui)' }}>
+                  Also on
+                </p>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', background: 'var(--bg-2)', padding: '4px 0', borderRadius: '0 0 8px 8px', overflowX: 'auto' }}>
+                {siblings.map((s) => {
+                  const sc = siblingColorMap[s.source_id]
+                  const name = sourceNames[s.source_id] ?? s.source_id
+                  return (
+                    <button
+                      key={s.id}
+                      onClick={(e) => { e.stopPropagation(); onSwitchChannel?.({ id: s.id, type: 'live', title: s.title, primary_source_id: s.source_id } as ContentItem) }}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 8,
+                        padding: '5px 10px',
+                        background: 'none', border: 'none',
+                        cursor: 'pointer', textAlign: 'left', width: '100%',
+                        minWidth: 'max-content',
+                      }}
+                      onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-3)' }}
+                      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'none' }}
+                    >
+                      <span style={{ width: 7, height: 7, borderRadius: '50%', background: sc?.accent ?? 'var(--text-3)', flexShrink: 0 }} />
+                      <span style={{ fontSize: 10, color: 'var(--text-1)', fontFamily: 'var(--font-ui)', flexShrink: 0, whiteSpace: 'nowrap' }}>
+                        {name}
+                      </span>
+                      <span style={{ fontSize: 11, color: 'var(--text-0)', fontFamily: 'var(--font-ui)', whiteSpace: 'nowrap' }}>
+                        {s.title}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -486,13 +536,36 @@ function MiniPlayer({ channel }: { channel: ContentItem }) {
 
 // ── EPG strip ─────────────────────────────────────────────────────────────────
 
-function EpgStrip({ channel, expanded, onToggle, onOpenGuide }: { channel: ContentItem; expanded: boolean; onToggle: () => void; onOpenGuide: () => void }) {
+function EpgStrip({ channel, expanded, onToggle, onOpenGuide, onNoData }: { channel: ContentItem; expanded: boolean; onToggle: () => void; onOpenGuide: () => void; onNoData?: () => void }) {
   const [nowNext, setNowNext] = useState<{ now: any; next: any } | null>(null)
+  const [fetched, setFetched] = useState(false)
 
   useEffect(() => {
     let alive = true
-    api.epg.nowNext(channel.id).then((data) => { if (alive) setNowNext(data) })
-    // Refresh every 60s in case programme changes
+    setFetched(false)
+    let triedShortEpg = false
+    const loadNowNext = async () => {
+      const data = await api.epg.nowNext(channel.id)
+      if (!alive) return
+      setNowNext(data)
+      setFetched(true)
+      if (!data?.now && !data?.next) {
+        // Xtream short-EPG on-demand fallback: a single channel may be
+        // missing from the full xmltv.php dump. Fetch once per selection;
+        // the IPC handler has its own 1-hour cache guard.
+        if (!triedShortEpg) {
+          triedShortEpg = true
+          const r = await api.epg.fetchShort(channel.id)
+          if (alive && r.inserted > 0) {
+            const refreshed = await api.epg.nowNext(channel.id)
+            if (alive) setNowNext(refreshed)
+            return
+          }
+        }
+        onNoData?.()
+      }
+    }
+    loadNowNext()
     const interval = setInterval(() => {
       api.epg.nowNext(channel.id).then((data) => { if (alive) setNowNext(data) })
     }, 60_000)
@@ -501,6 +574,7 @@ function EpgStrip({ channel, expanded, onToggle, onOpenGuide }: { channel: Conte
 
   const now = nowNext?.now
   const next = nowNext?.next
+  const hasData = !!(now || next)
 
   const progress = now
     ? Math.min(100, Math.max(0, ((Date.now() / 1000 - now.startTime) / (now.endTime - now.startTime)) * 100))
@@ -511,50 +585,59 @@ function EpgStrip({ channel, expanded, onToggle, onOpenGuide }: { channel: Conte
     <div
       onClick={onToggle}
       style={{
-        flexShrink: 0,
+        flex: 1, minWidth: 0,
         background: 'var(--bg-1)',
-        borderTop: '1px solid var(--border-default)',
         overflow: 'hidden',
-        height: expanded ? 260 : 86,
-        transition: 'height 220ms cubic-bezier(0.32,0.72,0,1)',
         display: 'flex', flexDirection: 'column',
         cursor: 'pointer',
+        height: '100%',
       }}
     >
       {/* Collapsed row */}
       <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '0 14px', height: 86, minHeight: 86 }}>
-        {/* Logo */}
-        <div style={{
-          width: 30, height: 30, borderRadius: 5, background: 'var(--bg-3)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 6, fontWeight: 800, color: 'var(--text-3)', flexShrink: 0, overflow: 'hidden',
-        }}>
-          {(channel.posterUrl || channel.poster_url)
-            ? <img src={channel.posterUrl ?? channel.poster_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} onError={(e) => { e.currentTarget.style.display = 'none' }} />
-            : channel.title.split(' ')[0].toUpperCase().substring(0, 4)
-          }
-        </div>
+        {fetched && !hasData ? (
+          /* No EPG data — minimal message only */
+          <span style={{ fontSize: 12, color: 'var(--text-1)', fontFamily: 'var(--font-ui)', fontStyle: 'italic' }}>
+            No EPG data
+          </span>
+        ) : (
+          <>
+            {/* Logo */}
+            <div style={{
+              width: 30, height: 30, borderRadius: 5, background: 'var(--bg-3)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 6, fontWeight: 800, color: 'var(--text-3)', flexShrink: 0, overflow: 'hidden',
+            }}>
+              {(channel.posterUrl || channel.poster_url)
+                ? <img src={channel.posterUrl ?? channel.poster_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} onError={(e) => { e.currentTarget.style.display = 'none' }} />
+                : channel.title.split(' ')[0].toUpperCase().substring(0, 4)
+              }
+            </div>
 
-        {/* NOW / NEXT */}
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-            <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--accent-live)', flexShrink: 0 }}>Now</span>
-            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-0)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {now ? now.title : channel.title}
-            </span>
-            {now && <span style={{ fontSize: 9, color: 'var(--text-3)', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>{fmtTime(now.startTime)}–{fmtTime(now.endTime)}</span>}
-          </div>
-          {/* Progress bar */}
-          <div style={{ height: 3, background: 'var(--bg-4)', borderRadius: 2, overflow: 'hidden' }}>
-            <div style={{ height: '100%', width: `${progress ?? 40}%`, background: 'var(--accent-live)', borderRadius: 2, transition: 'width 1s linear' }} />
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.06em', flexShrink: 0 }}>Next</span>
-            <span style={{ fontSize: 11, color: 'var(--text-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
-              {next ? `${next.title}${next.startTime ? ` · ${fmtTime(next.startTime)}` : ''}` : '—'}
-            </span>
-          </div>
-        </div>
+            {/* NOW / NEXT */}
+            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--accent-live)', flexShrink: 0 }}>Now</span>
+                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-0)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {now?.title ?? '—'}
+                </span>
+                {now && <span style={{ fontSize: 9, color: 'var(--text-3)', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>{fmtTime(now.startTime)}–{fmtTime(now.endTime)}</span>}
+              </div>
+              {/* Progress bar — only when we have real data */}
+              {now && (
+                <div style={{ height: 3, background: 'var(--bg-4)', borderRadius: 2, overflow: 'hidden' }}>
+                  <div style={{ height: '100%', width: `${progress ?? 0}%`, background: 'var(--accent-live)', borderRadius: 2, transition: 'width 1s linear' }} />
+                </div>
+              )}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.06em', flexShrink: 0 }}>Next</span>
+                <span style={{ fontSize: 11, color: 'var(--text-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                  {next ? `${next.title}${next.startTime ? ` · ${fmtTime(next.startTime)}` : ''}` : '—'}
+                </span>
+              </div>
+            </div>
+          </>
+        )}
 
         {/* Full Guide button */}
         <button
@@ -587,7 +670,7 @@ function EpgStrip({ channel, expanded, onToggle, onOpenGuide }: { channel: Conte
       </div>
 
       {/* Expanded — description + upcoming */}
-      {expanded && (
+      {expanded && hasData && (
         <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', borderTop: '1px solid var(--border-subtle)', padding: '12px 14px', gap: 10 }} onClick={(e) => e.stopPropagation()}>
           {now?.description && (
             <div style={{
@@ -639,6 +722,21 @@ function LiveChannelListCard({ ch, isActive, activeRef, colorMap, isFav, onToggl
   const srcId = ch.primarySourceId ?? ch.primary_source_id ?? (ch as any).source_ids ?? ''
   const srcColor = colorMap[srcId]
 
+  const { data: nowNext } = useQuery({
+    queryKey: ['epg-now-next', ch.id],
+    queryFn: () => api.epg.nowNext(ch.id),
+    enabled: !!ch.has_epg_data,
+    staleTime: 60_000,
+    refetchInterval: 60_000,
+  })
+  const epgProgress = (() => {
+    const now = nowNext?.now
+    if (!now) return null
+    const total = now.endTime - now.startTime
+    if (total <= 0) return null
+    return Math.min(100, Math.max(0, (Date.now() / 1000 - now.startTime) / total * 100))
+  })()
+
   return (
     <div
       ref={activeRef}
@@ -681,16 +779,12 @@ function LiveChannelListCard({ ch, isActive, activeRef, colorMap, isFav, onToggl
           display: 'flex', alignItems: 'center', gap: 5,
         }}>
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{ch.title}</span>
-          {!!(ch as any).has_epg_data && (
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-              style={{ flexShrink: 0, color: 'var(--text-3)', opacity: 0.7 }}>
-              <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
-            </svg>
-          )}
           {srcColor && <span style={{ width: 5, height: 5, borderRadius: '50%', background: srcColor.accent, flexShrink: 0, display: 'inline-block' }} />}
         </div>
         <div style={{ height: 2, background: 'var(--bg-4)', borderRadius: 1, marginTop: 4, overflow: 'hidden' }}>
-          <div style={{ height: '100%', width: '40%', background: 'var(--accent-live)', borderRadius: 1 }} />
+          {epgProgress !== null && (
+            <div style={{ height: '100%', width: `${epgProgress}%`, background: 'var(--accent-live)', borderRadius: 1 }} />
+          )}
         </div>
       </div>
 
@@ -726,11 +820,20 @@ function FullscreenHint() {
   return (
     <div className="fullscreen-hint" style={{
       position: 'absolute', inset: 0,
-      background: 'rgba(0,0,0,0.35)',
+      background: 'rgba(0,0,0,0)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      opacity: 0, transition: 'opacity 0.15s', zIndex: 3, pointerEvents: 'none',
+      opacity: 0, transition: 'opacity 0.15s, background 0.15s', zIndex: 3,
     }}
-    onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.opacity = '1' }}
+    onMouseEnter={(e) => {
+      const el = e.currentTarget as HTMLElement
+      el.style.opacity = '1'
+      el.style.background = 'rgba(0,0,0,0.35)'
+    }}
+    onMouseLeave={(e) => {
+      const el = e.currentTarget as HTMLElement
+      el.style.opacity = '0'
+      el.style.background = 'rgba(0,0,0,0)'
+    }}
     >
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
         <div style={{
@@ -808,49 +911,3 @@ function SearchIconSm() {
   )
 }
 
-function MiniAudioBars() {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const rafRef = useRef<number>(0)
-
-  useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-
-    const BAR_COUNT = 24
-    const BAR_GAP = 2
-    const BAR_RADIUS = 1.5
-    const phases = Array.from({ length: BAR_COUNT }, () => Math.random() * Math.PI * 2)
-    const speeds = Array.from({ length: BAR_COUNT }, () => 1.5 + Math.random() * 2.5)
-
-    const draw = (t: number) => {
-      rafRef.current = requestAnimationFrame(draw)
-      const dpr = window.devicePixelRatio || 1
-      const w = canvas.clientWidth
-      const h = canvas.clientHeight
-      canvas.width = w * dpr
-      canvas.height = h * dpr
-      ctx.scale(dpr, dpr)
-      ctx.clearRect(0, 0, w, h)
-      const barW = (w - (BAR_COUNT - 1) * BAR_GAP) / BAR_COUNT
-      for (let i = 0; i < BAR_COUNT; i++) {
-        const val = 0.3 + 0.7 * Math.abs(Math.sin(t * 0.002 * speeds[i] + phases[i]))
-        const barH = Math.max(2, val * h * 0.8)
-        const x = i * (barW + BAR_GAP)
-        const y = (h - barH) / 2
-        const hue = 260 + (i / BAR_COUNT) * 80
-        const lightness = 50 + val * 25
-        ctx.fillStyle = `hsla(${hue}, 80%, ${lightness}%, 0.85)`
-        ctx.beginPath()
-        ctx.roundRect(x, y, barW, barH, BAR_RADIUS)
-        ctx.fill()
-      }
-    }
-
-    rafRef.current = requestAnimationFrame(draw)
-    return () => cancelAnimationFrame(rafRef.current)
-  }, [])
-
-  return <canvas ref={canvasRef} style={{ width: 120, height: 36 }} />
-}

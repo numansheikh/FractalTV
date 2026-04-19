@@ -5,7 +5,6 @@
  * Tests the space-aware FTS query builder logic (no DB required).
  */
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
 const anyAscii: (s: string) => string = require('any-ascii').default ?? require('any-ascii')
 
 function normalizeForSearch(text: string): string {

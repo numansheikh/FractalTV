@@ -1,11 +1,13 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAppStore } from '@/stores/app.store'
 import { useSourcesStore } from '@/stores/sources.store'
 import { useSearchStore } from '@/stores/search.store'
 import { buildColorMapFromSources } from '@/lib/sourceColors'
 import { api } from '@/lib/api'
 import { ActiveView } from '@/lib/types'
+
+interface CatCtxMenu { id: string; name: string; is_nsfw: boolean; x: number; y: number }
 
 const TYPE_MAP: Partial<Record<ActiveView, 'live' | 'movie' | 'series'>> = {
   live: 'live',
@@ -33,6 +35,8 @@ export function BrowseSidebar() {
   const [filter, setFilter] = useState('')
   const [sort, setSort] = useState<SortMode>('count')
   const [showSort, setShowSort] = useState(false)
+  const [catCtx, setCatCtx] = useState<CatCtxMenu | null>(null)
+  const queryClient = useQueryClient()
 
   const colorMap = buildColorMapFromSources(sources)
   const showSourceBar = sources.filter((s) => !s.disabled).length > 1
@@ -240,7 +244,6 @@ export function BrowseSidebar() {
       {/* Scrollable category list */}
       <div style={{ flex: 1, overflowY: 'auto' }}>
         {sorted.map((cat: any) => {
-          // source_ids is a comma-separated string from GROUP_CONCAT
           const primarySrcId = cat.source_ids?.split(',')[0]
           const srcColor = showSourceBar && primarySrcId ? colorMap[primarySrcId]?.accent : undefined
           return (
@@ -251,7 +254,12 @@ export function BrowseSidebar() {
               active={categoryFilter === cat.name}
               accent={accent}
               sourceColor={srcColor}
+              isNsfw={!!cat.is_nsfw}
               onClick={() => { if (query) setQuery(''); setCategoryFilter(cat.name) }}
+              onContextMenu={(e) => {
+                e.preventDefault()
+                setCatCtx({ id: cat.id, name: cat.name, is_nsfw: !!cat.is_nsfw, x: e.clientX, y: e.clientY })
+              }}
               buttonRef={categoryFilter === cat.name ? activeItemRef : undefined}
             />
           )
@@ -261,19 +269,63 @@ export function BrowseSidebar() {
           <div style={{ padding: '12px 12px', fontSize: 11, color: 'var(--text-3)' }}>No match</div>
         )}
       </div>
+
+      {/* Category context menu */}
+      {catCtx && (
+        <>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 190 }} onClick={() => setCatCtx(null)} />
+          <div style={{
+            position: 'fixed',
+            left: Math.min(catCtx.x, window.innerWidth - 200),
+            top: Math.min(catCtx.y, window.innerHeight - 80),
+            zIndex: 200,
+            background: 'var(--bg-2)',
+            border: '1px solid var(--border-default)',
+            borderRadius: 8,
+            padding: 4,
+            minWidth: 190,
+            boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+          }}>
+            <div style={{ padding: '4px 10px 6px', fontSize: 10, color: 'var(--text-3)', fontFamily: 'var(--font-ui)' }}>
+              {catCtx.name}
+            </div>
+            <button
+              onClick={async () => {
+                const newVal = catCtx.is_nsfw ? 0 : 1
+                await api.categories.setNsfw(catCtx.id, newVal)
+                queryClient.invalidateQueries({ queryKey: ['categories'] })
+                queryClient.invalidateQueries({ queryKey: ['browse'] })
+                setCatCtx(null)
+              }}
+              style={{
+                display: 'block', width: '100%', textAlign: 'left',
+                padding: '7px 10px', borderRadius: 5, border: 'none', cursor: 'pointer',
+                fontSize: 12, color: catCtx.is_nsfw ? 'var(--accent-danger)' : 'var(--text-1)',
+                background: 'transparent', fontFamily: 'var(--font-ui)',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-3)' }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+            >
+              {catCtx.is_nsfw ? 'Remove adult content tag' : 'Mark as adult content'}
+            </button>
+          </div>
+        </>
+      )}
     </div>
   )
 }
 
-function SidebarItem({ label, count, active, accent, sourceColor, icon, onClick, buttonRef, muted }: {
+function SidebarItem({ label, count, active, accent, sourceColor, icon, onClick, onContextMenu, buttonRef, muted, isNsfw }: {
   label: string; count?: number; active: boolean; accent: string
   sourceColor?: string; icon?: React.ReactNode; onClick: () => void
-  buttonRef?: React.RefObject<HTMLButtonElement | null>; muted?: boolean
+  onContextMenu?: (e: React.MouseEvent) => void
+  buttonRef?: React.RefObject<HTMLButtonElement | null>; muted?: boolean; isNsfw?: boolean
 }) {
   return (
     <button
       ref={buttonRef}
       onClick={onClick}
+      onContextMenu={onContextMenu}
       style={{
         width: '100%', textAlign: 'left',
         padding: '6px 10px 6px 14px',
@@ -312,6 +364,13 @@ function SidebarItem({ label, count, active, accent, sourceColor, icon, onClick,
         </span>
       )}
       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{label}</span>
+      {isNsfw && (
+        <span style={{
+          fontSize: 9, fontWeight: 700, letterSpacing: '0.03em',
+          color: 'var(--accent-danger)', flexShrink: 0,
+          fontFamily: 'var(--font-ui)',
+        }}>18+</span>
+      )}
       {count != null && (
         <span style={{ fontSize: 10, color: 'var(--text-3)', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>
           {count.toLocaleString()}

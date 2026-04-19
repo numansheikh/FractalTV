@@ -328,7 +328,9 @@ export function LibraryView({ onSelectContent }: Props) {
 
   const handleRemoveContinue = async (item: ContentItem) => {
     // Remove from continue watching only — keeps watch history intact
-    const clearId = item.resume_episode_id ?? item.id
+    // Movies: clear by item.id. Series: clear by resume_episode_id (skip if absent).
+    const clearId = item.type === 'series' ? item.resume_episode_id : item.id
+    if (!clearId) return
     qc.setQueryData<ContentItem[]>(['library', 'continue-watching'], (prev) =>
       prev ? prev.filter((i) => i.id !== item.id) : []
     )

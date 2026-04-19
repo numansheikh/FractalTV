@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { ActiveView } from '@/lib/types'
 import { useAppStore } from '@/stores/app.store'
 import { useSourcesStore } from '@/stores/sources.store'
@@ -28,7 +29,22 @@ export function NavRail({ onOpenSources, onOpenSettings }: Props) {
   const { activeView, setView } = useAppStore()
   const { theme, setTheme } = useTheme()
   const syncProgress = useSourcesStore((s) => s.syncProgress)
+  const enrichProgress = useSourcesStore((s) => s.enrichProgress)
   const isSyncing = Object.values(syncProgress).some((p) => p && p.phase !== 'done' && p.phase !== 'error')
+  const isEnriching = Object.values(enrichProgress).some((p) => p !== null)
+  const isBusy = isSyncing || isEnriching
+
+  const [isOffline, setIsOffline] = useState(() => typeof navigator !== 'undefined' && !navigator.onLine)
+  useEffect(() => {
+    const on = () => setIsOffline(false)
+    const off = () => setIsOffline(true)
+    window.addEventListener('online', on)
+    window.addEventListener('offline', off)
+    return () => {
+      window.removeEventListener('online', on)
+      window.removeEventListener('offline', off)
+    }
+  }, [])
 
   return (
     <div style={{
@@ -59,7 +75,14 @@ export function NavRail({ onOpenSources, onOpenSettings }: Props) {
             inactiveColor={accent}
             onClick={() => {
               setView(item.id)
-              if (item.id !== 'live') useAppStore.getState().setLiveViewChannel(null)
+              if (item.id !== 'live') {
+                const s = useAppStore.getState()
+                s.setLiveViewChannel(null)
+                if (s.playerMode === 'fullscreen') {
+                  s.setPlayerMode('hidden')
+                  s.setPlayingContent(null)
+                }
+              }
             }}
           >
             <NavIcon id={item.id} />
@@ -69,13 +92,37 @@ export function NavRail({ onOpenSources, onOpenSettings }: Props) {
 
       <div style={{ flex: 1 }} />
 
+      {isOffline && (
+        <div
+          title="You're offline. Playback needs a connection."
+          style={{
+            width: 32, height: 32, borderRadius: 8,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'color-mix(in srgb, var(--accent-danger) 16%, transparent)',
+            border: '1px solid color-mix(in srgb, var(--accent-danger) 36%, transparent)',
+            color: 'var(--accent-danger)',
+            marginBottom: 2,
+          }}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="1" y1="1" x2="23" y2="23"/>
+            <path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/>
+            <path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/>
+            <path d="M10.71 5.05A16 16 0 0 1 22.58 9"/>
+            <path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"/>
+            <path d="M8.53 16.11a6 6 0 0 1 6.95 0"/>
+            <line x1="12" y1="20" x2="12.01" y2="20"/>
+          </svg>
+        </div>
+      )}
+
       {/* DEV: theme toggle — remove before ship */}
       <RailButton label={theme === 'dark' ? 'Light mode' : 'Dark mode'} shortcut="" isActive={false} activeColor="var(--accent-interactive)" onClick={() => setTheme(theme === 'dark' ? 'fractals-day' : 'dark')}>
         <span style={{ color: 'var(--text-2)' }}>{theme === 'dark' ? <SunIcon /> : <MoonIcon />}</span>
       </RailButton>
 
       <RailButton label="Sources" shortcut="" isActive={false} activeColor="var(--accent-interactive)" onClick={onOpenSources}>
-        <span style={{ color: isSyncing ? 'var(--accent-interactive)' : 'var(--text-2)', animation: isSyncing ? 'nav-pulse 2s ease-in-out infinite' : 'none' }}>
+        <span style={{ color: isBusy ? 'var(--accent-interactive)' : 'var(--text-2)', animation: isBusy ? 'nav-pulse 2s ease-in-out infinite' : 'none' }}>
           <LayersIcon />
         </span>
       </RailButton>

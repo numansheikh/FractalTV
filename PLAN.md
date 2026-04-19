@@ -2,11 +2,13 @@
 
 > "Plex-quality browsing and search for IPTV content, running locally on every platform."
 
-Architecture, tech stack, schema, conventions, design language: see `fractals/CLAUDE.md`.
+**Strategy, phase history, architecture pointers.** For actionable work (bugs, gaps, debt, planned features) see [`BACKLOG.md`](BACKLOG.md).
+
+Architecture, tech stack, schema, conventions, design language: [`fractals/CLAUDE.md`](fractals/CLAUDE.md).
 
 ---
 
-## Phases
+## Phase map
 
 | Phase | Status | Scope |
 |---|---|---|
@@ -14,78 +16,115 @@ Architecture, tech stack, schema, conventions, design language: see `fractals/CL
 | 1 | Complete | UX refinement (pagination nav, Escape behavior, library search) |
 | 2 | Complete | V2 data model cutover (canonical + streams, v1 dropped) |
 | 2.5 | Complete | V3 data model + search (canonical split, association layer, MetadataProvider, advanced search, two-phase sync) |
-| g1 | Complete | Strip to pure provider-data app. 12 tables. LIKE search + debounce. |
-| g1c | **Complete** | 15-table per-type split. LIKE on `search_title` (inline at sync). Test → Sync pipeline (EPG auto-chains). VoD card redesign, vocabulary sweep, Channel Detail panel (logo/title/actions + Schedule section + EPG identity) + card Details buttons. Continue-watching invalidation bug fixed (2026-04-15). Tech cleanup: `tsconfig.node.json` fixed, Electron sandbox enabled. |
-| g2 | Future | Search improvements (possibilities listed below; no commitments) |
-| 3 | Not started | Capacitor (Android/iOS/TV), Tizen |
+| g1 | Complete | Pure provider-data app. 12 tables. LIKE search + debounce. |
+| g1c | Complete | 15-table per-type split. LIKE on `search_title` (inline at sync). Test → Sync pipeline (EPG auto-chains). |
+| g2 | Complete | iptv-org ingestion, detail panels, mini player, NSFW filtering, EPG sync, M3U parity, ADV search, TVmaze enrichment |
+| g3 | **Complete** | TMDB enrichment, post-sync auto-chain, full code sweep, unit test suite (125 tests) |
+| g4 | Not started | Capacitor (Android/iOS/TV), Tizen, three-tier product split |
 
 ---
 
-## g1c — shipped
+## Snapshot (2026-04-19 — g3 closed)
 
-Branch: `g1c`. Drops the old 12-table g1 schema and rebuilds on 15 per-type tables. Data is expendable at cutover — users re-sync from providers.
+- **Branch:** `g3` (tagged `g3`, g4 opens next)
+- **DB:** 15 tables + enrichment tables (`movie_enrichment_g2`, `series_enrichment_g2` with `tvmaze_id`). Per-type split, no canonical, no FTS.
+- **Search:** LIKE on `search_title`. ADV search (`@` prefix) tokenized parser with `md_*` filters + title LIKE fallback.
+- **Pipeline:** Test → Sync. Ingest states `added → tested → synced → epg_fetched`. EPG auto-chains for Xtream.
+- **Enrichment:** 3-level picker (off / keyless / TMDB). Keyless = FM-DB + Wikidata/Wikipedia + TVmaze. TMDB Level 2 key-gated, sequential after v3.
+- **Player:** episode surf (PgUp/PgDn + Cmd+↑/↓, Prev/Next pills), draggable floating mini player for VoD, resume-aware autoplay.
+- **M3U:** full parity with Xtream — channels, movies, series+episodes, EPG (`url-tvg`/`x-tvg-url`), HTTP headers (`#EXTVLCOPT`).
+- **Code health:** `handlers.ts` split (8 domain files), dead code removed, 125 unit tests passing (normalize / title-parser / adv-query-parser / m3u-parser / export-selection). ~115 `as any` remaining (content item shapes — deferred to g4).
+- **Security:** Electron sandbox on, contextIsolation on, nodeIntegration off. NSFW default-off.
 
-**15 tables:**
+---
 
+## g1c — shipped (design record)
+
+Drops the 12-table g1 schema for 15 per-type tables. Data is expendable at cutover — users re-sync from providers.
+
+**Tables:**
 - **Core (3):** `sources`, `profiles`, `settings`
-- **Content (8):**
-  - Channels: `channel_categories`, `channels`, `epg`
-  - Movies: `movie_categories`, `movies`
-  - Series: `series_categories`, `series`, `episodes`
+- **Content (8):** `channel_categories`, `channels`, `epg` · `movie_categories`, `movies` · `series_categories`, `series`, `episodes`
 - **User data (4):** `channel_user_data`, `movie_user_data`, `series_user_data`, `episode_user_data`
 
-No FTS tables. Search is plain `LIKE '%query%'` on a `search_title` column.
+**Key design decisions shipped on top of the original g1c plan:**
 
-**What shipped on top of the original g1c design:**
+1. **FTS removed.** Tried trigram + unicode61 — posting lists too large, SQLite couldn't push `source_id` / `category` filters into FTS, COUNT enumerated full match sets. LIKE + B-tree + LIMIT wins at 10k–100k rows per source.
+2. **`search_title` inline at sync INSERT**, not a separate Index button. `search_title = anyAscii(title).toLowerCase()` — bidirectional diacritic + ligature match (ae↔æ, e↔é, ss↔ß, oe↔œ). Reversed the "manual button for transformational ops" rule for this specific column: microseconds per row, can't fail, Index button blocked diacritic search from "just working" for new users.
+3. **EPG auto-chains inside Sync** for Xtream sources. M3U stops at `synced`. Progress streams through the shared `sync:progress` IPC channel.
+4. **Pipeline is 2 buttons: Test → Sync** (was Test → Sync → EPG → Index). `'indexed'` state removed from enum.
+5. **User data is not preserved across resync.** CASCADE on source delete/sync wipes per-source user_data. Hard cut — users re-sync after schema transition.
 
-1. **FTS removed.** The original design baked in `channel_fts` / `movie_fts` / `series_fts`. Tried trigram and unicode61 tokenizers — posting lists were large, SQLite couldn't push `source_id` / `category` filters into FTS, and COUNT enumerated full match sets. LIKE + B-tree index + LIMIT short-circuits better at this catalog scale (10k–100k rows per source).
-2. **`search_title` is populated inline at sync INSERT**, not via a separate Index button. `search_title = anyAscii(title).toLowerCase()` — gives bidirectional diacritic/ligature match (ae↔æ, e↔é, ss↔ß, oe↔œ). This reversed the earlier "manual button for transformational ops" preference for this specific column: it's microseconds per row, can't fail, and the Index button was blocking diacritic search from "just working" for new users.
-3. **EPG auto-chains after Sync** inside the sync-done handler. EPG progress streams through the same `sync:progress` IPC channel with `phase: 'epg'` so the source card's message bar shows it inline. M3U sources skip EPG (no endpoint).
-4. **Pipeline is 2 buttons: Test → Sync** (was Test → Sync → EPG → Index). The `'indexed'` ingest_state is removed from the enum; terminal state is `'epg_fetched'`. Sync button "done" shows at both `'synced'` and `'epg_fetched'` so EPG-less sources aren't stuck purple.
-5. **Deleted services/code:** `electron/services/enrichment/` (iptv-org cache + Wikidata + IMDb-suggest providers), `electron/services/indexing/`, `electron/services/search/query-parser.ts`, `electron/workers/enrichment.worker.ts`, plus helper scripts `fractals/scripts/resync-from-dumps.mjs` and `sync-and-compare.mjs`. All were the canonical-layer enrichment pipeline, separate indexing worker, and old parsed-query search path — superseded by the flat LIKE-on-search_title design.
-6. **User data is not preserved across resync.** Per the g1c hard cut, CASCADE on source delete/sync wipes per-source user_data. Users re-sync from providers after the schema transition.
-
-**Normalizer (one function, two callers):** lowercase + any-ascii folding (diacritic strip + ligature fold). Sync workers call it to populate `search_title`; search handler calls it on the user's query before the LIKE comparison. No punctuation strip, no whitespace collapse, no leading-article strip.
-
-**Ingest pipeline:**
-
-- `ingest_state` enum: `added → tested → synced → epg_fetched`
-- Test → Sync (two manual buttons on the source card)
-- EPG auto-chains inside Sync for Xtream sources; M3U stops at `synced`
-- Sync button "done" is true at both `synced` and `epg_fetched`
+**Normalizer (one function, two callers):** `electron/lib/normalize.ts` — lowercase + any-ascii. Sync workers populate `search_title`; search handler normalizes the user's query before LIKE.
 
 ---
 
-## g2 — future search improvements
+## g2 — shipped (highlights)
 
-No commitments. Possibilities when search needs more:
+Full shipped list in git history (branch `g2`). Headlines:
 
-- Denormalize a per-title "search corpus" column (title + category + hints) so LIKE covers more than just title
+- iptv-org channel DB ingestion (39K channel snapshot, tvg-id matching, country/category/NSFW flags)
+- Unified detail panel spine (`DetailShell`) — Channel/Movie/Series share chrome
+- Mini player in detail panels → later removed embedded zones (Phase C), VoD always floats
+- PlayerOverlay reconnect overlay — 5-attempt exponential backoff
+- IptvStrip siblings redesign, panel visual separation, EPG Sync button (Xtream only)
+- NSFW filtering end-to-end — category flag + content row propagation + Settings toggle
+- VoD enrichment pipeline (keyless): Wikipedia REST + Wikidata + IMDb suggest; v1/v2/v3 algos
+- TVmaze enrichment (series only, sequential after v3)
+- Movie duration (`md_runtime`, lazy-fetched via `get_vod_info`)
+- Episode surf (PgUp/PgDn + Cmd+↑/↓, Prev/Next pills, embedded mode)
+- Populate metadata handler — batched UPDATE (1000 rows/txn) for `md_prefix`, `md_language`, `md_year`, `md_quality`, `is_nsfw`
+- ADV search (`@` prefix) — tokenized query parser, `field:value` syntax, `md_*` filter + LIKE fallback
+- M3U source parity: two-pass series detection, URL-path classification, EPG via `url-tvg`, `#EXTVLCOPT` headers forwarded to HLS.js / mpv / VLC
+
+---
+
+## g3 — shipped (design record)
+
+**Shipped (branch `g3`, tagged `g3`):**
+
+- TMDB enrichment — key-gated Level 2 in the 3-level picker
+- Genre pills + cast panel in detail views
+- Post-sync auto-chain — iptv-org match → populate metadata runs automatically
+- Cast/genre styling polish (pill padding, bg separation, inline label)
+- Full code sweep: dead code removed, `handlers.ts` split (2,671 lines → 22-line orchestrator + 8 domain files), `as any` eliminated from IPC bridge + player overlay + row types, 1 silent-catch fixed
+- Unit test suite: 125 tests across normalize / title-parser / adv-query-parser / m3u-parser / export-selection
+
+**Deferred to g4:**
+
+- Visual design revamp (tokens + full surface audit) — BACKLOG §7.1
+- ~115 `as any` in content item shapes (detail panels, browse) — BACKLOG §5.2
+- 42 `react-hooks/exhaustive-deps` warnings triage — BACKLOG §5.5
+- libmpv embedded player for direct-file VoD — BACKLOG §3
+
+---
+
+## g4 — future
+
+Detailed strategy: [`docs/reference/multi-platform-strategy.md`](docs/reference/multi-platform-strategy.md). Summary:
+
+- Capacitor: Android phone → Android TV → iOS → Tizen → PWA
+- `DataService` interface swap (Electron IPC → direct HTTP + `@capacitor-community/sqlite`)
+- `PlayerAdapter` abstraction (ArtPlayer / ExoPlayer / AVPlayer / AVPlay)
+- Spatial navigation (d-pad) + TV 1.5x spacing
+- Three-tier product split (feature flags, same codebase):
+  - **M3U Player** — free, all platforms, channel organizer
+  - **Xtream Lite** — free, Android only, single source, TMDB
+  - **Fractals Pro** — paid, all platforms, multi-source, full features
+
+---
+
+## Future search directions (no commitments)
+
+Possibilities if LIKE ceases to be enough:
+
+- Denormalized per-title "search corpus" column (title + category + hints)
 - Trigram index on `search_title` for CJK / Arabic where word boundaries are fuzzy
-- Ranking signals (recency, favorites-weight, source-selection) on top of LIKE
-- Cross-language resolution (single Title seen under different language names)
+- Ranking signals (recency, favorites-weight, source-selection)
+- Cross-language resolution (same Title under different language names)
 - Embeddings / semantic search (sqlite-vec in place, worker not built)
 
-FTS5 is **not** on this list — tried twice, rejected both times at this catalog scale. Revisit only if catalog grows past ~1M rows or there's a concrete use case LIKE can't serve.
-
----
-
-## Future / Parked Buckets
-
-### Bucket 3 — Tech Health
-
-- [ ] 130+ `as any` casts across IPC layer — triage sprint (worst: `lib/api.ts`, `PlayerOverlay`, `ipc/handlers.ts`)
-
-### Bucket 4 — Multi-Platform Reach (Phase 3)
-
-Order: Electron (done) → Android phone → Android TV → iOS → Tizen → PWA.
-
-### Bucket 5 — Product Shape
-
-Three-tier split (same React codebase, feature flags):
-- **M3U Player** — free, all platforms, channel organizer
-- **Xtream Lite** — free, Android only, single source, TMDB enrichment
-- **Fractals Pro** — paid, all platforms, multi-source, full features
+**FTS5 is not on this list** — tried twice, rejected both times. Revisit only past ~1M rows or a concrete use case LIKE can't serve.
 
 ---
 
@@ -93,18 +132,11 @@ Three-tier split (same React codebase, feature flags):
 
 | Doc | Purpose |
 |---|---|
-| `fractals/CLAUDE.md` | Architecture, tech stack, schema, conventions, design language |
-| `fractals/docs/business-plan.md` | Bucket 5 — three-tier split, competitors, monetization |
-| `fractals/docs/multi-platform-strategy.md` | Bucket 4 — platform priority, abstractions |
-| `XtreamCodesAPI.md` | Xtream Codes API reference |
-
----
-
-## Snapshot (2026-04-15)
-
-- Phase state: **g1c shipped** (simplified past the original design — FTS removed, Index step merged into sync, pipeline reduced to 2 buttons; VoD card redesign, vocabulary sweep, Channel Detail panel with Schedule section + Details buttons on all VoD/Channel cards; continue-watching invalidation bug fixed)
-- Active branch: `g1c` (kept as source of truth; `master` fast-forwarded alongside)
-- DB: 15 tables — per-type split for content/categories/user-data, no canonical, no FTS
-- Search: LIKE on `search_title` (populated inline at sync via any-ascii + lowercase). No ranking, no FTS.
-- Pipeline: Test → Sync. Ingest states `added → tested → synced → epg_fetched`. EPG auto-chains for Xtream sources.
-- Security: Electron sandbox enabled, contextIsolation on, nodeIntegration off.
+| [`fractals/CLAUDE.md`](fractals/CLAUDE.md) | Architecture, tech stack, schema, conventions, design language |
+| [`BACKLOG.md`](BACKLOG.md) | Actionable work — bugs, gaps, debt, planned features |
+| [`docs/reference/M3U-Format.md`](docs/reference/M3U-Format.md) | M3U playlist format reference |
+| [`docs/reference/XtreamCodesAPI.md`](docs/reference/XtreamCodesAPI.md) | Xtream Codes API reference |
+| [`docs/reference/metadata-extraction-strategy.md`](docs/reference/metadata-extraction-strategy.md) | VOD title analysis — prefix taxonomy, extraction rules (implemented as `parseTitle()`) |
+| [`docs/reference/business-plan.md`](docs/reference/business-plan.md) | Competitor analysis, monetization, GTM |
+| [`docs/reference/multi-platform-strategy.md`](docs/reference/multi-platform-strategy.md) | Capacitor / Tizen implementation plan |
+| [`fractals/docs/USER-GUIDE.md`](fractals/docs/USER-GUIDE.md) | End-user documentation |

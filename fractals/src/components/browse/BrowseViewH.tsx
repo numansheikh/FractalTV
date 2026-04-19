@@ -421,7 +421,7 @@ export function BrowseViewH({ onAddSource, onSyncSource, onRemoveSource, onSelec
                   onSelect={onSelectContent} scopedTo={activeCategory}
                 />
               ) : (
-                <BrowsePane key={`browse-${type}-${activeCategory ?? ''}`} items={items} fetching={browseFetching} onSelect={onSelectContent} type={type} hasCategory={!!activeCategory} />
+                <BrowsePane key={`browse-${type}-${activeCategory ?? ''}`} items={items} fetching={browseFetching} onSelect={onSelectContent} type={type} hasCategory={!!activeCategory} query={query} isSearching={isSearching} />
               )}
             </AnimatePresence>
           </div>
@@ -607,8 +607,9 @@ function LoadMoreBtn({ onClick }: { onClick: () => void }) {
 
 // ── Browse pane ─────────────────────────────────────────────────────────────
 
-function BrowsePane({ items, fetching, onSelect, type, hasCategory }: {
+function BrowsePane({ items, fetching, onSelect, type, hasCategory, query, isSearching }: {
   items: ContentItem[]; fetching: boolean; onSelect: (item: ContentItem) => void; type: ContentType; hasCategory: boolean
+  query: string; isSearching: boolean
 }) {
   const liveItems = items.filter(i => i.type === 'live')
   const movieItems = items.filter(i => i.type === 'movie')
@@ -622,10 +623,15 @@ function BrowsePane({ items, fetching, onSelect, type, hasCategory }: {
       {!hasCategory && <PersonalizedRows onSelect={onSelect} type={type} />}
 
       {items.length === 0 && (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', paddingTop: 80 }}>
-          <p style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
-            {fetching ? 'Loading…' : 'No content found'}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', paddingTop: 80, gap: 8 }}>
+          <p style={{ fontSize: 12, color: 'var(--color-text-muted)', margin: 0 }}>
+            {fetching ? 'Loading…' : (isSearching ? `No results for "${query}"` : 'No content found')}
           </p>
+          {!fetching && isSearching && !query.trim().startsWith('@') && (
+            <p style={{ fontSize: 11, color: 'var(--text-3)', margin: 0, fontFamily: 'var(--font-ui)' }}>
+              Tip: prefix with <code style={{ fontFamily: 'var(--font-mono)' }}>@</code> for advanced search — e.g. <code style={{ fontFamily: 'var(--font-mono)' }}>@ year:2020</code>
+            </p>
+          )}
         </div>
       )}
 
